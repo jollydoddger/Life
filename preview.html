@@ -1,0 +1,363 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Scots Pine Bark — Preview</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { background: #1a1a1a; color: #ccc; font-family: system-ui, sans-serif; overflow: hidden; }
+#canvas { display: block; }
+#controls {
+  position: absolute; top: 10px; left: 10px; width: 280px;
+  background: rgba(0,0,0,0.85); border-radius: 8px; padding: 14px;
+  max-height: calc(100vh - 20px); overflow-y: auto;
+}
+#controls h2 { font-size: 14px; color: #fff; margin-bottom: 10px; }
+.group { margin-bottom: 12px; border-bottom: 1px solid #333; padding-bottom: 8px; }
+.group-title { font-size: 11px; color: #888; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 6px; }
+.param { display: flex; align-items: center; margin-bottom: 4px; }
+.param label { flex: 1; font-size: 12px; }
+.param input[type=range] { width: 100px; margin: 0 6px; }
+.param .val { width: 40px; text-align: right; font-size: 11px; color: #aaa; }
+#info { position: absolute; bottom: 10px; left: 10px; font-size: 11px; color: #666; }
+</style>
+</head>
+<body>
+<canvas id="canvas"></canvas>
+<div id="controls">
+  <h2>Scots Pine Bark Preview</h2>
+  <div class="group">
+    <div class="group-title">Macro Plates</div>
+    <div class="param"><label>Plate Scale</label><input type="range" id="plateScale" min="0.2" max="3" step="0.05" value="0.8"><span class="val" id="plateScaleV">0.8</span></div>
+    <div class="param"><label>Y Stretch</label><input type="range" id="yStretch" min="2" max="20" step="0.5" value="8"><span class="val" id="yStretchV">8</span></div>
+    <div class="param"><label>Num Levels</label><input type="range" id="numLevels" min="2" max="5" step="1" value="3"><span class="val" id="numLevelsV">3</span></div>
+    <div class="param"><label>Layer Depth</label><input type="range" id="layerDepth" min="0.1" max="3" step="0.05" value="1.0"><span class="val" id="layerDepthV">1.0</span></div>
+    <div class="param"><label>Wall Steepness</label><input type="range" id="wallSteepness" min="0.02" max="0.2" step="0.005" value="0.07"><span class="val" id="wallSteepnessV">0.07</span></div>
+    <div class="param"><label>Edge Fray</label><input type="range" id="edgeFray" min="0" max="0.3" step="0.005" value="0.06"><span class="val" id="edgeFrayV">0.06</span></div>
+  </div>
+  <div class="group">
+    <div class="group-title">Coordinate Warp</div>
+    <div class="param"><label>Warp X</label><input type="range" id="warpX" min="0" max="4" step="0.1" value="1.2"><span class="val" id="warpXV">1.2</span></div>
+    <div class="param"><label>Warp Y</label><input type="range" id="warpY" min="0" max="2" step="0.05" value="0.15"><span class="val" id="warpYV">0.15</span></div>
+  </div>
+  <div class="group">
+    <div class="group-title">Sub-Plates</div>
+    <div class="param"><label>Sub Scale</label><input type="range" id="subScale" min="1" max="5" step="0.1" value="2.5"><span class="val" id="subScaleV">2.5</span></div>
+    <div class="param"><label>Sub Depth</label><input type="range" id="subDepth" min="0" max="0.5" step="0.01" value="0.15"><span class="val" id="subDepthV">0.15</span></div>
+  </div>
+  <div class="group">
+    <div class="group-title">Horizontal Breaks</div>
+    <div class="param"><label>H-Break Freq</label><input type="range" id="hbreakFreq" min="0.5" max="10" step="0.25" value="3"><span class="val" id="hbreakFreqV">3</span></div>
+    <div class="param"><label>H-Break Depth</label><input type="range" id="hbreakDepth" min="0" max="1" step="0.02" value="0.25"><span class="val" id="hbreakDepthV">0.25</span></div>
+  </div>
+  <div class="group">
+    <div class="group-title">Detail</div>
+    <div class="param"><label>Crumple</label><input type="range" id="crumple" min="0" max="0.5" step="0.01" value="0.12"><span class="val" id="crumpleV">0.12</span></div>
+    <div class="param"><label>Per-Plate Var</label><input type="range" id="perPlateVar" min="0" max="1" step="0.05" value="0.8"><span class="val" id="perPlateVarV">0.8</span></div>
+    <div class="param"><label>Plate Tilt</label><input type="range" id="plateTilt" min="0" max="0.3" step="0.01" value="0.08"><span class="val" id="plateTiltV">0.08</span></div>
+    <div class="param"><label>Fibre Grain</label><input type="range" id="fibreGrain" min="0" max="0.15" step="0.005" value="0.03"><span class="val" id="fibreGrainV">0.03</span></div>
+    <div class="param"><label>Micro Roughness</label><input type="range" id="microRoughness" min="0" max="0.1" step="0.005" value="0.02"><span class="val" id="microRoughnessV">0.02</span></div>
+  </div>
+  <div class="group">
+    <div class="group-title">Master</div>
+    <div class="param"><label>Overall Depth</label><input type="range" id="overallDepth" min="0.5" max="8" step="0.1" value="3"><span class="val" id="overallDepthV">3</span></div>
+    <div class="param"><label>Seed</label><input type="range" id="seed" min="0" max="99" step="1" value="0"><span class="val" id="seedV">0</span></div>
+  </div>
+</div>
+<div id="info">Drag to rotate · Scroll to zoom · Shift+drag to pan</div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+// ---------------------------------------------------------------
+// Perlin noise (classic 3D, self-contained)
+// ---------------------------------------------------------------
+const _p = new Uint8Array(512);
+const _perm = [151,160,137,91,90,15,131,13,201,95,96,53,194,233,7,225,140,36,
+103,30,69,142,8,99,37,240,21,10,23,190,6,148,247,120,234,75,0,26,197,62,94,
+252,219,203,117,35,11,32,57,177,33,88,237,149,56,87,174,20,125,136,171,168,
+68,175,74,165,71,134,139,48,27,166,77,146,158,231,83,111,229,122,60,211,133,
+230,220,105,92,41,55,46,245,40,244,102,143,54,65,25,63,161,1,216,80,73,209,
+76,132,187,208,89,18,169,200,196,135,130,116,188,159,86,164,100,109,198,173,
+186,3,64,52,217,226,250,124,123,5,202,38,147,118,126,255,82,85,212,207,206,
+59,227,47,16,58,17,182,189,28,42,223,183,170,213,119,248,152,2,44,154,163,
+70,221,153,101,155,167,43,172,9,129,22,39,253,19,98,108,110,79,113,224,232,
+178,185,112,104,218,246,97,228,251,34,242,193,238,210,144,12,191,179,162,241,
+81,51,145,235,249,14,239,107,49,192,214,31,181,199,106,157,184,84,204,176,
+115,121,50,45,127,4,150,254,138,236,205,93,222,114,67,29,24,72,243,141,128,195,
+78,66,215,61,156,180];
+for (let i = 0; i < 256; i++) { _p[i] = _perm[i]; _p[256 + i] = _perm[i]; }
+
+function fade(t) { return t * t * t * (t * (t * 6 - 15) + 10); }
+function lerp(a, b, t) { return a + t * (b - a); }
+function grad(hash, x, y, z) {
+  const h = hash & 15;
+  const u = h < 8 ? x : y;
+  const v = h < 4 ? y : (h === 12 || h === 14 ? x : z);
+  return ((h & 1) === 0 ? u : -u) + ((h & 2) === 0 ? v : -v);
+}
+function perlin3(x, y, z) {
+  const X = Math.floor(x) & 255, Y = Math.floor(y) & 255, Z = Math.floor(z) & 255;
+  x -= Math.floor(x); y -= Math.floor(y); z -= Math.floor(z);
+  const u = fade(x), v = fade(y), w = fade(z);
+  const A = _p[X] + Y, AA = _p[A] + Z, AB = _p[A + 1] + Z;
+  const B = _p[X + 1] + Y, BA = _p[B] + Z, BB = _p[B + 1] + Z;
+  return lerp(
+    lerp(lerp(grad(_p[AA], x, y, z), grad(_p[BA], x - 1, y, z), u),
+         lerp(grad(_p[AB], x, y - 1, z), grad(_p[BB], x - 1, y - 1, z), u), v),
+    lerp(lerp(grad(_p[AA + 1], x, y, z - 1), grad(_p[BA + 1], x - 1, y, z - 1), u),
+         lerp(grad(_p[AB + 1], x, y - 1, z - 1), grad(_p[BB + 1], x - 1, y - 1, z - 1), u), v),
+    w);
+}
+
+function fbm(x, y, z, octaves = 4, lac = 2.0, gain = 0.5) {
+  let total = 0, amp = 1, freq = 1;
+  for (let i = 0; i < octaves; i++) {
+    total += perlin3(x * freq, y * freq, z * freq) * amp;
+    freq *= lac; amp *= gain;
+  }
+  return total;
+}
+
+// ---------------------------------------------------------------
+// Voronoi F1/F2
+// ---------------------------------------------------------------
+function hashVec(ix, iy, iz, seed) {
+  let n = ix * 374761393 + iy * 668265263 + iz * 1274126177 + seed * 1013904223;
+  n = ((n ^ (n >> 13)) * 1274126177) >>> 0;
+  const fx = (n & 0xFFFF) / 65535;
+  n = ((n * 1664525 + 1013904223) & 0x7FFFFFFF) >>> 0;
+  const fy = (n & 0xFFFF) / 65535;
+  n = ((n * 1664525 + 1013904223) & 0x7FFFFFFF) >>> 0;
+  const fz = (n & 0xFFFF) / 65535;
+  return [ix + fx, iy + fy, iz + fz];
+}
+
+function cellHash(ix, iy, iz, seed) {
+  let n = ix * 374761393 + iy * 668265263 + iz * 1274126177 + seed * 982451653;
+  n = ((n ^ (n >> 13)) * 1274126177) >>> 0;
+  return (n & 0xFFFF) / 65535;
+}
+
+function voronoiF1F2(px, py, pz, seed) {
+  const ix0 = Math.floor(px), iy0 = Math.floor(py), iz0 = Math.floor(pz);
+  let d1 = 1e10, d2 = 1e10, bestHash = 0;
+  for (let dz = -1; dz <= 1; dz++)
+    for (let dy = -1; dy <= 1; dy++)
+      for (let dx = -1; dx <= 1; dx++) {
+        const cx = ix0 + dx, cy = iy0 + dy, cz = iz0 + dz;
+        const [sx, sy, sz] = hashVec(cx, cy, cz, seed);
+        const dd = (px - sx) ** 2 + (py - sy) ** 2 + (pz - sz) ** 2;
+        if (dd < d1) { d2 = d1; d1 = dd; bestHash = cellHash(cx, cy, cz, seed); }
+        else if (dd < d2) { d2 = dd; }
+      }
+  return [Math.sqrt(d1), Math.sqrt(d2), bestHash];
+}
+
+function smoothstep(e0, e1, x) {
+  const t = Math.max(0, Math.min(1, (x - e0) / (e1 - e0 + 1e-9)));
+  return t * t * (3 - 2 * t);
+}
+
+// ---------------------------------------------------------------
+// Bark displacement (2D: x,y → height)
+// ---------------------------------------------------------------
+function barkHeight(ox, oy, p) {
+  const z = 0.5; // fixed z for 2D preview
+  let x = ox, y = oy;
+
+  // Layer 0: coordinate warp
+  const wf = 0.25;
+  x += fbm(ox * wf, oy * wf, z * wf, 3) * p.warpX;
+  y += fbm(ox * wf + 31.7, oy * wf + 31.7, z * wf + 31.7, 3) * p.warpY;
+
+  // Layer 1: macro plates
+  const ps = p.plateScale;
+  const ys = p.yStretch;
+  const vx = x * ps, vy = y * ps / ys, vz = z * ps;
+  let [f1, f2, ch] = voronoiF1F2(vx, vy, vz, p.seed);
+  let boundary = f2 - f1;
+  boundary += fbm(x * ps * 4 + 100, y * ps * 4 / ys + 100, z * ps * 4 + 100, 3) * p.edgeFray;
+  const wall = smoothstep(0, p.wallSteepness, boundary);
+  const level = Math.floor(ch * p.numLevels * 0.999);
+  const levelH = (level / Math.max(p.numLevels - 1, 1)) * p.layerDepth;
+  const macroH = wall * levelH;
+
+  // Layer 5: plate tilt
+  const tiltDirX = ch * 2 - 1;
+  const tiltDirY = cellHash(Math.floor(vx), Math.floor(vy), Math.floor(vz), p.seed + 77) * 2 - 1;
+  const tiltH = wall * p.plateTilt * (
+    tiltDirX * (ox * ps - Math.floor(vx)) + tiltDirY * (oy * ps / ys - Math.floor(vy))
+  );
+
+  // Layer 2: sub-plates
+  const ss = p.subScale;
+  const svx = x * ps * ss, svy = y * ps * ss / (ys * 0.6), svz = z * ps * ss;
+  let [sf1, sf2, sch] = voronoiF1F2(svx, svy, svz, p.seed + 42);
+  let sBoundary = sf2 - sf1;
+  sBoundary += fbm(x * ps * ss * 3 + 200, y * ps * ss * 3 / ys + 200, z * ps * ss * 3 + 200, 2) * p.edgeFray * 0.5;
+  const sWall = smoothstep(0, p.wallSteepness * 1.5, sBoundary);
+  const sLevel = Math.floor(sch * 2 * 0.999);
+  const subH = wall * sWall * sLevel * p.subDepth;
+
+  // Layer 3: horizontal breaks
+  const hbY = oy * p.hbreakFreq + fbm(ox * 0.5 + 300, oy * 0.5 + 300, z * 0.5 + 300, 2) * 0.4;
+  const hbVal = Math.sin(hbY * Math.PI * 2) * 0.5 + 0.5;
+  const hbCut = 1 - smoothstep(0, 0.08, hbVal);
+  const hbreakH = -wall * hbCut * p.hbreakDepth;
+
+  // Layer 4: per-plate crumple
+  const crumpleInt = 0.3 + ch * p.perPlateVar * 0.7;
+  const crumpleH = wall * crumpleInt * fbm(x * ps * 2.5 + 400, y * ps * 1.2 + 400, z * ps * 2.5 + 400, 3) * p.crumple;
+
+  // Layer 6: fibre grain
+  const fibreH = fbm(x * ps * 6 + 500, y * ps * 0.3 + 500, z * ps * 6 + 500, 2) * p.fibreGrain;
+
+  // Layer 7: micro roughness
+  const microH = fbm(x * ps * 12 + 600, y * ps * 12 + 600, z * ps * 12 + 600, 2) * p.microRoughness;
+
+  return (macroH + tiltH + subH + hbreakH + crumpleH + fibreH + microH) * p.overallDepth;
+}
+
+// ---------------------------------------------------------------
+// Three.js setup
+// ---------------------------------------------------------------
+const canvas = document.getElementById('canvas');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.0;
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x1a1a1a);
+
+const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.01, 100);
+camera.position.set(0, 0, 1.8);
+
+const controls = new OrbitControls(camera, canvas);
+controls.enableDamping = true;
+controls.dampingFactor = 0.08;
+
+// Lighting — warm side light to show bark depth
+const ambient = new THREE.AmbientLight(0x404040, 0.5);
+scene.add(ambient);
+const dirLight = new THREE.DirectionalLight(0xffeedd, 1.8);
+dirLight.position.set(2, 3, 4);
+scene.add(dirLight);
+const fillLight = new THREE.DirectionalLight(0x8899bb, 0.6);
+fillLight.position.set(-2, -1, 2);
+scene.add(fillLight);
+
+// Bark-coloured material
+const material = new THREE.MeshStandardMaterial({
+  color: 0x8B6B4A,
+  roughness: 0.9,
+  metalness: 0.0,
+  flatShading: false,
+});
+
+// Panel geometry: 200mm × 800mm → 0.2 × 0.8 in scene units
+const PANEL_W = 0.4, PANEL_H = 1.2;
+const SEGS_X = 200, SEGS_Y = 600;
+const geo = new THREE.PlaneGeometry(PANEL_W, PANEL_H, SEGS_X, SEGS_Y);
+const mesh = new THREE.Mesh(geo, material);
+scene.add(mesh);
+
+// Store original positions
+const basePositions = new Float32Array(geo.attributes.position.array);
+
+// ---------------------------------------------------------------
+// Parameters from UI
+// ---------------------------------------------------------------
+function getParams() {
+  return {
+    plateScale: +document.getElementById('plateScale').value,
+    yStretch: +document.getElementById('yStretch').value,
+    numLevels: +document.getElementById('numLevels').value,
+    layerDepth: +document.getElementById('layerDepth').value,
+    wallSteepness: +document.getElementById('wallSteepness').value,
+    edgeFray: +document.getElementById('edgeFray').value,
+    warpX: +document.getElementById('warpX').value,
+    warpY: +document.getElementById('warpY').value,
+    subScale: +document.getElementById('subScale').value,
+    subDepth: +document.getElementById('subDepth').value,
+    hbreakFreq: +document.getElementById('hbreakFreq').value,
+    hbreakDepth: +document.getElementById('hbreakDepth').value,
+    crumple: +document.getElementById('crumple').value,
+    perPlateVar: +document.getElementById('perPlateVar').value,
+    plateTilt: +document.getElementById('plateTilt').value,
+    fibreGrain: +document.getElementById('fibreGrain').value,
+    microRoughness: +document.getElementById('microRoughness').value,
+    overallDepth: +document.getElementById('overallDepth').value,
+    seed: +document.getElementById('seed').value,
+  };
+}
+
+// Update value displays
+document.querySelectorAll('#controls input[type=range]').forEach(input => {
+  const valSpan = document.getElementById(input.id + 'V');
+  input.addEventListener('input', () => {
+    valSpan.textContent = parseFloat(input.value).toFixed(
+      input.step.includes('.') ? input.step.split('.')[1].length : 0
+    );
+    needsUpdate = true;
+  });
+});
+
+let needsUpdate = true;
+
+function updateGeometry() {
+  const p = getParams();
+  const pos = geo.attributes.position.array;
+  const count = pos.length / 3;
+
+  // Scale factor: displacement is in mm, geometry is in scene units (≈ metres)
+  const scale = 0.001;
+
+  for (let i = 0; i < count; i++) {
+    const bx = basePositions[i * 3];
+    const by = basePositions[i * 3 + 1];
+    // Map plane coords to "real world" coordinates for noise
+    // Panel is 0.4 × 1.2 scene units = 400 × 1200 mm
+    const wx = bx * 1000; // mm
+    const wy = by * 1000;
+    const h = barkHeight(wx * 0.005, wy * 0.005, p);
+    pos[i * 3 + 2] = h * scale;
+  }
+
+  geo.attributes.position.needsUpdate = true;
+  geo.computeVertexNormals();
+}
+
+// ---------------------------------------------------------------
+// Render loop
+// ---------------------------------------------------------------
+function animate() {
+  requestAnimationFrame(animate);
+  if (needsUpdate) {
+    updateGeometry();
+    needsUpdate = false;
+  }
+  controls.update();
+  renderer.render(scene, camera);
+}
+animate();
+
+window.addEventListener('resize', () => {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});
+</script>
+</body>
+</html>
