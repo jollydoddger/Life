@@ -2,87 +2,69 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Scots Pine Bark — Preview</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Scots Pine Bark</title>
 <style>
-* { margin: 0; padding: 0; box-sizing: border-box; }
-body { background: #1a1a1a; color: #ccc; font-family: system-ui, sans-serif; overflow: hidden; }
-#canvas { display: block; }
-#controls {
-  position: absolute; top: 10px; left: 10px; width: 280px;
-  background: rgba(0,0,0,0.85); border-radius: 8px; padding: 14px;
-  max-height: calc(100vh - 20px); overflow-y: auto;
-}
-#controls h2 { font-size: 14px; color: #fff; margin-bottom: 10px; }
-.group { margin-bottom: 12px; border-bottom: 1px solid #333; padding-bottom: 8px; }
-.group-title { font-size: 11px; color: #888; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 6px; }
-.param { display: flex; align-items: center; margin-bottom: 4px; }
-.param label { flex: 1; font-size: 12px; }
-.param input[type=range] { width: 100px; margin: 0 6px; }
-.param .val { width: 40px; text-align: right; font-size: 11px; color: #aaa; }
-#info { position: absolute; bottom: 10px; left: 10px; font-size: 11px; color: #666; }
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#1a1a1a;color:#ccc;font-family:system-ui,sans-serif;overflow:hidden;touch-action:none}
+canvas{display:block;width:100%;height:100%}
+#ui{position:absolute;top:0;left:0;width:220px;background:rgba(0,0,0,0.88);padding:10px;
+  max-height:100vh;overflow-y:auto;font-size:11px;z-index:10}
+#ui h2{font-size:13px;color:#fff;margin-bottom:8px}
+.g{margin-bottom:8px;border-bottom:1px solid #333;padding-bottom:6px}
+.gt{font-size:9px;color:#777;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px}
+.r{display:flex;align-items:center;margin-bottom:2px}
+.r label{flex:1;font-size:10px}
+.r input{width:80px;margin:0 4px}
+.r .v{width:32px;text-align:right;font-size:10px;color:#aaa}
+#info{position:absolute;bottom:6px;left:6px;font-size:10px;color:#555}
+#loading{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);color:#888;font-size:16px}
 </style>
 </head>
 <body>
-<canvas id="canvas"></canvas>
-<div id="controls">
-  <h2>Scots Pine Bark Preview</h2>
-  <div class="group">
-    <div class="group-title">Macro Plates</div>
-    <div class="param"><label>Plate Scale</label><input type="range" id="plateScale" min="0.2" max="3" step="0.05" value="0.8"><span class="val" id="plateScaleV">0.8</span></div>
-    <div class="param"><label>Y Stretch</label><input type="range" id="yStretch" min="2" max="20" step="0.5" value="8"><span class="val" id="yStretchV">8</span></div>
-    <div class="param"><label>Num Levels</label><input type="range" id="numLevels" min="2" max="5" step="1" value="3"><span class="val" id="numLevelsV">3</span></div>
-    <div class="param"><label>Layer Depth</label><input type="range" id="layerDepth" min="0.1" max="3" step="0.05" value="1.0"><span class="val" id="layerDepthV">1.0</span></div>
-    <div class="param"><label>Wall Steepness</label><input type="range" id="wallSteepness" min="0.02" max="0.2" step="0.005" value="0.07"><span class="val" id="wallSteepnessV">0.07</span></div>
-    <div class="param"><label>Edge Fray</label><input type="range" id="edgeFray" min="0" max="0.3" step="0.005" value="0.06"><span class="val" id="edgeFrayV">0.06</span></div>
+<div id="loading">Generating bark...</div>
+<canvas id="c"></canvas>
+<div id="ui">
+  <h2>Pine Bark Preview</h2>
+  <div class="g"><div class="gt">Macro Plates</div>
+    <div class="r"><label>Plate Scale</label><input type="range" id="ps" min="0.2" max="3" step="0.05" value="0.8"><span class="v" id="psV">0.8</span></div>
+    <div class="r"><label>Y Stretch</label><input type="range" id="ys" min="2" max="20" step="0.5" value="8"><span class="v" id="ysV">8</span></div>
+    <div class="r"><label>Levels</label><input type="range" id="nl" min="2" max="5" step="1" value="3"><span class="v" id="nlV">3</span></div>
+    <div class="r"><label>Layer Depth</label><input type="range" id="ld" min="0.1" max="3" step="0.05" value="1.0"><span class="v" id="ldV">1.0</span></div>
+    <div class="r"><label>Wall Steep</label><input type="range" id="ws" min="0.02" max="0.2" step="0.005" value="0.07"><span class="v" id="wsV">0.07</span></div>
+    <div class="r"><label>Edge Fray</label><input type="range" id="ef" min="0" max="0.3" step="0.005" value="0.06"><span class="v" id="efV">0.06</span></div>
   </div>
-  <div class="group">
-    <div class="group-title">Coordinate Warp</div>
-    <div class="param"><label>Warp X</label><input type="range" id="warpX" min="0" max="4" step="0.1" value="1.2"><span class="val" id="warpXV">1.2</span></div>
-    <div class="param"><label>Warp Y</label><input type="range" id="warpY" min="0" max="2" step="0.05" value="0.15"><span class="val" id="warpYV">0.15</span></div>
+  <div class="g"><div class="gt">Warp</div>
+    <div class="r"><label>Warp X</label><input type="range" id="wx" min="0" max="4" step="0.1" value="1.2"><span class="v" id="wxV">1.2</span></div>
+    <div class="r"><label>Warp Y</label><input type="range" id="wy" min="0" max="2" step="0.05" value="0.15"><span class="v" id="wyV">0.15</span></div>
   </div>
-  <div class="group">
-    <div class="group-title">Sub-Plates</div>
-    <div class="param"><label>Sub Scale</label><input type="range" id="subScale" min="1" max="5" step="0.1" value="2.5"><span class="val" id="subScaleV">2.5</span></div>
-    <div class="param"><label>Sub Depth</label><input type="range" id="subDepth" min="0" max="0.5" step="0.01" value="0.15"><span class="val" id="subDepthV">0.15</span></div>
+  <div class="g"><div class="gt">Sub-Plates</div>
+    <div class="r"><label>Sub Scale</label><input type="range" id="ss" min="1" max="5" step="0.1" value="2.5"><span class="v" id="ssV">2.5</span></div>
+    <div class="r"><label>Sub Depth</label><input type="range" id="sd" min="0" max="0.5" step="0.01" value="0.15"><span class="v" id="sdV">0.15</span></div>
   </div>
-  <div class="group">
-    <div class="group-title">Horizontal Breaks</div>
-    <div class="param"><label>H-Break Freq</label><input type="range" id="hbreakFreq" min="0.5" max="10" step="0.25" value="3"><span class="val" id="hbreakFreqV">3</span></div>
-    <div class="param"><label>H-Break Depth</label><input type="range" id="hbreakDepth" min="0" max="1" step="0.02" value="0.25"><span class="val" id="hbreakDepthV">0.25</span></div>
+  <div class="g"><div class="gt">H-Breaks</div>
+    <div class="r"><label>Freq</label><input type="range" id="hf" min="0.5" max="10" step="0.25" value="3"><span class="v" id="hfV">3</span></div>
+    <div class="r"><label>Depth</label><input type="range" id="hd" min="0" max="1" step="0.02" value="0.25"><span class="v" id="hdV">0.25</span></div>
   </div>
-  <div class="group">
-    <div class="group-title">Detail</div>
-    <div class="param"><label>Crumple</label><input type="range" id="crumple" min="0" max="0.5" step="0.01" value="0.12"><span class="val" id="crumpleV">0.12</span></div>
-    <div class="param"><label>Per-Plate Var</label><input type="range" id="perPlateVar" min="0" max="1" step="0.05" value="0.8"><span class="val" id="perPlateVarV">0.8</span></div>
-    <div class="param"><label>Plate Tilt</label><input type="range" id="plateTilt" min="0" max="0.3" step="0.01" value="0.08"><span class="val" id="plateTiltV">0.08</span></div>
-    <div class="param"><label>Fibre Grain</label><input type="range" id="fibreGrain" min="0" max="0.15" step="0.005" value="0.03"><span class="val" id="fibreGrainV">0.03</span></div>
-    <div class="param"><label>Micro Roughness</label><input type="range" id="microRoughness" min="0" max="0.1" step="0.005" value="0.02"><span class="val" id="microRoughnessV">0.02</span></div>
+  <div class="g"><div class="gt">Detail</div>
+    <div class="r"><label>Crumple</label><input type="range" id="cr" min="0" max="0.5" step="0.01" value="0.12"><span class="v" id="crV">0.12</span></div>
+    <div class="r"><label>Plate Var</label><input type="range" id="pv" min="0" max="1" step="0.05" value="0.8"><span class="v" id="pvV">0.8</span></div>
+    <div class="r"><label>Tilt</label><input type="range" id="pt" min="0" max="0.3" step="0.01" value="0.08"><span class="v" id="ptV">0.08</span></div>
+    <div class="r"><label>Fibre</label><input type="range" id="fg" min="0" max="0.15" step="0.005" value="0.03"><span class="v" id="fgV">0.03</span></div>
+    <div class="r"><label>Micro</label><input type="range" id="mr" min="0" max="0.1" step="0.005" value="0.02"><span class="v" id="mrV">0.02</span></div>
   </div>
-  <div class="group">
-    <div class="group-title">Master</div>
-    <div class="param"><label>Overall Depth</label><input type="range" id="overallDepth" min="0.5" max="8" step="0.1" value="3"><span class="val" id="overallDepthV">3</span></div>
-    <div class="param"><label>Seed</label><input type="range" id="seed" min="0" max="99" step="1" value="0"><span class="val" id="seedV">0</span></div>
+  <div class="g"><div class="gt">Master</div>
+    <div class="r"><label>Depth (mm)</label><input type="range" id="od" min="0.5" max="8" step="0.1" value="3"><span class="v" id="odV">3</span></div>
+    <div class="r"><label>Seed</label><input type="range" id="se" min="0" max="99" step="1" value="0"><span class="v" id="seV">0</span></div>
   </div>
 </div>
-<div id="info">Drag to rotate · Scroll to zoom · Shift+drag to pan</div>
+<div id="info">Touch drag rotate · Pinch zoom</div>
 
-<script type="importmap">
-{
-  "imports": {
-    "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
-    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
-  }
-}
-</script>
-<script type="module">
-import * as THREE from 'three';
-import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-
-// ---------------------------------------------------------------
-// Perlin noise (classic 3D, self-contained)
-// ---------------------------------------------------------------
-const _p = new Uint8Array(512);
-const _perm = [151,160,137,91,90,15,131,13,201,95,96,53,194,233,7,225,140,36,
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+// ---- Perlin noise (classic 3D) ----
+var _p=new Uint8Array(512);
+var _pm=[151,160,137,91,90,15,131,13,201,95,96,53,194,233,7,225,140,36,
 103,30,69,142,8,99,37,240,21,10,23,190,6,148,247,120,234,75,0,26,197,62,94,
 252,219,203,117,35,11,32,57,177,33,88,237,149,56,87,174,20,125,136,171,168,
 68,175,74,165,71,134,139,48,27,166,77,146,158,231,83,111,229,122,60,211,133,
@@ -95,268 +77,209 @@ const _perm = [151,160,137,91,90,15,131,13,201,95,96,53,194,233,7,225,140,36,
 81,51,145,235,249,14,239,107,49,192,214,31,181,199,106,157,184,84,204,176,
 115,121,50,45,127,4,150,254,138,236,205,93,222,114,67,29,24,72,243,141,128,195,
 78,66,215,61,156,180];
-for (let i = 0; i < 256; i++) { _p[i] = _perm[i]; _p[256 + i] = _perm[i]; }
+for(var i=0;i<256;i++){_p[i]=_pm[i];_p[256+i]=_pm[i]}
 
-function fade(t) { return t * t * t * (t * (t * 6 - 15) + 10); }
-function lerp(a, b, t) { return a + t * (b - a); }
-function grad(hash, x, y, z) {
-  const h = hash & 15;
-  const u = h < 8 ? x : y;
-  const v = h < 4 ? y : (h === 12 || h === 14 ? x : z);
-  return ((h & 1) === 0 ? u : -u) + ((h & 2) === 0 ? v : -v);
+function fade(t){return t*t*t*(t*(t*6-15)+10)}
+function lerp(a,b,t){return a+t*(b-a)}
+function grad(h,x,y,z){var u=h<8?x:y,v=h<4?y:(h===12||h===14?x:z);return((h&1)===0?u:-u)+((h&2)===0?v:-v)}
+function perlin3(x,y,z){
+  var X=Math.floor(x)&255,Y=Math.floor(y)&255,Z=Math.floor(z)&255;
+  x-=Math.floor(x);y-=Math.floor(y);z-=Math.floor(z);
+  var u=fade(x),v=fade(y),w=fade(z);
+  var A=_p[X]+Y,AA=_p[A]+Z,AB=_p[A+1]+Z,B=_p[X+1]+Y,BA=_p[B]+Z,BB=_p[B+1]+Z;
+  return lerp(lerp(lerp(grad(_p[AA]&15,x,y,z),grad(_p[BA]&15,x-1,y,z),u),
+    lerp(grad(_p[AB]&15,x,y-1,z),grad(_p[BB]&15,x-1,y-1,z),u),v),
+    lerp(lerp(grad(_p[AA+1]&15,x,y,z-1),grad(_p[BA+1]&15,x-1,y,z-1),u),
+    lerp(grad(_p[AB+1]&15,x,y-1,z-1),grad(_p[BB+1]&15,x-1,y-1,z-1),u),v),w);
 }
-function perlin3(x, y, z) {
-  const X = Math.floor(x) & 255, Y = Math.floor(y) & 255, Z = Math.floor(z) & 255;
-  x -= Math.floor(x); y -= Math.floor(y); z -= Math.floor(z);
-  const u = fade(x), v = fade(y), w = fade(z);
-  const A = _p[X] + Y, AA = _p[A] + Z, AB = _p[A + 1] + Z;
-  const B = _p[X + 1] + Y, BA = _p[B] + Z, BB = _p[B + 1] + Z;
-  return lerp(
-    lerp(lerp(grad(_p[AA], x, y, z), grad(_p[BA], x - 1, y, z), u),
-         lerp(grad(_p[AB], x, y - 1, z), grad(_p[BB], x - 1, y - 1, z), u), v),
-    lerp(lerp(grad(_p[AA + 1], x, y, z - 1), grad(_p[BA + 1], x - 1, y, z - 1), u),
-         lerp(grad(_p[AB + 1], x, y - 1, z - 1), grad(_p[BB + 1], x - 1, y - 1, z - 1), u), v),
-    w);
+function fbm(x,y,z,oct){
+  var t=0,a=1,f=1;oct=oct||4;
+  for(var i=0;i<oct;i++){t+=perlin3(x*f,y*f,z*f)*a;f*=2;a*=0.5}
+  return t;
 }
 
-function fbm(x, y, z, octaves = 4, lac = 2.0, gain = 0.5) {
-  let total = 0, amp = 1, freq = 1;
-  for (let i = 0; i < octaves; i++) {
-    total += perlin3(x * freq, y * freq, z * freq) * amp;
-    freq *= lac; amp *= gain;
+// ---- Voronoi F1/F2 ----
+function hashVec(ix,iy,iz,s){
+  var n=ix*374761393+iy*668265263+iz*1274126177+s*1013904223;
+  n=((n^(n>>13))*1274126177)>>>0;var fx=(n&0xFFFF)/65535;
+  n=((n*1664525+1013904223)&0x7FFFFFFF)>>>0;var fy=(n&0xFFFF)/65535;
+  n=((n*1664525+1013904223)&0x7FFFFFFF)>>>0;var fz=(n&0xFFFF)/65535;
+  return[ix+fx,iy+fy,iz+fz];
+}
+function cellHash(ix,iy,iz,s){
+  var n=ix*374761393+iy*668265263+iz*1274126177+s*982451653;
+  n=((n^(n>>13))*1274126177)>>>0;return(n&0xFFFF)/65535;
+}
+function voronoi(px,py,pz,s){
+  var ix0=Math.floor(px),iy0=Math.floor(py),iz0=Math.floor(pz);
+  var d1=1e10,d2=1e10,bh=0;
+  for(var dz=-1;dz<=1;dz++)for(var dy=-1;dy<=1;dy++)for(var dx=-1;dx<=1;dx++){
+    var cx=ix0+dx,cy=iy0+dy,cz=iz0+dz;
+    var sv=hashVec(cx,cy,cz,s);
+    var dd=(px-sv[0])*(px-sv[0])+(py-sv[1])*(py-sv[1])+(pz-sv[2])*(pz-sv[2]);
+    if(dd<d1){d2=d1;d1=dd;bh=cellHash(cx,cy,cz,s)}else if(dd<d2){d2=dd}
   }
-  return total;
+  return[Math.sqrt(d1),Math.sqrt(d2),bh];
+}
+function ss(e0,e1,x){var t=Math.max(0,Math.min(1,(x-e0)/(e1-e0+1e-9)));return t*t*(3-2*t)}
+
+// ---- Bark height ----
+function bark(ox,oy,p){
+  var z=0.5,x=ox,y=oy,wf=0.25;
+  x+=fbm(ox*wf,oy*wf,z*wf,3)*p.wx;
+  y+=fbm(ox*wf+31.7,oy*wf+31.7,z*wf+31.7,3)*p.wy;
+  var ps=p.ps,ys=p.ys,vx=x*ps,vy=y*ps/ys,vz=z*ps;
+  var v=voronoi(vx,vy,vz,p.se),f1=v[0],f2=v[1],ch=v[2];
+  var bd=f2-f1;
+  bd+=fbm(x*ps*4+100,y*ps*4/ys+100,z*ps*4+100,3)*p.ef;
+  var wall=ss(0,p.ws,bd);
+  var lv=Math.floor(ch*p.nl*0.999);
+  var lh=(lv/Math.max(p.nl-1,1))*p.ld;
+  var macH=wall*lh;
+  var tdx=ch*2-1,tdy=cellHash(Math.floor(vx),Math.floor(vy),Math.floor(vz),p.se+77)*2-1;
+  var tiltH=wall*p.pt*(tdx*(ox*ps-Math.floor(vx))+tdy*(oy*ps/ys-Math.floor(vy)));
+  var ssc=p.ss,svx=x*ps*ssc,svy=y*ps*ssc/(ys*0.6),svz=z*ps*ssc;
+  var sv=voronoi(svx,svy,svz,p.se+42);
+  var sb=sv[1]-sv[0];
+  sb+=fbm(x*ps*ssc*3+200,y*ps*ssc*3/ys+200,z*ps*ssc*3+200,2)*p.ef*0.5;
+  var sw=ss(0,p.ws*1.5,sb);
+  var sl=Math.floor(sv[2]*2*0.999);
+  var subH=wall*sw*sl*p.sd;
+  var hby=oy*p.hf+fbm(ox*0.5+300,oy*0.5+300,z*0.5+300,2)*0.4;
+  var hbv=Math.sin(hby*Math.PI*2)*0.5+0.5;
+  var hbc=1-ss(0,0.08,hbv);
+  var hbH=-wall*hbc*p.hd;
+  var ci=0.3+ch*p.pv*0.7;
+  var crH=wall*ci*fbm(x*ps*2.5+400,y*ps*1.2+400,z*ps*2.5+400,3)*p.cr;
+  var fiH=fbm(x*ps*6+500,y*ps*0.3+500,z*ps*6+500,2)*p.fg;
+  var miH=fbm(x*ps*12+600,y*ps*12+600,z*ps*12+600,2)*p.mr;
+  return(macH+tiltH+subH+hbH+crH+fiH+miH)*p.od;
 }
 
-// ---------------------------------------------------------------
-// Voronoi F1/F2
-// ---------------------------------------------------------------
-function hashVec(ix, iy, iz, seed) {
-  let n = ix * 374761393 + iy * 668265263 + iz * 1274126177 + seed * 1013904223;
-  n = ((n ^ (n >> 13)) * 1274126177) >>> 0;
-  const fx = (n & 0xFFFF) / 65535;
-  n = ((n * 1664525 + 1013904223) & 0x7FFFFFFF) >>> 0;
-  const fy = (n & 0xFFFF) / 65535;
-  n = ((n * 1664525 + 1013904223) & 0x7FFFFFFF) >>> 0;
-  const fz = (n & 0xFFFF) / 65535;
-  return [ix + fx, iy + fy, iz + fz];
-}
+// ---- Three.js (classic non-module, r128) ----
+var canvas=document.getElementById('c');
+var W=window.innerWidth,H=window.innerHeight;
+var renderer=new THREE.WebGLRenderer({canvas:canvas,antialias:true});
+renderer.setSize(W,H);renderer.setPixelRatio(Math.min(window.devicePixelRatio,2));
+renderer.toneMapping=THREE.ACESFilmicToneMapping;
 
-function cellHash(ix, iy, iz, seed) {
-  let n = ix * 374761393 + iy * 668265263 + iz * 1274126177 + seed * 982451653;
-  n = ((n ^ (n >> 13)) * 1274126177) >>> 0;
-  return (n & 0xFFFF) / 65535;
-}
+var scene=new THREE.Scene();
+scene.background=new THREE.Color(0x1a1a1a);
+var camera=new THREE.PerspectiveCamera(45,W/H,0.01,100);
+camera.position.set(0,0,1.6);
 
-function voronoiF1F2(px, py, pz, seed) {
-  const ix0 = Math.floor(px), iy0 = Math.floor(py), iz0 = Math.floor(pz);
-  let d1 = 1e10, d2 = 1e10, bestHash = 0;
-  for (let dz = -1; dz <= 1; dz++)
-    for (let dy = -1; dy <= 1; dy++)
-      for (let dx = -1; dx <= 1; dx++) {
-        const cx = ix0 + dx, cy = iy0 + dy, cz = iz0 + dz;
-        const [sx, sy, sz] = hashVec(cx, cy, cz, seed);
-        const dd = (px - sx) ** 2 + (py - sy) ** 2 + (pz - sz) ** 2;
-        if (dd < d1) { d2 = d1; d1 = dd; bestHash = cellHash(cx, cy, cz, seed); }
-        else if (dd < d2) { d2 = dd; }
-      }
-  return [Math.sqrt(d1), Math.sqrt(d2), bestHash];
-}
+scene.add(new THREE.AmbientLight(0x404040,0.5));
+var dl=new THREE.DirectionalLight(0xffeedd,1.8);dl.position.set(2,3,4);scene.add(dl);
+var fl=new THREE.DirectionalLight(0x8899bb,0.6);fl.position.set(-2,-1,2);scene.add(fl);
 
-function smoothstep(e0, e1, x) {
-  const t = Math.max(0, Math.min(1, (x - e0) / (e1 - e0 + 1e-9)));
-  return t * t * (3 - 2 * t);
-}
+var mat=new THREE.MeshStandardMaterial({color:0x8B6B4A,roughness:0.9,metalness:0});
+// Reduced segments for mobile performance
+var SX=120,SY=360;
+var geo=new THREE.PlaneGeometry(0.4,1.2,SX,SY);
+var mesh=new THREE.Mesh(geo,mat);
+scene.add(mesh);
+var basePos=new Float32Array(geo.attributes.position.array);
 
-// ---------------------------------------------------------------
-// Bark displacement (2D: x,y → height)
-// ---------------------------------------------------------------
-function barkHeight(ox, oy, p) {
-  const z = 0.5; // fixed z for 2D preview
-  let x = ox, y = oy;
+// ---- Simple orbit controls (touch + mouse) ----
+var rotX=-0.3,rotY=0,dist=1.6,panX=0,panY=0;
+var dragging=false,pinching=false,prevX,prevY,prevDist,prevMidX,prevMidY;
+var shifted=false;
 
-  // Layer 0: coordinate warp
-  const wf = 0.25;
-  x += fbm(ox * wf, oy * wf, z * wf, 3) * p.warpX;
-  y += fbm(ox * wf + 31.7, oy * wf + 31.7, z * wf + 31.7, 3) * p.warpY;
+canvas.addEventListener('mousedown',function(e){dragging=true;prevX=e.clientX;prevY=e.clientY;shifted=e.shiftKey});
+window.addEventListener('mousemove',function(e){
+  if(!dragging)return;
+  var dx=e.clientX-prevX,dy=e.clientY-prevY;prevX=e.clientX;prevY=e.clientY;
+  if(shifted||e.shiftKey){panX+=dx*0.002;panY-=dy*0.002}
+  else{rotY+=dx*0.008;rotX+=dy*0.008;rotX=Math.max(-1.5,Math.min(1.5,rotX))}
+});
+window.addEventListener('mouseup',function(){dragging=false});
+canvas.addEventListener('wheel',function(e){e.preventDefault();dist*=1+e.deltaY*0.001;dist=Math.max(0.3,Math.min(5,dist))},{passive:false});
 
-  // Layer 1: macro plates
-  const ps = p.plateScale;
-  const ys = p.yStretch;
-  const vx = x * ps, vy = y * ps / ys, vz = z * ps;
-  let [f1, f2, ch] = voronoiF1F2(vx, vy, vz, p.seed);
-  let boundary = f2 - f1;
-  boundary += fbm(x * ps * 4 + 100, y * ps * 4 / ys + 100, z * ps * 4 + 100, 3) * p.edgeFray;
-  const wall = smoothstep(0, p.wallSteepness, boundary);
-  const level = Math.floor(ch * p.numLevels * 0.999);
-  const levelH = (level / Math.max(p.numLevels - 1, 1)) * p.layerDepth;
-  const macroH = wall * levelH;
-
-  // Layer 5: plate tilt
-  const tiltDirX = ch * 2 - 1;
-  const tiltDirY = cellHash(Math.floor(vx), Math.floor(vy), Math.floor(vz), p.seed + 77) * 2 - 1;
-  const tiltH = wall * p.plateTilt * (
-    tiltDirX * (ox * ps - Math.floor(vx)) + tiltDirY * (oy * ps / ys - Math.floor(vy))
-  );
-
-  // Layer 2: sub-plates
-  const ss = p.subScale;
-  const svx = x * ps * ss, svy = y * ps * ss / (ys * 0.6), svz = z * ps * ss;
-  let [sf1, sf2, sch] = voronoiF1F2(svx, svy, svz, p.seed + 42);
-  let sBoundary = sf2 - sf1;
-  sBoundary += fbm(x * ps * ss * 3 + 200, y * ps * ss * 3 / ys + 200, z * ps * ss * 3 + 200, 2) * p.edgeFray * 0.5;
-  const sWall = smoothstep(0, p.wallSteepness * 1.5, sBoundary);
-  const sLevel = Math.floor(sch * 2 * 0.999);
-  const subH = wall * sWall * sLevel * p.subDepth;
-
-  // Layer 3: horizontal breaks
-  const hbY = oy * p.hbreakFreq + fbm(ox * 0.5 + 300, oy * 0.5 + 300, z * 0.5 + 300, 2) * 0.4;
-  const hbVal = Math.sin(hbY * Math.PI * 2) * 0.5 + 0.5;
-  const hbCut = 1 - smoothstep(0, 0.08, hbVal);
-  const hbreakH = -wall * hbCut * p.hbreakDepth;
-
-  // Layer 4: per-plate crumple
-  const crumpleInt = 0.3 + ch * p.perPlateVar * 0.7;
-  const crumpleH = wall * crumpleInt * fbm(x * ps * 2.5 + 400, y * ps * 1.2 + 400, z * ps * 2.5 + 400, 3) * p.crumple;
-
-  // Layer 6: fibre grain
-  const fibreH = fbm(x * ps * 6 + 500, y * ps * 0.3 + 500, z * ps * 6 + 500, 2) * p.fibreGrain;
-
-  // Layer 7: micro roughness
-  const microH = fbm(x * ps * 12 + 600, y * ps * 12 + 600, z * ps * 12 + 600, 2) * p.microRoughness;
-
-  return (macroH + tiltH + subH + hbreakH + crumpleH + fibreH + microH) * p.overallDepth;
-}
-
-// ---------------------------------------------------------------
-// Three.js setup
-// ---------------------------------------------------------------
-const canvas = document.getElementById('canvas');
-const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
-renderer.setSize(window.innerWidth, window.innerHeight);
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 1.0;
-
-const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x1a1a1a);
-
-const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.01, 100);
-camera.position.set(0, 0, 1.8);
-
-const controls = new OrbitControls(camera, canvas);
-controls.enableDamping = true;
-controls.dampingFactor = 0.08;
-
-// Lighting — warm side light to show bark depth
-const ambient = new THREE.AmbientLight(0x404040, 0.5);
-scene.add(ambient);
-const dirLight = new THREE.DirectionalLight(0xffeedd, 1.8);
-dirLight.position.set(2, 3, 4);
-scene.add(dirLight);
-const fillLight = new THREE.DirectionalLight(0x8899bb, 0.6);
-fillLight.position.set(-2, -1, 2);
-scene.add(fillLight);
-
-// Bark-coloured material
-const material = new THREE.MeshStandardMaterial({
-  color: 0x8B6B4A,
-  roughness: 0.9,
-  metalness: 0.0,
-  flatShading: false,
+canvas.addEventListener('touchstart',function(e){
+  e.preventDefault();
+  if(e.touches.length===1){dragging=true;pinching=false;prevX=e.touches[0].clientX;prevY=e.touches[0].clientY}
+  if(e.touches.length===2){
+    pinching=true;dragging=false;
+    var dx=e.touches[1].clientX-e.touches[0].clientX,dy=e.touches[1].clientY-e.touches[0].clientY;
+    prevDist=Math.sqrt(dx*dx+dy*dy);
+    prevMidX=(e.touches[0].clientX+e.touches[1].clientX)/2;
+    prevMidY=(e.touches[0].clientY+e.touches[1].clientY)/2;
+  }
+},{passive:false});
+canvas.addEventListener('touchmove',function(e){
+  e.preventDefault();
+  if(dragging&&e.touches.length===1){
+    var dx=e.touches[0].clientX-prevX,dy=e.touches[0].clientY-prevY;
+    prevX=e.touches[0].clientX;prevY=e.touches[0].clientY;
+    rotY+=dx*0.008;rotX+=dy*0.008;rotX=Math.max(-1.5,Math.min(1.5,rotX));
+  }
+  if(pinching&&e.touches.length===2){
+    var dx=e.touches[1].clientX-e.touches[0].clientX,dy=e.touches[1].clientY-e.touches[0].clientY;
+    var d=Math.sqrt(dx*dx+dy*dy);
+    dist*=prevDist/d;dist=Math.max(0.3,Math.min(5,dist));prevDist=d;
+    var mx=(e.touches[0].clientX+e.touches[1].clientX)/2;
+    var my=(e.touches[0].clientY+e.touches[1].clientY)/2;
+    panX+=(mx-prevMidX)*0.002;panY-=(my-prevMidY)*0.002;
+    prevMidX=mx;prevMidY=my;
+  }
+},{passive:false});
+canvas.addEventListener('touchend',function(e){
+  if(e.touches.length<2)pinching=false;
+  if(e.touches.length<1)dragging=false;
 });
 
-// Panel geometry: 200mm × 800mm → 0.2 × 0.8 in scene units
-const PANEL_W = 0.4, PANEL_H = 1.2;
-const SEGS_X = 200, SEGS_Y = 600;
-const geo = new THREE.PlaneGeometry(PANEL_W, PANEL_H, SEGS_X, SEGS_Y);
-const mesh = new THREE.Mesh(geo, material);
-scene.add(mesh);
+// ---- Params ----
+function gp(){return{
+  ps:+document.getElementById('ps').value,ys:+document.getElementById('ys').value,
+  nl:+document.getElementById('nl').value,ld:+document.getElementById('ld').value,
+  ws:+document.getElementById('ws').value,ef:+document.getElementById('ef').value,
+  wx:+document.getElementById('wx').value,wy:+document.getElementById('wy').value,
+  ss:+document.getElementById('ss').value,sd:+document.getElementById('sd').value,
+  hf:+document.getElementById('hf').value,hd:+document.getElementById('hd').value,
+  cr:+document.getElementById('cr').value,pv:+document.getElementById('pv').value,
+  pt:+document.getElementById('pt').value,fg:+document.getElementById('fg').value,
+  mr:+document.getElementById('mr').value,od:+document.getElementById('od').value,
+  se:+document.getElementById('se').value
+}}
 
-// Store original positions
-const basePositions = new Float32Array(geo.attributes.position.array);
-
-// ---------------------------------------------------------------
-// Parameters from UI
-// ---------------------------------------------------------------
-function getParams() {
-  return {
-    plateScale: +document.getElementById('plateScale').value,
-    yStretch: +document.getElementById('yStretch').value,
-    numLevels: +document.getElementById('numLevels').value,
-    layerDepth: +document.getElementById('layerDepth').value,
-    wallSteepness: +document.getElementById('wallSteepness').value,
-    edgeFray: +document.getElementById('edgeFray').value,
-    warpX: +document.getElementById('warpX').value,
-    warpY: +document.getElementById('warpY').value,
-    subScale: +document.getElementById('subScale').value,
-    subDepth: +document.getElementById('subDepth').value,
-    hbreakFreq: +document.getElementById('hbreakFreq').value,
-    hbreakDepth: +document.getElementById('hbreakDepth').value,
-    crumple: +document.getElementById('crumple').value,
-    perPlateVar: +document.getElementById('perPlateVar').value,
-    plateTilt: +document.getElementById('plateTilt').value,
-    fibreGrain: +document.getElementById('fibreGrain').value,
-    microRoughness: +document.getElementById('microRoughness').value,
-    overallDepth: +document.getElementById('overallDepth').value,
-    seed: +document.getElementById('seed').value,
-  };
-}
-
-// Update value displays
-document.querySelectorAll('#controls input[type=range]').forEach(input => {
-  const valSpan = document.getElementById(input.id + 'V');
-  input.addEventListener('input', () => {
-    valSpan.textContent = parseFloat(input.value).toFixed(
-      input.step.includes('.') ? input.step.split('.')[1].length : 0
-    );
-    needsUpdate = true;
+var dirty=true;
+document.querySelectorAll('#ui input').forEach(function(inp){
+  var vs=document.getElementById(inp.id+'V');
+  inp.addEventListener('input',function(){
+    var d=inp.step.indexOf('.')>=0?inp.step.split('.')[1].length:0;
+    vs.textContent=parseFloat(inp.value).toFixed(d);dirty=true;
   });
 });
 
-let needsUpdate = true;
-
-function updateGeometry() {
-  const p = getParams();
-  const pos = geo.attributes.position.array;
-  const count = pos.length / 3;
-
-  // Scale factor: displacement is in mm, geometry is in scene units (≈ metres)
-  const scale = 0.001;
-
-  for (let i = 0; i < count; i++) {
-    const bx = basePositions[i * 3];
-    const by = basePositions[i * 3 + 1];
-    // Map plane coords to "real world" coordinates for noise
-    // Panel is 0.4 × 1.2 scene units = 400 × 1200 mm
-    const wx = bx * 1000; // mm
-    const wy = by * 1000;
-    const h = barkHeight(wx * 0.005, wy * 0.005, p);
-    pos[i * 3 + 2] = h * scale;
+function updateGeo(){
+  var p=gp(),pos=geo.attributes.position.array,cnt=pos.length/3,sc=0.001;
+  for(var i=0;i<cnt;i++){
+    var bx=basePos[i*3],by=basePos[i*3+1];
+    var h=bark(bx*1000*0.005,by*1000*0.005,p);
+    pos[i*3+2]=h*sc;
   }
-
-  geo.attributes.position.needsUpdate = true;
+  geo.attributes.position.needsUpdate=true;
   geo.computeVertexNormals();
+  document.getElementById('loading').style.display='none';
 }
 
-// ---------------------------------------------------------------
-// Render loop
-// ---------------------------------------------------------------
-function animate() {
+function animate(){
   requestAnimationFrame(animate);
-  if (needsUpdate) {
-    updateGeometry();
-    needsUpdate = false;
-  }
-  controls.update();
-  renderer.render(scene, camera);
+  if(dirty){updateGeo();dirty=false}
+  camera.position.set(
+    dist*Math.sin(rotY)*Math.cos(rotX)+panX,
+    -dist*Math.sin(rotX)+panY,
+    dist*Math.cos(rotY)*Math.cos(rotX)
+  );
+  camera.lookAt(panX,panY,0);
+  renderer.render(scene,camera);
 }
 animate();
 
-window.addEventListener('resize', () => {
-  camera.aspect = window.innerWidth / window.innerHeight;
-  camera.updateProjectionMatrix();
-  renderer.setSize(window.innerWidth, window.innerHeight);
+window.addEventListener('resize',function(){
+  W=window.innerWidth;H=window.innerHeight;
+  camera.aspect=W/H;camera.updateProjectionMatrix();
+  renderer.setSize(W,H);
 });
 </script>
 </body>
