@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Orbit VR — watch any video in stereoscopic VR
 // @namespace    https://github.com/jollydoddger/Life
-// @version      0.3.3
+// @version      0.3.4
 // @description  Adds a "VR" button to video pages. Plays the page's own video — or, on sites that hide it (e.g. SLR), fetches the scene's real stream via its deeplink using your logged-in session — in stereoscopic 180/360/fisheye with Cardboard + head tracking.
 // @author       Orbit
 // @match        *://*/*
@@ -24,7 +24,7 @@
   if (window.__orbitVR) return;          // guard against double-injection
   window.__orbitVR = true;
 
-  const VERSION = '0.3.3';
+  const VERSION = '0.3.4';
   // Tampermonkey's privileged request (bypasses CORS, carries cookies). Supports
   // both the classic (GM_xmlhttpRequest) and GM4 (GM.xmlHttpRequest) names.
   const gmXHR = (typeof GM_xmlhttpRequest === 'function') ? GM_xmlhttpRequest
@@ -397,7 +397,12 @@
   // ---- stereoscopic engine (compact port of the Orbit player) -------------
   function buildEngine(canvas, video, fmt) {
     const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    // Render scale (cap on devicePixelRatio). Lower = far less GPU fill-rate =
+    // smoother + cooler (less thermal throttling) on high-DPI phones; higher =
+    // sharper. 1.5 is a good default on the S24 Ultra's ~3.4x display.
+    let renderScale = 1.5;
+    const applyScale = () => renderer.setPixelRatio(Math.min(window.devicePixelRatio, renderScale));
+    applyScale();
     const scene = new THREE.Scene();
     const camera = new THREE.PerspectiveCamera(72, 1, 0.1, 1100);
     camera.layers.set(1);                 // flat view = left eye
@@ -504,6 +509,8 @@
       setOrientation(o) { orientation = o; },
       look(dx, dy) { lon += dx; lat = Math.max(-85, Math.min(85, lat + dy)); },
       recenter,
+      get renderScale() { return renderScale; },
+      setRenderScale(s) { renderScale = s; applyScale(); resize(); },
       camera, scene, renderer,
       dispose() {
         window.removeEventListener('resize', resize);
@@ -561,6 +568,8 @@
       bar.appendChild(projSelect());
       seg([['mono', 'Mono'], ['sbs', 'SBS'], ['ou', 'OU']], () => engine.layout, (v) => engine.setLayout(v)).forEach((b) => bar.appendChild(b));
       bar.appendChild(mk('⟲ Recenter', () => engine.recenter(), false));
+      const q = engine.renderScale, qLabel = q <= 1 ? '⚡ Perf' : q < 2 ? '◎ Balanced' : '✦ Sharp';
+      bar.appendChild(mk(qLabel, () => { engine.setRenderScale(q <= 1 ? 1.5 : q < 2 ? 2 : 1); refresh(); }, false));
       bar.appendChild(mk(engine.mode === 'cardboard' ? '◑ Cardboard' : '◐ Cardboard', cardboard, engine.mode === 'cardboard'));
       bar.appendChild(mk(orientationOn ? '⦿ Gyro' : '○ Gyro', gyro, orientationOn));
       bar.appendChild(mk('✕ Exit', () => { stopGyro(); onClose(); }, false));
