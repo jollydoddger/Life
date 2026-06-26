@@ -951,5 +951,69 @@ $('intercept-play-btn').addEventListener('click', () => {
 
 $('intercept-dismiss').addEventListener('click', hideIntercept);
 
+// ── Find Videos (stream extractor) ─────────────────────────────────────────
+$('extract-btn').addEventListener('click', () => {
+  // Pre-fill with current iframe URL if available
+  const cur = iframeHistory[historyPos] || '';
+  $('find-url-input').value = cur;
+  $('find-status').textContent = '';
+  $('find-results').innerHTML = '';
+  $('find-modal').classList.add('open');
+  setTimeout(() => $('find-url-input').focus(), 200);
+});
+
+$('find-cancel').addEventListener('click', () => $('find-modal').classList.remove('open'));
+$('find-modal').addEventListener('click', e => { if (e.target === $('find-modal')) $('find-modal').classList.remove('open'); });
+
+$('find-go').addEventListener('click', async () => {
+  const url = $('find-url-input').value.trim();
+  if (!url) return;
+  const status  = $('find-status');
+  const results = $('find-results');
+  status.textContent  = 'Searching…';
+  results.innerHTML   = '';
+  $('find-go').disabled = true;
+
+  try {
+    const apiUrl = `${PROXY_BASE}/find-videos?url=${encodeURIComponent(url)}`;
+    const res  = await fetch(apiUrl);
+    const data = await res.json();
+
+    $('find-go').disabled = false;
+
+    if (data.error && !data.videos?.length) {
+      status.textContent = '⚠️ ' + data.error;
+      return;
+    }
+    if (!data.videos?.length) {
+      status.textContent = 'No video streams found on that page. Try a direct scene/video URL.';
+      return;
+    }
+
+    status.textContent = `Found ${data.videos.length} stream${data.videos.length > 1 ? 's' : ''} — tap one to play`;
+    data.videos.forEach(v => {
+      const ext   = (v.url.match(/\.(mp4|webm|m3u8|mpd)/i) || ['','?'])[1].toUpperCase();
+      const is4k  = /4k|2160/i.test(v.url);
+      const is1080= /1080/i.test(v.url);
+      const card  = document.createElement('div');
+      card.className = 'result-card';
+      card.innerHTML = `
+        <div class="result-title">${esc(v.title)}</div>
+        <div class="result-url">${esc(v.url)}</div>
+        <span class="result-badge">${ext}${is4k?' · 4K':is1080?' · 1080p':''}</span>`;
+      card.addEventListener('click', () => {
+        const vid = { id: Date.now(), url: v.url, title: v.title, thumb: '', stereoMode: 'mono' };
+        if (!library.find(l => l.url === v.url)) { library.unshift(vid); saveLib(); renderLibrary(); }
+        $('find-modal').classList.remove('open');
+        openPlayer(vid);
+      });
+      results.appendChild(card);
+    });
+  } catch (e) {
+    $('find-go').disabled = false;
+    status.textContent = '⚠️ Could not reach proxy. Is proxy.py running?';
+  }
+});
+
 // ── Boot ──────────────────────────────────────────────────────────────────────
 renderLibrary();

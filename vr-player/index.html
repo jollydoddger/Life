@@ -140,6 +140,20 @@
     .nav-btn:disabled { opacity:.25; cursor:default; }
     .nav-btn.active { color:var(--accent); }
 
+    /* Find-videos modal */
+    #find-modal { z-index:110; }
+    #find-results { max-height:55vh; overflow-y:auto; margin-top:12px; display:flex; flex-direction:column; gap:8px; }
+    .result-card {
+      background:var(--surface2); border:1px solid var(--border);
+      border-radius:10px; padding:11px 14px; cursor:pointer;
+      transition:border-color .15s;
+    }
+    .result-card:active { border-color:var(--accent); }
+    .result-title { font-size:13px; font-weight:500; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .result-url   { font-size:11px; color:var(--text-dim); margin-top:3px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .result-badge { display:inline-block; font-size:10px; font-weight:700; color:var(--accent); background:var(--accent-dim); padding:1px 6px; border-radius:4px; margin-top:4px; }
+    #find-status  { font-size:13px; color:var(--text-dim); text-align:center; padding:16px 0; }
+
     /* Proxy notice strip */
     #proxy-notice {
       display:none; background:rgba(0,212,255,.12); border-bottom:1px solid rgba(0,212,255,.3);
@@ -489,6 +503,7 @@
       <button id="go-btn">Go</button>
     </div>
     <button class="nav-btn" id="proxy-btn" title="Bypass iframe blocks via local proxy">🔓</button>
+    <button class="nav-btn" id="extract-btn" title="Find video streams on this page">🎬</button>
   </div>
 
   <!-- Proxy notice -->
@@ -546,6 +561,28 @@
       <button class="btn-ghost" id="modal-cancel">Cancel</button>
       <button class="btn-primary" id="modal-add">Add &amp; Play</button>
     </div>
+  </div>
+</div>
+
+<!-- ── Find Videos Modal ──────────────────────────────── -->
+<div class="overlay-bg" id="find-modal">
+  <div class="sheet">
+    <div class="sheet-handle"></div>
+    <div class="sheet-title">🎬 Find Video Streams</div>
+    <div style="font-size:13px;color:var(--text-dim);margin-bottom:4px">
+      Paste a scene/video page URL — we'll extract the stream links.
+    </div>
+    <div class="field-group" style="margin-top:12px">
+      <div class="field-label">Page URL</div>
+      <input class="field-input" type="url" id="find-url-input"
+        placeholder="https://sexlikereal.com/scenes/..." inputmode="url" autocorrect="off">
+    </div>
+    <div class="modal-actions">
+      <button class="btn-ghost" id="find-cancel">Cancel</button>
+      <button class="btn-primary" id="find-go" style="flex:2;margin-top:0;padding:12px;border-radius:var(--radius)">Search</button>
+    </div>
+    <div id="find-status"></div>
+    <div id="find-results"></div>
   </div>
 </div>
 

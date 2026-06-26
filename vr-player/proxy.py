@@ -49,6 +49,14 @@ class Handler(BaseHTTPRequestHandler):
         return p if p.startswith(('http://', 'https://')) else None
 
     def handle_req(self, body=None):
+        # Special endpoint: /find-videos?url=https://...
+        parsed_path = urllib.parse.urlparse(self.path)
+        if parsed_path.path.rstrip('/') == '/find-videos':
+            params = urllib.parse.parse_qs(parsed_path.query)
+            target_url = params.get('url', [''])[0]
+            self.find_videos(target_url)
+            return
+
         url = self.target()
         if not url:
             self.send_response(200)
@@ -110,6 +118,46 @@ class Handler(BaseHTTPRequestHandler):
             self.send_error(e.code, str(e.reason))
         except Exception as e:
             self.send_error(502, str(e))
+
+    def find_videos(self, url):
+        """Fetch a page and return all video URLs found as JSON."""
+        import json
+        self.send_header_cors()
+        if not url:
+            self.respond_json({'error': 'No URL provided', 'videos': []})
+            return
+        try:
+            hdrs = {'User-Agent': UA, 'Accept': 'text/html,*/*',
+                    'Accept-Language': 'en-US,en;q=0.9',
+                    'Accept-Encoding': 'gzip, deflate'}
+            req  = urllib.request.Request(url, headers=hdrs)
+            with _opener.open(req, timeout=20) as resp:
+                raw = resp.read()
+                enc = resp.headers.get('Content-Encoding', '')
+                try:
+                    text = (gzip.decompress(raw) if 'gzip' in enc
+                            else zlib.decompress(raw) if 'deflate' in enc
+                            else raw).decode('utf-8', errors='replace')
+                except Exception:
+                    text = raw.decode('utf-8', errors='replace')
+
+            videos = extract_video_urls(text, url)
+            self.respond_json({'videos': videos, 'url': url})
+        except Exception as e:
+            self.respond_json({'error': str(e), 'videos': []})
+
+    def send_header_cors(self):
+        pass  # called before respond_json which does full headers
+
+    def respond_json(self, data):
+        import json
+        body = json.dumps(data).encode()
+        self.send_response(200)
+        self.send_header('Content-Type', 'application/json')
+        self.send_header('Access-Control-Allow-Origin', '*')
+        self.send_header('Content-Length', len(body))
+        self.end_headers()
+        self.wfile.write(body)
 
     def log_message(self, *_): pass   # silent
 
@@ -204,6 +252,69 @@ def rewrite(html, page_url):
         html = head_inject + html
 
     return html
+
+
+VIDEO_EXTS = r'\.(?:mp4|webm|m3u8|mpd|ts)(?:[?#][^\s"\'<>]*)?'
+
+def extract_video_urls(html, page_url):
+    """Pull every video stream URL out of a page's HTML/JS."""
+    found = set()
+    base  = urllib.parse.urlparse(page_url)
+
+    # Direct video file URLs anywhere in the source
+    for m in re.finditer(r'["\']((https?://)[^\s"\'<>]+' + VIDEO_EXTS + r')["\']',
+                         html, re.IGNORECASE):
+        found.add(m.group(1))
+
+    # Relative paths to video files
+    for m in re.finditer(r'["\']((/?[^"\'<>\s]+)' + VIDEO_EXTS + r')["\']',
+                         html, re.IGNORECASE):
+        rel = m.group(1)
+        if not rel.startswith('http'):
+            abs_url = (f'{base.scheme}://{base.netloc}{rel}'
+                       if rel.startswith('/') else
+                       f'{base.scheme}://{base.netloc}{base.path.rsplit("/",1)[0]}/{rel}')
+            found.add(abs_url)
+
+    # Common JSON keys: src, url, videoUrl, streamUrl, hlsUrl, file, path
+    for m in re.finditer(
+            r'"(?:src|url|video(?:Url|URL|_url)|stream(?:Url|URL)?|'
+            r'hls(?:Url|URL)?|dash(?:Url|URL)?|file|path|source|mp4|webm)"'
+            r'\s*:\s*"([^"]+)"', html, re.IGNORECASE):
+        val = m.group(1)
+        if re.search(VIDEO_EXTS, val, re.IGNORECASE) or val.startswith('http'):
+            if re.search(VIDEO_EXTS, val, re.IGNORECASE):
+                found.add(val if val.startswith('http')
+                          else f'{base.scheme}://{base.netloc}{val}')
+
+    # <source src="..."> and <video src="...">
+    for m in re.finditer(r'<(?:video|source)[^>]+src=["\']([^"\']+)["\']',
+                         html, re.IGNORECASE):
+        val = m.group(1)
+        if re.search(VIDEO_EXTS, val, re.IGNORECASE):
+            found.add(val if val.startswith('http')
+                      else f'{base.scheme}://{base.netloc}{val}')
+
+    # Deduplicate and sort: prefer higher-res / mp4 over m3u8
+    def rank(u):
+        u = u.lower()
+        score = 0
+        if '4k' in u or '2160' in u: score += 40
+        elif '2k' in u or '1440' in u: score += 30
+        elif '1080' in u: score += 20
+        elif '720' in u: score += 10
+        if u.endswith('.mp4') or '.mp4?' in u: score += 5
+        return -score
+
+    results = []
+    seen_names = set()
+    for u in sorted(found, key=rank):
+        name = u.split('/')[-1].split('?')[0] or u
+        if name not in seen_names:
+            seen_names.add(name)
+            results.append({'url': u, 'title': name})
+
+    return results[:20]  # cap at 20
 
 
 if __name__ == '__main__':
