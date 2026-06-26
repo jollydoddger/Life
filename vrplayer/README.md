@@ -39,6 +39,14 @@ and the **Mono/SBS/OU** buttons — the page title usually tells you (e.g.
 "…MKX200" or "…180°"). Play the scene on SLR first (so its video is loaded and
 your subscription is authenticated), then tap **🜨 VR**.
 
+When you tap VR a **status bar** appears at the top showing what it found —
+e.g. `Orbit · 5400×2700 · fisheye 200° · sbs`. That tells you the resolution and
+the projection it chose. If instead it warns the video is **cross-origin
+protected**, the browser is blocking the script from rendering SLR's stream
+(you'd see a black screen) — that's a browser security limit, not a bug, and it
+means that stream needs SLR's own app. The status bar makes the outcome obvious
+either way.
+
 ### Install on Android
 
 1. Install a browser that supports extensions: **Kiwi Browser** or **Firefox for

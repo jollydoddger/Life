@@ -97,10 +97,35 @@
     if (pickVideo() && !document.body.contains(launch)) document.body.appendChild(launch);
   }, 1500);
 
+  // Cross-origin videos can't be uploaded to WebGL (the canvas would be
+  // "tainted"). Detect that up front so we can explain a black screen instead of
+  // just showing one. Returns 'ok', 'tainted', or 'notready'.
+  function videoTextureStatus(video) {
+    if (!video.videoWidth) return 'notready';
+    try {
+      const c = document.createElement('canvas'); c.width = c.height = 2;
+      const cx = c.getContext('2d');
+      cx.drawImage(video, 0, 0, 2, 2);
+      cx.getImageData(0, 0, 1, 1);   // throws SecurityError if cross-origin tainted
+      return 'ok';
+    } catch { return 'tainted'; }
+  }
+
+  function statusBar() {
+    const s = document.createElement('div');
+    Object.assign(s.style, {
+      position: 'fixed', top: '10px', left: '50%', transform: 'translateX(-50%)',
+      zIndex: 2147483647, maxWidth: '92vw', padding: '8px 12px', borderRadius: '10px',
+      background: 'rgba(16,18,26,.82)', color: '#cdd6ec', font: '12px system-ui, sans-serif',
+      textAlign: 'center', lineHeight: '1.4',
+    });
+    return s;
+  }
+
   // ---- the VR overlay + engine --------------------------------------------
   function start() {
     const video = pickVideo();
-    if (!video) { alert('Orbit: no video found on this page yet.'); return; }
+    if (!video) { alert('Orbit: no video found yet — press play on the scene first, then tap VR.'); return; }
 
     const overlay = document.createElement('div');
     Object.assign(overlay.style, {
@@ -112,6 +137,24 @@
     document.body.appendChild(overlay);
 
     const fmt = guessFormat();
+    const status = statusBar();
+    overlay.appendChild(status);
+
+    const tex = videoTextureStatus(video);
+    if (tex === 'tainted') {
+      status.style.background = 'rgba(60,20,24,.92)'; status.style.color = '#ffd0d0';
+      status.innerHTML = '⚠ This video is <b>cross-origin protected</b>, so the browser blocks rendering it (you\'d see a black screen). '
+        + 'SLR\'s full streams may require their native app. The script works on sites whose video allows it. '
+        + '<u>Tap to close</u>';
+      status.addEventListener('click', () => overlay.remove());
+      return;
+    }
+
+    const lens = fmt.projection === 'fisheye' ? `fisheye ${fmt.fov}°` : `${fmt.projection}`;
+    status.textContent = `Orbit · ${video.videoWidth}×${video.videoHeight} · ${lens} · ${fmt.layout}`
+      + (tex === 'notready' ? ' · (still loading…)' : '');
+    setTimeout(() => { status.style.transition = 'opacity .6s'; status.style.opacity = '0'; }, 3500);
+
     const engine = buildEngine(canvas, video, fmt);
     window.__orbitEngine = engine;       // for the automated test harness
     overlay.appendChild(buildControls(engine, () => { engine.dispose(); overlay.remove(); }));
@@ -185,9 +228,14 @@
       renderer.render(scene, stereo.cameraR);
       renderer.setScissorTest(false);
     }
+    let renderErr = false;
     renderer.setAnimationLoop(() => {
       if (orientation) applyOrientation(orientation); else applyPointer();
-      if (mode === 'cardboard') renderStereo(); else renderer.render(scene, camera);
+      try {
+        if (mode === 'cardboard') renderStereo(); else renderer.render(scene, camera);
+      } catch (e) {
+        if (!renderErr) { renderErr = true; console.warn('[Orbit] render error (likely cross-origin video):', e.message); }
+      }
     });
 
     function resize() {
