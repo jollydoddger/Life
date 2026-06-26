@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Orbit VR — watch any video in stereoscopic VR
 // @namespace    https://github.com/jollydoddger/Life
-// @version      0.3.4
+// @version      0.3.5
 // @description  Adds a "VR" button to video pages. Plays the page's own video — or, on sites that hide it (e.g. SLR), fetches the scene's real stream via its deeplink using your logged-in session — in stereoscopic 180/360/fisheye with Cardboard + head tracking.
 // @author       Orbit
 // @match        *://*/*
@@ -24,7 +24,7 @@
   if (window.__orbitVR) return;          // guard against double-injection
   window.__orbitVR = true;
 
-  const VERSION = '0.3.4';
+  const VERSION = '0.3.5';
   // Tampermonkey's privileged request (bypasses CORS, carries cookies). Supports
   // both the classic (GM_xmlhttpRequest) and GM4 (GM.xmlHttpRequest) names.
   const gmXHR = (typeof GM_xmlhttpRequest === 'function') ? GM_xmlhttpRequest
@@ -208,7 +208,7 @@
 
   // Build the fullscreen overlay + engine around a <video> (from the page or a
   // stream we created). Handles taint detection now and once frames arrive.
-  function launchViewer(video, fmt) {
+  function launchViewer(video, fmt, mediaCtl) {
     const overlay = document.createElement('div');
     Object.assign(overlay.style, {
       position: 'fixed', inset: '0', zIndex: 2147483647, background: '#000', touchAction: 'none',
@@ -230,7 +230,20 @@
 
     const engine = buildEngine(canvas, video, fmt);
     window.__orbitEngine = engine;       // for the automated test harness
-    overlay.appendChild(buildControls(engine, () => { engine.dispose(); overlay.remove(); }));
+
+    // Live FPS badge (top-left) so you can tune sharpness vs. smoothness/120Hz.
+    const fpsBadge = document.createElement('div');
+    Object.assign(fpsBadge.style, {
+      position: 'fixed', top: '10px', left: '10px', zIndex: 2147483647, display: 'none',
+      padding: '4px 8px', borderRadius: '8px', background: 'rgba(0,0,0,.6)', color: '#9eff9e',
+      font: '600 12px ui-monospace, monospace',
+    });
+    overlay.appendChild(fpsBadge);
+    const fpsTimer = setInterval(() => { fpsBadge.textContent = engine.fps + ' fps'; }, 500);
+
+    overlay.appendChild(buildControls(engine, () => {
+      clearInterval(fpsTimer); engine.dispose(); overlay.remove();
+    }, mediaCtl, fpsBadge));
 
     // Cross-origin texture check — now if ready, else once the first frame loads.
     const check = () => { if (videoTextureStatus(video) === 'tainted') showTaint(status, overlay, engine); };
@@ -273,9 +286,9 @@
     const layout = (data.is3d === false || m === 'off' || m === '') ? 'mono'
       : (m === 'tb' ? 'ou' : 'sbs'); // sbs/cuv/lr/unknown-3d -> sbs
     const sources = [];
-    const push = (u, h, c) => { if (u) sources.push({ url: u, height: +h || 0, codec: String(c || '').toLowerCase() }); };
-    (data.encodings || []).forEach((e) => (e.videoSources || []).forEach((x) => push(x.url, x.resolution ?? x.height, e.name)));
-    if (!sources.length && Array.isArray(data.videoSources)) data.videoSources.forEach((x) => push(x.url, x.resolution ?? x.height, x.codec));
+    const push = (u, h, c, sz) => { if (u) sources.push({ url: u, height: +h || 0, codec: String(c || '').toLowerCase(), size: +sz || 0 }); };
+    (data.encodings || []).forEach((e) => (e.videoSources || []).forEach((x) => push(x.url, x.resolution ?? x.height, e.name, x.size)));
+    if (!sources.length && Array.isArray(data.videoSources)) data.videoSources.forEach((x) => push(x.url, x.resolution ?? x.height, x.codec, x.size));
     const rank = (c) => (/264|avc/.test(c) ? 0 : /m3u8|hls/.test(c) ? 1 : /265|hevc/.test(c) ? 3 : 2);
     sources.sort((a, b) => rank(a.codec) - rank(b.codec) || b.height - a.height);
     return { projection, fov, layout, sources };
@@ -334,7 +347,7 @@
     return { set: (html) => { inner.innerHTML = html; }, remove: () => p.remove() };
   }
 
-  const MAX_CACHE_BYTES = 1100 * 1e6; // guard so we don't OOM the tab
+  const MAX_CACHE_BYTES = 2000 * 1e6; // guard so we don't OOM the tab (S24 Ultra has headroom)
 
   async function deeplinkRoute() {
     const dl = findDeeplinkUrl();
@@ -363,35 +376,64 @@
     window.__orbitVideo = v;
 
     const mp4 = scene.sources.filter((s) => !/\.m3u8/i.test(s.url));
+    let mediaCtl = null;
+
     if (gmXHR && mp4.length) {
-      // Cache the smallest mp4 in memory (renderable blob, no CORS taint, no disk).
-      const cache = mp4.slice().sort((a, b) => (a.height || 1e9) - (b.height || 1e9))[0];
-      try {
-        const blob = await gmGetBlob(cache.url, (loaded, total) => {
-          panel.set('Orbit v' + VERSION + '<br><br>Caching scene (' + (cache.height ? cache.height + 'p' : '') + ')… '
-            + Math.round(loaded / total * 100) + '%<br><small>' + Math.round(loaded / 1e6) + ' / ' + Math.round(total / 1e6) + ' MB</small>'
-            + '<br><br><small>kept in memory only — nothing saved to your phone</small>');
-        }, MAX_CACHE_BYTES);
-        v.src = URL.createObjectURL(blob);
-      } catch (e) {
-        panel.remove();
-        alert('Orbit: reached the scene but couldn\'t cache the video:\n' + e
-          + '\n\nFor full scenes the download → Open file route is more practical.');
-        return;
-      }
+      // Cache an mp4 in memory (renderable blob, no CORS taint, no disk write).
+      // The quality picker re-runs this for a different resolution on demand.
+      panel.remove(); // hand off to per-cache progress panels
+      let blobUrl = null;
+      const cacheSource = async (src) => {
+        const p = progressPanel();
+        let aborted = false;
+        try {
+          const blob = await gmGetBlob(src.url, (loaded, total) => {
+            p.set('Orbit v' + VERSION + '<br><br>Caching ' + (src.height ? src.height + 'p' : 'scene') + '… '
+              + Math.round(loaded / total * 100) + '%<br><small>' + Math.round(loaded / 1e6) + ' / ' + Math.round(total / 1e6) + ' MB</small>'
+              + '<br><br><small>kept in memory only — nothing saved to your phone</small>');
+          }, MAX_CACHE_BYTES);
+          if (blobUrl) URL.revokeObjectURL(blobUrl);
+          blobUrl = URL.createObjectURL(blob);
+          v.src = blobUrl; v.play().catch(() => {});
+        } catch (e) {
+          aborted = true;
+          alert('Orbit: couldn\'t cache ' + (src.height ? src.height + 'p' : 'that quality') + ':\n' + e
+            + '\n\nTry a lower quality, or use download → Open file for full size.');
+        } finally { p.remove(); }
+        return !aborted;
+      };
+      const def = pickDefaultSource(mp4);
+      await cacheSource(def);
+      mediaCtl = {
+        sources: mp4, current: def,
+        recache: async (src) => { mediaCtl.current = src; await cacheSource(src); },
+      };
     } else if (mp4.length === 0) {
       // HLS only — stream it (cross-origin, so may not render).
       const url = scene.sources[0].url;
       v.crossOrigin = 'anonymous';
       if (await ensureHls() && window.Hls.isSupported()) { const hls = new window.Hls(); hls.loadSource(url); hls.attachMedia(v); }
       else v.src = url;
+      panel.remove();
     } else {
       v.src = mp4[0].url; // no privileged fetch (e.g. tests) — direct
+      panel.remove();
     }
 
-    panel.remove();
     v.play().catch(() => {});
-    launchViewer(v, scene);
+    launchViewer(v, scene, mediaCtl);
+  }
+
+  // Default cache quality: the sharpest source that should fit in memory.
+  function pickDefaultSource(list) {
+    const known = list.filter((s) => s.size > 0);
+    if (known.length) {
+      const fit = known.filter((s) => s.size <= MAX_CACHE_BYTES * 0.92).sort((a, b) => b.height - a.height);
+      return fit[0] || known.slice().sort((a, b) => a.size - b.size)[0];
+    }
+    // No sizes given: prefer the highest resolution up to 2160p, else the lowest.
+    const under = list.filter((s) => s.height && s.height <= 2160).sort((a, b) => b.height - a.height);
+    return under[0] || list.slice().sort((a, b) => (a.height || 1e9) - (b.height || 1e9))[0];
   }
 
   // ---- stereoscopic engine (compact port of the Orbit player) -------------
@@ -483,7 +525,7 @@
       renderer.render(scene, stereo.cameraR);
       renderer.setScissorTest(false);
     }
-    let renderErr = false;
+    let renderErr = false, fps = 0, _fc = 0, _ft = performance.now();
     renderer.setAnimationLoop(() => {
       if (orientation) applyOrientation(orientation); else applyPointer();
       try {
@@ -491,6 +533,8 @@
       } catch (e) {
         if (!renderErr) { renderErr = true; console.warn('[Orbit] render error (likely cross-origin video):', e.message); }
       }
+      _fc++; const n = performance.now();
+      if (n - _ft >= 500) { fps = Math.round(_fc / ((n - _ft) / 1000)); _fc = 0; _ft = n; }
     });
 
     function resize() {
@@ -511,6 +555,7 @@
       recenter,
       get renderScale() { return renderScale; },
       setRenderScale(s) { renderScale = s; applyScale(); resize(); },
+      get fps() { return fps; },
       camera, scene, renderer,
       dispose() {
         window.removeEventListener('resize', resize);
@@ -520,7 +565,7 @@
   }
 
   // ---- overlay controls ----------------------------------------------------
-  function buildControls(engine, onClose) {
+  function buildControls(engine, onClose, mediaCtl, fpsBadge) {
     const bar = document.createElement('div');
     Object.assign(bar.style, {
       position: 'fixed', left: '50%', bottom: '16px', transform: 'translateX(-50%)',
@@ -563,13 +608,35 @@
       });
       return sel;
     }
+    // Quality (source resolution) picker — only for the deeplink/cache path.
+    function qualitySelect() {
+      const sel = document.createElement('select');
+      Object.assign(sel.style, {
+        padding: '8px', borderRadius: '9px', border: '1px solid rgba(255,255,255,.12)',
+        background: 'rgba(255,255,255,.05)', color: '#fff', font: 'inherit',
+      });
+      const list = mediaCtl.sources.slice().sort((a, b) => (b.height || 0) - (a.height || 0));
+      for (const s of list) {
+        const o = document.createElement('option');
+        o.value = s.url; o.textContent = (s.height ? s.height + 'p' : 'source') + (s.size ? ' · ' + Math.round(s.size / 1e6) + 'MB' : '');
+        if (s === mediaCtl.current) o.selected = true; sel.appendChild(o);
+      }
+      sel.addEventListener('change', () => {
+        const src = mediaCtl.sources.find((s) => s.url === sel.value);
+        if (src) mediaCtl.recache(src);
+      });
+      return sel;
+    }
+    let fpsOn = false;
     function refresh() {
       bar.innerHTML = '';
       bar.appendChild(projSelect());
       seg([['mono', 'Mono'], ['sbs', 'SBS'], ['ou', 'OU']], () => engine.layout, (v) => engine.setLayout(v)).forEach((b) => bar.appendChild(b));
+      if (mediaCtl && mediaCtl.sources.length > 1) bar.appendChild(qualitySelect());
       bar.appendChild(mk('⟲ Recenter', () => engine.recenter(), false));
       const q = engine.renderScale, qLabel = q <= 1 ? '⚡ Perf' : q < 2 ? '◎ Balanced' : '✦ Sharp';
       bar.appendChild(mk(qLabel, () => { engine.setRenderScale(q <= 1 ? 1.5 : q < 2 ? 2 : 1); refresh(); }, false));
+      if (fpsBadge) bar.appendChild(mk('fps', () => { fpsOn = !fpsOn; fpsBadge.style.display = fpsOn ? 'block' : 'none'; refresh(); }, fpsOn));
       bar.appendChild(mk(engine.mode === 'cardboard' ? '◑ Cardboard' : '◐ Cardboard', cardboard, engine.mode === 'cardboard'));
       bar.appendChild(mk(orientationOn ? '⦿ Gyro' : '○ Gyro', gyro, orientationOn));
       bar.appendChild(mk('✕ Exit', () => { stopGyro(); onClose(); }, false));
