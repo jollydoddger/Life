@@ -8,7 +8,8 @@
     "start": "python3 -m http.server 8123 --bind 127.0.0.1",
     "serve:phone": "node serve-https.mjs",
     "test": "node test/render-check.mjs",
-    "test:unit": "node test/feed-parse.test.mjs"
+    "test:unit": "node test/feed-parse.test.mjs",
+    "test:userscript": "node test/userscript-check.mjs"
   },
   "devDependencies": {
     "playwright": "^1.44.0"

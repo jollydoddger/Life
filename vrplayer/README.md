@@ -8,7 +8,44 @@ side-by-side / over-under stereo separation per eye.
 No build step, no bundler, no CDN — `three.js` is vendored under `lib/`, so the
 whole thing runs from any static file server (and offline).
 
-## Run it
+There are **two ways** to use it:
+
+1. **The standalone player** (this PWA) — paste a video URL / deeplink, or build
+   a library. Great for direct or CORS-friendly videos and local files.
+2. **The userscript** (`orbit.user.js`) — for **browsing a real VR site on your
+   phone, already logged in, and tapping a video to watch it in VR**. Read on.
+
+## Watch on real VR sites — the userscript (Android)
+
+A standalone web player **cannot** log into a third-party site or pull its video
+into WebGL: the browser blocks cross-origin video and auth (CORS). That's why the
+native DeoVR app is *native*. The browser-friendly way to get the same result is
+a **userscript that runs on the site itself** — so it inherits your login and has
+same-origin access to the video, no CORS wall — and overlays the Orbit stereo
+renderer on top of the site's player.
+
+`orbit.user.js` adds a floating **🜨 VR** button to any page with a video. Tap it
+and the current video plays in stereoscopic 180°/360°, with projection/stereo
+toggles, **Cardboard** split-screen, and gyro head tracking.
+
+### Install on Android
+
+1. Install a browser that supports extensions: **Kiwi Browser** or **Firefox for
+   Android**.
+2. Add the **Tampermonkey** extension from its store.
+3. Open the script to install it (Tampermonkey shows an install page):
+   `https://raw.githubusercontent.com/jollydoddger/Life/claude/deovr-stereo-player-g56wta/vrplayer/orbit.user.js`
+4. Go to your VR site, log in as usual, open a video, tap **🜨 VR**, then
+   **Cardboard** → grant motion access → drop the phone in the headset.
+
+> **Format & CORS notes.** Projection/stereo are auto-guessed from the page title
+> (e.g. "180 SBS") and adjustable with the on-screen toggles. The video must be
+> usable as a WebGL texture — sites that offer their own browser VR player serve
+> CORS-enabled video, so those work; a site that serves video cross-origin with
+> no CORS will show a black sphere (a browser limitation, not the script). By
+> default the script runs on every site; narrow the `@match` line to your sites.
+
+## Run the standalone player
 
 It's a client-side web app — it runs entirely in the phone's browser. You just
 need to serve the static files once over HTTPS.
@@ -142,7 +179,8 @@ library.js      persistent saved-scene library (localStorage)
 testpattern.js  equirectangular calibration pattern generator
 serve-https.mjs LAN HTTPS dev server (self-signed) for phone/headset testing
 manifest.webmanifest + sw.js + icons/   PWA: installable, offline app shell
-lib/            vendored three.js r160 + VRButton + StereoEffect + hls.js
+orbit.user.js   userscript: overlay the VR renderer on any site's video
+lib/            vendored three.js r160 (+ UMD build) + VRButton + StereoEffect + hls.js
 test/render-check.mjs    headless render + stereo-routing + feed e2e
 test/feed-parse.test.mjs unit tests for the deeplink parser
 ```
@@ -161,6 +199,9 @@ Two suites:
   the service worker to confirm the app shell precaches for offline use.
 - `npm run test:unit` (`test/feed-parse.test.mjs`) unit-tests the deeplink
   parser — no browser required.
+- `npm run test:userscript` (`test/userscript-check.mjs`) loads a mock VR-site
+  page, injects `orbit.user.js`, and asserts the VR button appears, the format
+  autodetects, and SBS routes the correct frame-half to each eye.
 
 ```bash
 npm install        # playwright (browser optional if one is already present)
