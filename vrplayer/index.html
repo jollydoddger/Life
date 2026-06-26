@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <title>Orbit · VR Video Player</title>
+  <link rel="stylesheet" href="styles.css" />
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "./lib/three.module.js",
+      "three/addons/": "./lib/jsm/"
+    }
+  }
+  </script>
+</head>
+<body>
+  <canvas id="stage"></canvas>
+
+  <!-- hidden media element; textures stream from it -->
+  <video id="media" crossorigin="anonymous" playsinline webkit-playsinline muted loop></video>
+
+  <!-- top-centre title / hint that fades out -->
+  <div id="hint" class="hint">Drag to look · load a video to begin</div>
+
+  <!-- transport + format controls -->
+  <div id="ui" class="panel hidden">
+    <div class="row transport">
+      <button id="playPause" class="icon" title="Play / Pause">▶</button>
+      <input id="seek" class="seek" type="range" min="0" max="1000" value="0" step="1" />
+      <span id="time" class="time">0:00 / 0:00</span>
+      <button id="mute" class="icon" title="Mute">🔇</button>
+    </div>
+    <div class="row formats">
+      <div class="seg" data-group="projection">
+        <button data-value="360" class="active">360°</button>
+        <button data-value="180">180°</button>
+      </div>
+      <div class="seg" data-group="layout">
+        <button data-value="mono" class="active">Mono</button>
+        <button data-value="sbs">SBS</button>
+        <button data-value="ou">Over/Under</button>
+      </div>
+      <button id="gyro" class="pill" title="Use phone motion to look around">Gyro</button>
+      <button id="cardboard" class="pill" title="Split-screen for a Cardboard headset">Cardboard</button>
+      <span id="vrslot"></span>
+    </div>
+  </div>
+
+  <!-- loader -->
+  <div id="loader" class="loader">
+    <div class="loader-card">
+      <h1>Orbit</h1>
+      <p>Stereoscopic 180° / 360° video player</p>
+      <input id="url" type="text" placeholder="Paste a video URL (mp4 / m3u8 / webm)…" />
+      <div class="loader-actions">
+        <button id="loadUrl" class="primary">Load URL</button>
+        <label class="filebtn">Open file<input id="file" type="file" accept="video/*" hidden /></label>
+      </div>
+      <button id="demo" class="ghost">Load test pattern</button>
+    </div>
+  </div>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>

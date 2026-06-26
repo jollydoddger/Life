@@ -1,0 +1,119 @@
+:root {
+  --bg: #0a0b0f;
+  --fg: #eef1f7;
+  --muted: #8b93a7;
+  --accent: #6c8cff;
+  --glass: rgba(18, 20, 28, 0.66);
+  --line: rgba(255, 255, 255, 0.08);
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  background: var(--bg);
+  color: var(--fg);
+  font: 14px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+#stage { position: fixed; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; }
+#media { display: none; }
+
+.hidden { display: none !important; }
+
+/* fading top hint */
+.hint {
+  position: fixed; top: 18px; left: 50%; transform: translateX(-50%);
+  color: var(--muted); font-size: 13px; letter-spacing: .02em;
+  pointer-events: none; transition: opacity .6s ease; z-index: 5;
+}
+.hint.gone { opacity: 0; }
+
+/* control panel */
+.panel {
+  position: fixed; left: 50%; bottom: 22px; transform: translateX(-50%);
+  width: min(760px, calc(100vw - 28px));
+  background: var(--glass);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  backdrop-filter: blur(18px) saturate(160%);
+  -webkit-backdrop-filter: blur(18px) saturate(160%);
+  padding: 12px 14px;
+  box-shadow: 0 18px 50px rgba(0, 0, 0, .5);
+  z-index: 10;
+}
+.row { display: flex; align-items: center; gap: 10px; }
+.row + .row { margin-top: 12px; }
+.transport .seek { flex: 1; }
+.formats { flex-wrap: wrap; }
+
+button { font: inherit; color: var(--fg); cursor: pointer; }
+
+.icon {
+  width: 38px; height: 38px; border-radius: 10px;
+  border: 1px solid var(--line); background: rgba(255,255,255,.04);
+  font-size: 15px; line-height: 1; flex: 0 0 auto;
+}
+.icon:hover { background: rgba(255,255,255,.1); }
+
+.time { color: var(--muted); font-variant-numeric: tabular-nums; font-size: 12px; min-width: 92px; text-align: right; }
+
+/* segmented controls */
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+.seg button { background: transparent; border: 0; padding: 8px 12px; color: var(--muted); }
+.seg button.active { background: var(--accent); color: #fff; }
+.seg button:not(.active):hover { background: rgba(255,255,255,.06); color: var(--fg); }
+
+.pill {
+  border: 1px solid var(--line); background: rgba(255,255,255,.04);
+  border-radius: 10px; padding: 8px 12px; color: var(--fg);
+}
+.pill.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+.pill:hover { background: rgba(255,255,255,.1); }
+
+/* three.js VRButton lives here; tame its inline styles a touch */
+#vrslot button { position: static !important; border-radius: 10px !important; }
+
+/* range styling */
+input[type="range"] {
+  -webkit-appearance: none; appearance: none; height: 4px;
+  background: rgba(255,255,255,.16); border-radius: 4px; outline: none;
+}
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none; width: 14px; height: 14px; border-radius: 50%;
+  background: var(--accent); cursor: pointer; box-shadow: 0 0 0 3px rgba(108,140,255,.25);
+}
+input[type="range"]::-moz-range-thumb {
+  width: 14px; height: 14px; border: 0; border-radius: 50%; background: var(--accent); cursor: pointer;
+}
+
+/* loader overlay */
+.loader {
+  position: fixed; inset: 0; z-index: 20;
+  display: grid; place-items: center;
+  background: radial-gradient(120% 120% at 50% 0%, #161a26 0%, #0a0b0f 60%);
+}
+.loader-card {
+  width: min(440px, calc(100vw - 36px));
+  background: var(--glass); border: 1px solid var(--line);
+  border-radius: 18px; padding: 26px; text-align: center;
+  backdrop-filter: blur(16px);
+}
+.loader-card h1 { margin: 0 0 4px; font-size: 30px; letter-spacing: .04em; }
+.loader-card p { margin: 0 0 18px; color: var(--muted); }
+.loader-card input[type="text"] {
+  width: 100%; padding: 11px 13px; border-radius: 10px;
+  border: 1px solid var(--line); background: rgba(0,0,0,.3); color: var(--fg);
+  outline: none; margin-bottom: 12px;
+}
+.loader-card input[type="text"]:focus { border-color: var(--accent); }
+.loader-actions { display: flex; gap: 10px; }
+.primary, .filebtn, .ghost { border-radius: 10px; padding: 11px 14px; border: 1px solid var(--line); }
+.primary { flex: 1; background: var(--accent); border-color: var(--accent); color: #fff; }
+.filebtn { background: rgba(255,255,255,.05); display: inline-flex; align-items: center; }
+.ghost { margin-top: 12px; width: 100%; background: transparent; color: var(--muted); }
+.ghost:hover { color: var(--fg); }

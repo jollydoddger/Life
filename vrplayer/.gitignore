@@ -1,0 +1,8 @@
+node_modules/
+_smoke_*.mp4
+test/__shots__/
+
+# The repo-root .gitignore ignores "lib/" (Python venv convention); the
+# vendored three.js below is intentional, so re-include it here.
+!lib/
+!lib/**
