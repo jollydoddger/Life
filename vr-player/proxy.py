@@ -114,6 +114,62 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, *_): pass   # silent
 
 
+# Script injected into every HTML page to:
+#  1. Route JS navigation back through the proxy
+#  2. Mask iframe-detection checks
+#  3. Auto-click age-gate "I am over 18" buttons
+INJECT = f"""<script>(function(){{
+var P='{PROXY}/';
+/* ── route location changes through proxy ─────────── */
+function proxyUrl(u){{
+  if(!u)return u;
+  u=String(u);
+  if(u.startsWith('http://')||u.startsWith('https://'))return P+u;
+  return u;
+}}
+try{{
+  var _loc=Object.getOwnPropertyDescriptor(window,'location');
+  ['assign','replace'].forEach(function(m){{
+    var orig=location[m].bind(location);
+    location[m]=function(u){{orig(proxyUrl(u));}};
+  }});
+  var _hrefDesc=Object.getOwnPropertyDescriptor(Location.prototype,'href');
+  if(_hrefDesc&&_hrefDesc.set){{
+    Object.defineProperty(Location.prototype,'href',{{
+      get:_hrefDesc.get,
+      set:function(u){{_hrefDesc.set.call(this,proxyUrl(u));}}
+    }});
+  }}
+}}catch(e){{}}
+try{{
+  ['pushState','replaceState'].forEach(function(m){{
+    var orig=history[m].bind(history);
+    history[m]=function(s,t,u){{orig(s,t,u&&proxyUrl(u)||u);}};
+  }});
+}}catch(e){{}}
+try{{
+  var origOpen=window.open;
+  window.open=function(u,n,f){{return origOpen(proxyUrl(u),n,f);}};
+}}catch(e){{}}
+/* ── mask iframe detection ────────────────────────── */
+try{{Object.defineProperty(window,'frameElement',{{get:function(){{return null;}}}});}}catch(e){{}}
+try{{Object.defineProperty(window,'parent',{{get:function(){{return window;}}}});}}catch(e){{}}
+try{{Object.defineProperty(window,'top',{{get:function(){{return window;}}}});}}catch(e){{}}
+/* ── auto-click age gates ─────────────────────────── */
+function clickAgeGate(){{
+  var els=[].slice.call(document.querySelectorAll('button,[role=button],a.btn,.btn,input[type=button],input[type=submit]'));
+  for(var i=0;i<els.length;i++){{
+    var t=(els[i].textContent||els[i].value||'').toLowerCase();
+    if(/over.?18|i am|enter site|yes.*adult|confirm age|agree/.test(t)){{els[i].click();return;}}
+  }}
+}}
+document.addEventListener('DOMContentLoaded',function(){{
+  setTimeout(clickAgeGate,600);setTimeout(clickAgeGate,2000);
+}});
+setTimeout(clickAgeGate,1200);
+}})();</script>"""
+
+
 def to_abs(url, base):
     url = url.strip()
     if not url or url.startswith(('data:', 'javascript:', 'mailto:', '#', 'blob:')):
@@ -137,9 +193,15 @@ def rewrite(html, page_url):
         r'(href|src|action|data-src|data-href)\s*=\s*(["\'])([^"\']*)\2',
         fix, html, flags=re.IGNORECASE)
 
-    # Inject base so any remaining relative URLs resolve correctly
-    tag = f'<base href="{PROXY}/{base.scheme}://{base.netloc}/">'
-    html = re.sub(r'(<head[^>]*>)', r'\1' + tag, html, count=1, flags=re.IGNORECASE)
+    # Inject base tag + navigation intercept script right after <head>
+    head_inject = (f'<base href="{PROXY}/{base.scheme}://{base.netloc}/">'
+                   + INJECT)
+    html = re.sub(r'(<head[^>]*>)', r'\1' + head_inject, html,
+                  count=1, flags=re.IGNORECASE)
+
+    # Fallback: no <head> tag — prepend to body
+    if '<head' not in html.lower():
+        html = head_inject + html
 
     return html
 
