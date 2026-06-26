@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Orbit VR — watch any video in stereoscopic VR
 // @namespace    https://github.com/jollydoddger/Life
-// @version      0.3.5
+// @version      0.4.0
 // @description  Adds a "VR" button to video pages. Plays the page's own video — or, on sites that hide it (e.g. SLR), fetches the scene's real stream via its deeplink using your logged-in session — in stereoscopic 180/360/fisheye with Cardboard + head tracking.
 // @author       Orbit
 // @match        *://*/*
@@ -24,7 +24,7 @@
   if (window.__orbitVR) return;          // guard against double-injection
   window.__orbitVR = true;
 
-  const VERSION = '0.3.5';
+  const VERSION = '0.4.0';
   // Tampermonkey's privileged request (bypasses CORS, carries cookies). Supports
   // both the classic (GM_xmlhttpRequest) and GM4 (GM.xmlHttpRequest) names.
   const gmXHR = (typeof GM_xmlhttpRequest === 'function') ? GM_xmlhttpRequest
@@ -514,16 +514,66 @@
         yawOffset = Math.atan2(f.z, f.x); // rotate current heading onto +X (content centre)
       } else { lon = 0; lat = 0; }
     }
+    // Lens (barrel) distortion correction for a real Cardboard-style headset:
+    // each eye is rendered to a target, then drawn through a pre-warp shader so
+    // the lens's pincushion distortion cancels to a straight, sharp image.
+    let lensOn = false;
+    const lens = { k1: 0.22, k2: 0.18, zoom: 1.0, ipd: 0.0 };
+    let post = null;
+    const FRAG = [
+      'varying vec2 vUv;',
+      'uniform sampler2D tDiffuse; uniform float k1, k2, zoom; uniform vec2 center;',
+      'void main(){',
+      '  vec2 p = (vUv - center) * 2.0;',
+      '  float r2 = dot(p, p);',
+      '  float f = 1.0 + k1 * r2 + k2 * r2 * r2;',
+      '  vec2 uv = center + (p * f) * 0.5 / zoom;',
+      '  if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) { gl_FragColor = vec4(0.0,0.0,0.0,1.0); return; }',
+      '  gl_FragColor = texture2D(tDiffuse, uv);',
+      '}',
+    ].join('\n');
+    const VERT = 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }';
+    function ensurePost() {
+      const dpr = renderer.getPixelRatio();
+      const rw = Math.max(2, Math.floor(window.innerWidth / 2 * dpr));
+      const rh = Math.max(2, Math.floor(window.innerHeight * dpr));
+      if (!post) {
+        const mkMat = (cx) => new THREE.ShaderMaterial({
+          uniforms: { tDiffuse: { value: null }, k1: { value: lens.k1 }, k2: { value: lens.k2 }, zoom: { value: lens.zoom }, center: { value: new THREE.Vector2(cx, 0.5) } },
+          vertexShader: VERT, fragmentShader: FRAG, depthTest: false, depthWrite: false,
+        });
+        const rtL = new THREE.WebGLRenderTarget(rw, rh), rtR = new THREE.WebGLRenderTarget(rw, rh);
+        rtL.texture.minFilter = rtR.texture.minFilter = THREE.LinearFilter;
+        const matL = mkMat(0.5), matR = mkMat(0.5);
+        matL.uniforms.tDiffuse.value = rtL.texture; matR.uniforms.tDiffuse.value = rtR.texture;
+        const sc = new THREE.Scene();
+        const qL = new THREE.Mesh(new THREE.PlaneGeometry(1, 2), matL); qL.position.x = -0.5; qL.frustumCulled = false;
+        const qR = new THREE.Mesh(new THREE.PlaneGeometry(1, 2), matR); qR.position.x = 0.5; qR.frustumCulled = false;
+        sc.add(qL, qR);
+        post = { rtL, rtR, matL, matR, scene: sc, cam: new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1) };
+      } else { post.rtL.setSize(rw, rh); post.rtR.setSize(rw, rh); }
+    }
     function renderStereo() {
       camera.updateMatrixWorld();
       stereo.update(camera);
-      const s = renderer.getSize(new THREE.Vector2()), w = s.x, h = s.y;
-      renderer.setScissorTest(true);
-      renderer.setScissor(0, 0, w / 2, h); renderer.setViewport(0, 0, w / 2, h);
-      renderer.render(scene, stereo.cameraL);
-      renderer.setScissor(w / 2, 0, w / 2, h); renderer.setViewport(w / 2, 0, w / 2, h);
-      renderer.render(scene, stereo.cameraR);
-      renderer.setScissorTest(false);
+      if (lensOn) {
+        ensurePost();
+        renderer.setRenderTarget(post.rtL); renderer.render(scene, stereo.cameraL);
+        renderer.setRenderTarget(post.rtR); renderer.render(scene, stereo.cameraR);
+        renderer.setRenderTarget(null);
+        for (const m of [post.matL, post.matR]) { m.uniforms.k1.value = lens.k1; m.uniforms.k2.value = lens.k2; m.uniforms.zoom.value = lens.zoom; }
+        post.matL.uniforms.center.value.set(0.5 + lens.ipd, 0.5);
+        post.matR.uniforms.center.value.set(0.5 - lens.ipd, 0.5);
+        renderer.render(post.scene, post.cam);
+      } else {
+        const s = renderer.getSize(new THREE.Vector2()), w = s.x, h = s.y;
+        renderer.setScissorTest(true);
+        renderer.setScissor(0, 0, w / 2, h); renderer.setViewport(0, 0, w / 2, h);
+        renderer.render(scene, stereo.cameraL);
+        renderer.setScissor(w / 2, 0, w / 2, h); renderer.setViewport(w / 2, 0, w / 2, h);
+        renderer.render(scene, stereo.cameraR);
+        renderer.setScissorTest(false);
+      }
     }
     let renderErr = false, fps = 0, _fc = 0, _ft = performance.now();
     renderer.setAnimationLoop(() => {
@@ -542,6 +592,7 @@
       camera.aspect = (mode === 'cardboard' ? (w / 2) : w) / h;
       camera.updateProjectionMatrix();
       renderer.setSize(w, h);
+      if (post) ensurePost();
     }
     window.addEventListener('resize', resize); resize();
 
@@ -556,10 +607,15 @@
       get renderScale() { return renderScale; },
       setRenderScale(s) { renderScale = s; applyScale(); resize(); },
       get fps() { return fps; },
+      get lens() { return Object.assign({ on: lensOn }, lens); },
+      setLens(p) { Object.assign(lens, p); },
+      setLensOn(b) { lensOn = b; resize(); },
       camera, scene, renderer,
       dispose() {
         window.removeEventListener('resize', resize);
-        renderer.setAnimationLoop(null); renderer.dispose();
+        renderer.setAnimationLoop(null);
+        if (post) { post.rtL.dispose(); post.rtR.dispose(); }
+        renderer.dispose();
       },
     };
   }
@@ -627,6 +683,29 @@
       });
       return sel;
     }
+    // Lens-correction settings panel (for a real Cardboard/printed headset):
+    // sliders for distortion, eye offset (IPD), and zoom — tune to your lenses.
+    const lensPanel = document.createElement('div');
+    Object.assign(lensPanel.style, {
+      position: 'fixed', right: '14px', bottom: '70px', zIndex: 2147483647, display: 'none',
+      padding: '12px', borderRadius: '12px', background: 'rgba(16,18,26,.92)', color: '#cdd6ec',
+      font: '12px system-ui, sans-serif', minWidth: '210px',
+    });
+    const slider = (label, min, max, step, get, set) => {
+      const wrap = document.createElement('label');
+      Object.assign(wrap.style, { display: 'block', margin: '8px 0' });
+      const name = document.createElement('div'); name.textContent = label;
+      const r = document.createElement('input');
+      r.type = 'range'; r.min = min; r.max = max; r.step = step; r.value = get(); r.style.width = '100%';
+      r.addEventListener('input', () => { set(parseFloat(r.value)); name.textContent = label + ' · ' + (+r.value).toFixed(2); });
+      wrap.appendChild(name); wrap.appendChild(r); return wrap;
+    };
+    lensPanel.appendChild(slider('Distortion', 0, 0.5, 0.01, () => engine.lens.k1,
+      (v) => engine.setLens({ k1: v, k2: v * 0.8 })));
+    lensPanel.appendChild(slider('Eye offset (IPD)', -0.12, 0.12, 0.005, () => engine.lens.ipd, (v) => engine.setLens({ ipd: v })));
+    lensPanel.appendChild(slider('Zoom', 0.8, 1.4, 0.02, () => engine.lens.zoom, (v) => engine.setLens({ zoom: v })));
+    document.body.appendChild(lensPanel);
+
     let fpsOn = false;
     function refresh() {
       bar.innerHTML = '';
@@ -636,10 +715,14 @@
       bar.appendChild(mk('⟲ Recenter', () => engine.recenter(), false));
       const q = engine.renderScale, qLabel = q <= 1 ? '⚡ Perf' : q < 2 ? '◎ Balanced' : '✦ Sharp';
       bar.appendChild(mk(qLabel, () => { engine.setRenderScale(q <= 1 ? 1.5 : q < 2 ? 2 : 1); refresh(); }, false));
+      bar.appendChild(mk(engine.lens.on ? '⊙ Lens' : '○ Lens', () => {
+        const on = !engine.lens.on;
+        engine.setLensOn(on); lensPanel.style.display = on ? 'block' : 'none'; refresh();
+      }, engine.lens.on));
       if (fpsBadge) bar.appendChild(mk('fps', () => { fpsOn = !fpsOn; fpsBadge.style.display = fpsOn ? 'block' : 'none'; refresh(); }, fpsOn));
       bar.appendChild(mk(engine.mode === 'cardboard' ? '◑ Cardboard' : '◐ Cardboard', cardboard, engine.mode === 'cardboard'));
       bar.appendChild(mk(orientationOn ? '⦿ Gyro' : '○ Gyro', gyro, orientationOn));
-      bar.appendChild(mk('✕ Exit', () => { stopGyro(); onClose(); }, false));
+      bar.appendChild(mk('✕ Exit', () => { stopGyro(); lensPanel.remove(); onClose(); }, false));
     }
 
     // drag to look (when gyro off)
