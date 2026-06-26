@@ -1,0 +1,644 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="theme-color" content="#000000">
+  <link rel="manifest" href="manifest.json">
+  <title>VR Player</title>
+  <style>
+    :root {
+      --accent: #00d4ff;
+      --bg: #000;
+      --surface: #111;
+      --surface2: #1a1a1a;
+      --border: #2a2a2a;
+      --text: #fff;
+      --text-dim: #888;
+      --radius: 12px;
+      --safe-top: env(safe-area-inset-top, 0px);
+      --safe-bottom: env(safe-area-inset-bottom, 0px);
+    }
+
+    * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      overflow: hidden;
+      height: 100dvh;
+      width: 100dvw;
+    }
+
+    /* ── Views ─────────────────────────────────────────────── */
+    .view {
+      position: fixed;
+      inset: 0;
+      display: none;
+      flex-direction: column;
+    }
+    .view.active { display: flex; }
+
+    /* ── Library ────────────────────────────────────────────── */
+    #view-library {
+      background: var(--bg);
+      overflow-y: auto;
+    }
+
+    .lib-header {
+      position: sticky;
+      top: 0;
+      z-index: 10;
+      padding: calc(16px + var(--safe-top)) 20px 16px;
+      background: linear-gradient(to bottom, rgba(0,0,0,0.95) 70%, transparent);
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .lib-header h1 {
+      flex: 1;
+      font-size: 22px;
+      font-weight: 700;
+      letter-spacing: -0.3px;
+    }
+
+    .btn-icon {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      color: var(--text);
+      width: 40px;
+      height: 40px;
+      border-radius: 50%;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 20px;
+      transition: background 0.15s;
+      flex-shrink: 0;
+    }
+    .btn-icon:active { background: #333; }
+
+    #video-grid {
+      padding: 12px 16px;
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+      gap: 12px;
+    }
+
+    .video-card {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+      cursor: pointer;
+      position: relative;
+      transition: transform 0.15s, border-color 0.15s;
+      aspect-ratio: 16/10;
+      display: flex;
+      flex-direction: column;
+    }
+    .video-card:active { transform: scale(0.97); border-color: var(--accent); }
+
+    .card-thumb {
+      flex: 1;
+      background: #0d0d0d;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 36px;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .card-thumb img {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      opacity: 0.8;
+    }
+
+    .card-play {
+      position: absolute;
+      inset: 0;
+      background: rgba(0,0,0,0.3);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .card-play-icon {
+      width: 40px;
+      height: 40px;
+      background: rgba(0,0,0,0.7);
+      border: 2px solid rgba(255,255,255,0.5);
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 16px;
+    }
+
+    .card-info {
+      padding: 8px 10px;
+      flex-shrink: 0;
+    }
+
+    .card-title {
+      font-size: 13px;
+      font-weight: 500;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      color: var(--text);
+    }
+
+    .card-meta {
+      font-size: 11px;
+      color: var(--text-dim);
+      margin-top: 2px;
+    }
+
+    .card-delete {
+      position: absolute;
+      top: 6px;
+      right: 6px;
+      background: rgba(0,0,0,0.7);
+      border: none;
+      color: rgba(255,255,255,0.6);
+      width: 26px;
+      height: 26px;
+      border-radius: 50%;
+      font-size: 13px;
+      cursor: pointer;
+      display: none;
+      align-items: center;
+      justify-content: center;
+    }
+    .video-card:hover .card-delete,
+    .video-card:focus-within .card-delete { display: flex; }
+
+    /* Empty state */
+    #empty-state {
+      display: none;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      flex: 1;
+      padding: 48px 32px;
+      text-align: center;
+      min-height: 60dvh;
+    }
+    #empty-state.show { display: flex; }
+
+    .empty-icon { font-size: 72px; margin-bottom: 24px; line-height: 1; }
+    .empty-title { font-size: 22px; font-weight: 600; margin-bottom: 12px; }
+    .empty-desc { color: var(--text-dim); font-size: 15px; line-height: 1.6; max-width: 280px; }
+
+    .btn-primary {
+      margin-top: 28px;
+      background: var(--accent);
+      color: #000;
+      border: none;
+      padding: 14px 28px;
+      border-radius: 100px;
+      font-size: 16px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: opacity 0.15s;
+    }
+    .btn-primary:active { opacity: 0.8; }
+
+    /* ── Add Modal ──────────────────────────────────────────── */
+    #add-modal {
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.85);
+      z-index: 100;
+      display: none;
+      align-items: flex-end;
+      justify-content: center;
+      backdrop-filter: blur(6px);
+    }
+    #add-modal.open { display: flex; }
+
+    .modal-sheet {
+      background: var(--surface);
+      border-radius: 20px 20px 0 0;
+      padding: 20px 24px calc(24px + var(--safe-bottom));
+      width: 100%;
+      max-width: 640px;
+      border-top: 1px solid var(--border);
+      animation: slideUp 0.25s ease-out;
+    }
+
+    @keyframes slideUp {
+      from { transform: translateY(100%); }
+      to { transform: translateY(0); }
+    }
+
+    .modal-handle {
+      width: 36px;
+      height: 4px;
+      background: #444;
+      border-radius: 2px;
+      margin: 0 auto 20px;
+    }
+
+    .modal-title { font-size: 18px; font-weight: 600; margin-bottom: 20px; }
+
+    .field-group { margin-bottom: 16px; }
+
+    .field-label {
+      font-size: 12px;
+      color: var(--text-dim);
+      font-weight: 500;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 8px;
+    }
+
+    .field-input {
+      width: 100%;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 13px 16px;
+      border-radius: var(--radius);
+      font-size: 15px;
+      outline: none;
+      transition: border-color 0.15s;
+    }
+    .field-input:focus { border-color: var(--accent); }
+    .field-input::placeholder { color: #555; }
+
+    .modal-actions {
+      display: flex;
+      gap: 12px;
+      margin-top: 20px;
+    }
+
+    .btn-ghost {
+      flex: 1;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 13px;
+      border-radius: var(--radius);
+      font-size: 15px;
+      cursor: pointer;
+    }
+    .btn-ghost:active { background: #333; }
+
+    .modal-actions .btn-primary { flex: 2; margin-top: 0; padding: 13px; border-radius: var(--radius); }
+
+    /* ── Player View ────────────────────────────────────────── */
+    #view-player {
+      background: #000;
+      position: relative;
+      overflow: hidden;
+    }
+
+    #player-canvas-wrap {
+      position: absolute;
+      inset: 0;
+    }
+
+    #player-canvas-wrap canvas {
+      display: block;
+      width: 100% !important;
+      height: 100% !important;
+    }
+
+    /* VR divider line */
+    #vr-line {
+      display: none;
+      position: absolute;
+      top: 0;
+      left: 50%;
+      width: 2px;
+      height: 100%;
+      background: #000;
+      transform: translateX(-50%);
+      z-index: 5;
+    }
+
+    /* Buffering spinner */
+    #buffering {
+      display: none;
+      position: absolute;
+      inset: 0;
+      align-items: center;
+      justify-content: center;
+      pointer-events: none;
+      z-index: 8;
+    }
+    #buffering.show { display: flex; }
+
+    .spinner {
+      width: 44px;
+      height: 44px;
+      border: 3px solid rgba(255,255,255,0.15);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: spin 0.75s linear infinite;
+    }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* Player controls overlay */
+    #player-controls {
+      position: absolute;
+      inset: 0;
+      z-index: 10;
+      pointer-events: none;
+      opacity: 0;
+      transition: opacity 0.25s;
+    }
+    #player-controls.show {
+      opacity: 1;
+      pointer-events: all;
+    }
+
+    /* Top bar */
+    #ctrl-top {
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      padding: calc(14px + var(--safe-top)) 16px 32px;
+      background: linear-gradient(to bottom, rgba(0,0,0,0.75), transparent);
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    #ctrl-title {
+      flex: 1;
+      font-size: 15px;
+      font-weight: 600;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .p-btn {
+      background: rgba(0,0,0,0.5);
+      border: 1.5px solid rgba(255,255,255,0.25);
+      color: var(--text);
+      cursor: pointer;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: background 0.15s, border-color 0.15s;
+      flex-shrink: 0;
+    }
+    .p-btn:active { background: rgba(255,255,255,0.15); }
+    .p-btn.active { border-color: var(--accent); color: var(--accent); }
+    .p-btn-sm { width: 36px; height: 36px; font-size: 16px; }
+    .p-btn-md { width: 52px; height: 52px; font-size: 22px; }
+    .p-btn-lg { width: 64px; height: 64px; font-size: 26px; }
+
+    /* Center play area */
+    #ctrl-center {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      display: flex;
+      align-items: center;
+      gap: 28px;
+    }
+
+    /* Bottom bar */
+    #ctrl-bottom {
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      padding: 28px 16px calc(16px + var(--safe-bottom));
+      background: linear-gradient(to top, rgba(0,0,0,0.8), transparent);
+    }
+
+    /* Progress */
+    #progress-wrap {
+      width: 100%;
+      padding: 8px 0;
+      cursor: pointer;
+      position: relative;
+    }
+
+    #progress-track {
+      height: 3px;
+      background: rgba(255,255,255,0.2);
+      border-radius: 2px;
+      overflow: visible;
+      position: relative;
+    }
+
+    #progress-fill {
+      height: 100%;
+      background: var(--accent);
+      border-radius: 2px;
+      width: 0%;
+      transition: width 0.1s linear;
+      pointer-events: none;
+    }
+
+    #progress-dot {
+      position: absolute;
+      top: 50%;
+      left: 0%;
+      width: 13px;
+      height: 13px;
+      background: #fff;
+      border-radius: 50%;
+      transform: translate(-50%, -50%);
+      opacity: 0;
+      transition: opacity 0.2s;
+      pointer-events: none;
+    }
+    #progress-wrap:hover #progress-dot { opacity: 1; }
+
+    /* Bottom row */
+    #ctrl-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-top: 4px;
+    }
+
+    .ctrl-spacer { flex: 1; }
+
+    #time-label {
+      font-size: 12px;
+      color: rgba(255,255,255,0.75);
+      font-variant-numeric: tabular-nums;
+      white-space: nowrap;
+    }
+
+    #vol-slider {
+      width: 72px;
+      accent-color: var(--accent);
+      cursor: pointer;
+    }
+
+    /* Gyro hint toast */
+    #gyro-toast {
+      position: absolute;
+      bottom: 100px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(0,0,0,0.85);
+      color: var(--text);
+      padding: 10px 18px;
+      border-radius: 100px;
+      font-size: 13px;
+      white-space: nowrap;
+      z-index: 20;
+      opacity: 0;
+      transition: opacity 0.3s;
+      pointer-events: none;
+      border: 1px solid var(--border);
+    }
+    #gyro-toast.show { opacity: 1; }
+
+    /* Error state */
+    #player-error {
+      display: none;
+      position: absolute;
+      inset: 0;
+      align-items: center;
+      justify-content: center;
+      z-index: 15;
+      background: #000;
+      flex-direction: column;
+      text-align: center;
+      padding: 32px;
+      gap: 16px;
+    }
+    #player-error.show { display: flex; }
+    #player-error .err-icon { font-size: 56px; }
+    #player-error .err-title { font-size: 20px; font-weight: 600; }
+    #player-error .err-msg { font-size: 14px; color: var(--text-dim); max-width: 300px; line-height: 1.5; }
+
+  </style>
+</head>
+<body>
+
+<!-- ── Library View ───────────────────────────────────────── -->
+<div id="view-library" class="view active">
+  <div class="lib-header">
+    <h1>🥽 VR Player</h1>
+    <button class="btn-icon" id="add-btn" title="Add video">+</button>
+  </div>
+
+  <div id="video-grid"></div>
+
+  <div id="empty-state">
+    <div class="empty-icon">🥽</div>
+    <div class="empty-title">Your VR library is empty</div>
+    <div class="empty-desc">Add 360° video URLs to start watching in immersive VR — works great with Google Cardboard on mobile.</div>
+    <button class="btn-primary" id="empty-add-btn">+ Add Your First Video</button>
+  </div>
+</div>
+
+<!-- ── Player View ────────────────────────────────────────── -->
+<div id="view-player" class="view">
+  <div id="player-canvas-wrap"></div>
+  <div id="vr-line"></div>
+
+  <div id="buffering" class="show">
+    <div class="spinner"></div>
+  </div>
+
+  <div id="player-error">
+    <div class="err-icon">⚠️</div>
+    <div class="err-title">Can't play this video</div>
+    <div class="err-msg" id="player-error-msg">The video couldn't be loaded. Make sure the URL points directly to an MP4 or WebM file and CORS is allowed.</div>
+    <button class="btn-primary" id="err-back-btn" style="margin-top:0">← Go Back</button>
+  </div>
+
+  <div id="player-controls">
+    <!-- Top -->
+    <div id="ctrl-top">
+      <button class="p-btn p-btn-sm" id="back-btn">←</button>
+      <span id="ctrl-title">Video</span>
+      <button class="p-btn p-btn-sm" id="gyro-btn" title="Toggle gyroscope">◉</button>
+    </div>
+
+    <!-- Center -->
+    <div id="ctrl-center">
+      <button class="p-btn p-btn-md" id="seek-back-btn" title="−10s">⏪</button>
+      <button class="p-btn p-btn-lg" id="play-pause-btn">▶</button>
+      <button class="p-btn p-btn-md" id="seek-fwd-btn" title="+10s">⏩</button>
+    </div>
+
+    <!-- Bottom -->
+    <div id="ctrl-bottom">
+      <div id="progress-wrap">
+        <div id="progress-track">
+          <div id="progress-fill"></div>
+          <div id="progress-dot"></div>
+        </div>
+      </div>
+      <div id="ctrl-row">
+        <button class="p-btn p-btn-sm" id="pp-small-btn">▶</button>
+        <span id="time-label">0:00 / 0:00</span>
+        <input type="range" id="vol-slider" min="0" max="1" step="0.05" value="1">
+        <div class="ctrl-spacer"></div>
+        <button class="p-btn p-btn-sm" id="vr-btn" title="VR / Cardboard mode">👓</button>
+        <button class="p-btn p-btn-sm" id="fs-btn" title="Fullscreen">⤢</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="gyro-toast">Move your phone to look around</div>
+</div>
+
+<!-- ── Add Video Modal ────────────────────────────────────── -->
+<div id="add-modal">
+  <div class="modal-sheet" id="modal-sheet">
+    <div class="modal-handle"></div>
+    <div class="modal-title">Add Video</div>
+
+    <div class="field-group">
+      <div class="field-label">Video URL</div>
+      <input class="field-input" type="url" id="input-url"
+        placeholder="https://example.com/video.mp4" inputmode="url" autocomplete="off" autocorrect="off">
+    </div>
+
+    <div class="field-group">
+      <div class="field-label">Title (optional)</div>
+      <input class="field-input" type="text" id="input-title" placeholder="My 360° Video" autocorrect="off">
+    </div>
+
+    <div class="field-group">
+      <div class="field-label">Thumbnail URL (optional)</div>
+      <input class="field-input" type="url" id="input-thumb" placeholder="https://example.com/thumb.jpg" autocorrect="off">
+    </div>
+
+    <div class="modal-actions">
+      <button class="btn-ghost" id="modal-cancel">Cancel</button>
+      <button class="btn-primary" id="modal-add">Add & Play</button>
+    </div>
+  </div>
+</div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js"
+  }
+}
+</script>
+<script type="module" src="app.js"></script>
+</body>
+</html>
