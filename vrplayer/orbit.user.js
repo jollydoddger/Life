@@ -92,10 +92,12 @@
   launch.title = 'Watch this video in VR';
   launch.addEventListener('click', start);
 
-  // show the button only once there's a video worth playing
+  // Show the button as soon as the script is active (proof it's installed),
+  // whether or not a video is detected yet. Tapping with no video explains what
+  // to do; tapping with a video starts VR.
   const watch = setInterval(() => {
-    if (pickVideo() && !document.body.contains(launch)) document.body.appendChild(launch);
-  }, 1500);
+    if (document.body && !document.body.contains(launch)) document.body.appendChild(launch);
+  }, 1200);
 
   // Cross-origin videos can't be uploaded to WebGL (the canvas would be
   // "tainted"). Detect that up front so we can explain a black screen instead of
