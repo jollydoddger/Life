@@ -5,7 +5,7 @@
 // cache-first with a runtime cache; never intercept cross-origin requests (video
 // streams, deeplink feeds) so range requests and CORS behave normally.
 
-const CACHE = 'orbit-v2';
+const CACHE = 'orbit-v3';
 
 const ASSETS = [
   './index.html',
@@ -23,7 +23,7 @@ const ASSETS = [
   './lib/three.module.js',
   './lib/jsm/webxr/VRButton.js',
   './lib/jsm/effects/StereoEffect.js',
-  './lib/hls.mjs',
+  './lib/hls.js',
 ];
 
 self.addEventListener('install', (e) => {

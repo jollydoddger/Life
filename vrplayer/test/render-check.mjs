@@ -172,7 +172,7 @@ try {
       const c = await caches.open(n);
       out.app = out.app || !!(await c.match('./app.js'));
       out.three = out.three || !!(await c.match('./lib/three.module.js'));
-      out.hls = out.hls || !!(await c.match('./lib/hls.mjs'));
+      out.hls = out.hls || !!(await c.match('./lib/hls.js'));
     }
     out.manifest = await fetch('manifest.webmanifest').then((r) => r.json()).then((m) => m.short_name).catch(() => null);
     return out;
