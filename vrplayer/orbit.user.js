@@ -1,16 +1,19 @@
 // ==UserScript==
 // @name         Orbit VR — watch any video in stereoscopic VR
 // @namespace    https://github.com/jollydoddger/Life
-// @version      0.3.1
+// @version      0.3.2
 // @description  Adds a "VR" button to video pages. Plays the page's own video — or, on sites that hide it (e.g. SLR), fetches the scene's real stream via its deeplink using your logged-in session — in stereoscopic 180/360/fisheye with Cardboard + head tracking.
 // @author       Orbit
 // @match        *://*/*
 // @run-at       document-idle
-// @grant        none
+// @grant        GM_xmlhttpRequest
+// @connect      sexlikereal.com
+// @connect      *
 // @require      https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js
 // ==/UserScript==
-// Note: hls.js is loaded lazily (only if a scene streams via .m3u8) so a CDN
-// hiccup can never stop the whole script from running.
+// GM_xmlhttpRequest lets us fetch a scene's data and video bytes past CORS using
+// your logged-in cookies; the bytes become an in-memory blob the viewer can
+// render (nothing is written to disk). hls.js is loaded lazily only if needed.
 //
 // Install on Android with Kiwi Browser or Firefox + Tampermonkey. See the
 // project README for the step-by-step. To restrict it to specific sites, edit
@@ -21,7 +24,12 @@
   if (window.__orbitVR) return;          // guard against double-injection
   window.__orbitVR = true;
 
-  const VERSION = '0.3.1';
+  const VERSION = '0.3.2';
+  // Tampermonkey's privileged request (bypasses CORS, carries cookies). Supports
+  // both the classic (GM_xmlhttpRequest) and GM4 (GM.xmlHttpRequest) names.
+  const gmXHR = (typeof GM_xmlhttpRequest === 'function') ? GM_xmlhttpRequest
+    : (typeof GM !== 'undefined' && GM && GM.xmlHttpRequest) ? (o) => GM.xmlHttpRequest(o)
+      : null;
   const THREE = window.THREE;             // loaded via @require (may be missing if that failed)
 
   // Equidistant fisheye dome (SLR/DeoVR mkx200/mkx220/rf52/fisheye). Forward=+X.
@@ -231,15 +239,22 @@
   }
 
   // ---- SLR-style deeplink route: fetch the real stream and play it --------
-  // Find a DeoVR/HereSphere deeplink the page exposes (it points at a JSON we
-  // can fetch with the logged-in session).
+  // Find the scene's DeoVR JSON endpoint.
   function findDeeplinkUrl() {
+    // SexLikeReal: their scene API is keyed by the numeric scene id at the end of
+    // the /scenes/<slug>-<id> URL (endpoint used by xbvr and the DeoVR deeplink).
+    if (/(^|\.)sexlikereal\.com$/.test(location.host)) {
+      const m = location.pathname.match(/\/scenes\/.*-(\d+)(?:[/?#]|$)/);
+      if (m) return `https://api.sexlikereal.com/virtualreality/video/id/${m[1]}`;
+    }
+    // Generic: a DeoVR/HereSphere deeplink the page exposes as a link…
     const sel = 'a[href^="deovr://"],a[href^="heresphere://"],a[href*="/deovr"],a[href$=".json"]';
     for (const a of document.querySelectorAll(sel)) {
       let h = a.getAttribute('href') || '';
       h = h.replace(/^deovr:\/\//i, '').replace(/^heresphere:\/\//i, '');
       if (/^https?:\/\//i.test(h)) return h;
     }
+    // …or one embedded anywhere in the page markup.
     const m = document.documentElement.innerHTML.match(/(?:deovr|heresphere):\/\/(https?:\/\/[^"'\s<>\\]+)/i);
     return m ? m[1] : null;
   }
@@ -279,6 +294,48 @@
     });
   }
 
+  // Privileged GET (bypasses CORS, sends cookies). Falls back to page fetch.
+  function gmGetJSON(url) {
+    return new Promise((resolve, reject) => {
+      if (!gmXHR) { fetch(url, { credentials: 'include' }).then((r) => r.json()).then(resolve, reject); return; }
+      gmXHR({
+        method: 'GET', url, withCredentials: true, responseType: 'json', timeout: 25000,
+        onload: (r) => { try { resolve(r.response || JSON.parse(r.responseText)); } catch (e) { reject(e); } },
+        onerror: () => reject(new Error('network/CORS error')),
+        ontimeout: () => reject(new Error('timeout')),
+      });
+    });
+  }
+  function gmGetBlob(url, onProgress, maxBytes) {
+    return new Promise((resolve, reject) => {
+      if (!gmXHR) { reject(new Error('no privileged fetch')); return; }
+      const h = gmXHR({
+        method: 'GET', url, withCredentials: true, responseType: 'blob', timeout: 0,
+        onprogress: (e) => {
+          if (maxBytes && e.total && e.total > maxBytes) { try { h.abort(); } catch {} reject(new Error('too large (' + Math.round(e.total / 1e6) + ' MB) to cache in memory')); return; }
+          if (onProgress && e.lengthComputable) onProgress(e.loaded, e.total);
+        },
+        onload: (r) => resolve(r.response),
+        onerror: () => reject(new Error('network/CORS error')),
+        ontimeout: () => reject(new Error('timeout')),
+      });
+    });
+  }
+
+  function progressPanel() {
+    const p = document.createElement('div');
+    Object.assign(p.style, {
+      position: 'fixed', inset: '0', zIndex: 2147483647, background: 'rgba(0,0,0,.93)',
+      color: '#cdd6ec', display: 'flex', alignItems: 'center', justifyContent: 'center',
+      textAlign: 'center', font: '15px system-ui, sans-serif', padding: '24px',
+    });
+    const inner = document.createElement('div');
+    p.appendChild(inner); document.body.appendChild(p);
+    return { set: (html) => { inner.innerHTML = html; }, remove: () => p.remove() };
+  }
+
+  const MAX_CACHE_BYTES = 1100 * 1e6; // guard so we don't OOM the tab
+
   async function deeplinkRoute() {
     const dl = findDeeplinkUrl();
     if (!dl) {
@@ -286,36 +343,53 @@
         + diagnostics() + '\n\nThis page may not expose a stream the script can reach.');
       return;
     }
+    const panel = progressPanel();
+    panel.set('Orbit v' + VERSION + '<br><br>Fetching scene data…');
+
     let data;
-    try {
-      data = await fetch(dl, { credentials: 'include' }).then((r) => r.json());
-    } catch (e) {
-      alert('Orbit: found a scene deeplink but couldn\'t read it:\n' + dl + '\n\n' + e);
+    try { data = await gmGetJSON(dl); }
+    catch (e) {
+      panel.remove();
+      alert('Orbit: found the scene endpoint but couldn\'t read it:\n' + dl + '\n\n' + e
+        + '\n\n(A CORS/network error here means SLR\'s API refused the request.)');
       return;
     }
     let scene;
-    try { scene = parseDeoVRMini(data); } catch (e) { alert('Orbit: scene data not understood.\n' + e); return; }
-    if (!scene.sources.length) { alert('Orbit: the scene deeplink has no stream URL.'); return; }
+    try { scene = parseDeoVRMini(data); } catch (e) { panel.remove(); alert('Orbit: scene data not understood.\n' + e); return; }
+    if (!scene.sources.length) { panel.remove(); alert('Orbit: the scene data has no stream URL.'); return; }
 
-    const src = scene.sources[0];
     const v = document.createElement('video');
-    v.playsInline = true; v.crossOrigin = 'anonymous'; v.preload = 'auto'; v.loop = false;
+    v.playsInline = true; v.preload = 'auto'; v.loop = false;
     window.__orbitVideo = v;
-    if (/\.m3u8(\?|$)/i.test(src.url)) {
-      if (await ensureHls() && window.Hls.isSupported()) {
-        const hls = new window.Hls(); hls.loadSource(src.url); hls.attachMedia(v);
-      } else {
-        v.src = src.url; // native HLS (Safari); Android Chrome will likely fail -> message
+
+    const mp4 = scene.sources.filter((s) => !/\.m3u8/i.test(s.url));
+    if (gmXHR && mp4.length) {
+      // Cache the smallest mp4 in memory (renderable blob, no CORS taint, no disk).
+      const cache = mp4.slice().sort((a, b) => (a.height || 1e9) - (b.height || 1e9))[0];
+      try {
+        const blob = await gmGetBlob(cache.url, (loaded, total) => {
+          panel.set('Orbit v' + VERSION + '<br><br>Caching scene (' + (cache.height ? cache.height + 'p' : '') + ')… '
+            + Math.round(loaded / total * 100) + '%<br><small>' + Math.round(loaded / 1e6) + ' / ' + Math.round(total / 1e6) + ' MB</small>'
+            + '<br><br><small>kept in memory only — nothing saved to your phone</small>');
+        }, MAX_CACHE_BYTES);
+        v.src = URL.createObjectURL(blob);
+      } catch (e) {
+        panel.remove();
+        alert('Orbit: reached the scene but couldn\'t cache the video:\n' + e
+          + '\n\nFor full scenes the download → Open file route is more practical.');
+        return;
       }
+    } else if (mp4.length === 0) {
+      // HLS only — stream it (cross-origin, so may not render).
+      const url = scene.sources[0].url;
+      v.crossOrigin = 'anonymous';
+      if (await ensureHls() && window.Hls.isSupported()) { const hls = new window.Hls(); hls.loadSource(url); hls.attachMedia(v); }
+      else v.src = url;
     } else {
-      v.src = src.url;
+      v.src = mp4[0].url; // no privileged fetch (e.g. tests) — direct
     }
-    // If a credentialed/anon cross-origin load errors, retry once without
-    // crossOrigin (it will play, though it may not be renderable).
-    v.addEventListener('error', function onerr() {
-      v.removeEventListener('error', onerr);
-      if (v.crossOrigin) { v.crossOrigin = null; v.src = src.url; v.play().catch(() => {}); }
-    }, { once: true });
+
+    panel.remove();
     v.play().catch(() => {});
     launchViewer(v, scene);
   }
