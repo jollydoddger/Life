@@ -17,7 +17,9 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const MIME = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.mp4': 'video/mp4' };
+const MIME = { '.html': 'text/html', '.js': 'text/javascript', '.mjs': 'text/javascript',
+  '.css': 'text/css', '.mp4': 'video/mp4', '.json': 'application/json',
+  '.m3u8': 'application/vnd.apple.mpegurl', '.ts': 'video/mp2t' };
 
 const server = http.createServer((req, res) => {
   const file = path.join(ROOT, decodeURIComponent(req.url.split('?')[0]));
@@ -102,6 +104,28 @@ try {
   if (!feed.qualityVisible) fail('quality selector should be visible for multi-source scene');
   if (!feed.hint.includes('Beach')) fail(`hint should show scene title (got "${feed.hint}")`);
   if (!process.exitCode) console.log('PASS: deeplink feed configured player + quality list');
+
+  // --- HLS: load a master playlist and confirm hls.js attaches + lists levels ---
+  await page.goto(`${base}/index.html`, { waitUntil: 'networkidle' });
+  await page.fill('#url', '/test/fixtures/hls/master.m3u8');
+  await page.click('#loadUrl');
+  await page.waitForFunction(
+    () => document.querySelector('#quality').options.length >= 4, { timeout: 8000 }).catch(() => {});
+  const hls = await page.evaluate(() => {
+    const q = document.querySelector('#quality');
+    return {
+      hasHls: !!document.querySelector('#media')._hls,
+      labels: [...q.options].map((o) => o.textContent),
+      visible: !q.classList.contains('hidden'),
+    };
+  });
+  console.log('hls =', JSON.stringify(hls));
+  if (!hls.hasHls) fail('hls.js instance was not attached to the <video>');
+  if (hls.labels.length !== 4) fail(`expected Auto + 3 levels (got ${hls.labels.length}: ${hls.labels})`);
+  if (!hls.labels.includes('Auto') || !hls.labels.includes('1080p'))
+    fail(`level labels missing Auto/1080p (got ${hls.labels})`);
+  if (!hls.visible) fail('quality selector should be visible for HLS levels');
+  if (!process.exitCode) console.log('PASS: HLS stream attached and adaptive levels listed');
 } finally {
   await browser.close();
   server.close();

@@ -18,8 +18,15 @@ python3 -m http.server 8123      # or: npm start
 # open http://localhost:8123/
 ```
 
-Then either paste a video URL, paste a **scene deeplink** (`.json`), open a local
-file, or hit **Load test pattern** to see the built-in calibration card.
+Then either paste a video URL (progressive `mp4`/`webm` **or** an HLS `.m3u8`
+stream), paste a **scene deeplink** (`.json`), open a local file, or hit **Load
+test pattern** to see the built-in calibration card.
+
+### Streaming (HLS)
+
+`.m3u8` URLs play through a vendored `hls.js` (with native HLS on Safari). The
+quality dropdown is driven by the manifest's bitrate ladder — **Auto** does
+adaptive selection, or pin a specific level (switches seamlessly, no reload).
 
 ### Scene deeplinks
 
@@ -81,8 +88,9 @@ styles.css      UI styling
 app.js          UI glue: loading, look controls, transport, view modes
 player.js       the engine: projection, stereo layers, render loop
 feed.js         DeoVR/SLR deeplink JSON -> normalized scene descriptor
+media.js        attach source to <video>: HLS (hls.js) / native / progressive
 testpattern.js  equirectangular calibration pattern generator
-lib/            vendored three.js r160 + VRButton + StereoEffect
+lib/            vendored three.js r160 + VRButton + StereoEffect + hls.js
 test/render-check.mjs    headless render + stereo-routing + feed e2e
 test/feed-parse.test.mjs unit tests for the deeplink parser
 ```
@@ -95,7 +103,8 @@ Two suites:
   calibration pattern in headless Chromium (software WebGL), asserts the SBS
   frame routes the left half to the left eye and the right half to the right
   eye, then loads a deeplink fixture end-to-end and checks the player
-  auto-configured projection / layout / quality list.
+  auto-configured projection / layout / quality list, and finally loads an HLS
+  master playlist and confirms hls.js attached and listed its bitrate levels.
 - `npm run test:unit` (`test/feed-parse.test.mjs`) unit-tests the deeplink
   parser — no browser required.
 
@@ -111,6 +120,7 @@ installed.
 
 ## Roadmap
 
-The playback core and scene-feed loading are done. Natural next layers: a
-library/browse grid, HLS (`.m3u8`) streaming via `hls.js`, and a true fisheye
-projection (MKX200-style 200° lenses currently approximate to a 180° dome).
+The playback core, scene-feed loading, and HLS streaming are done. Natural next
+layers: a library/browse grid (thumbnails for a set of scenes), and a true
+fisheye projection (MKX200-style 200° lenses currently approximate to a 180°
+dome).

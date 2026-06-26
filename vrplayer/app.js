@@ -3,6 +3,7 @@ import { Player } from './player.js';
 import { VRButton } from 'three/addons/webxr/VRButton.js';
 import { buildTestPattern } from './testpattern.js';
 import { looksLikeFeed, loadFeed } from './feed.js';
+import { attachMedia, isHlsUrl } from './media.js';
 
 const $ = (sel) => document.querySelector(sel);
 
@@ -117,12 +118,27 @@ function showPlayer() {
   $('#ui').classList.remove('hidden');
   setTimeout(() => $('#hint').classList.add('gone'), 2500);
 }
-// Swap the <video> source, optionally preserving playhead + play state (used by
-// the quality switcher so changing resolution doesn't restart the clip).
-function setVideoSource(src, { keepTime = false } = {}) {
+const quality = $('#quality');
+let controller = null;        // current media controller (from attachMedia)
+
+function fillQuality(options, mode) {
+  quality.innerHTML = '';
+  options.forEach((o, i) => {
+    const opt = document.createElement('option');
+    opt.value = String(o.value ?? i);
+    opt.textContent = o.label;
+    quality.appendChild(opt);
+  });
+  quality._mode = mode;
+  quality.classList.toggle('hidden', options.length < 2);
+}
+
+// Attach a source URL (HLS or progressive) to the <video>, optionally keeping
+// the current playhead/play-state (used when swapping progressive qualities).
+function playUrl(url, { keepTime = false, onLevels } = {}) {
   const t = keepTime ? video.currentTime : 0;
   const wasPlaying = keepTime ? !video.paused : true;
-  video.src = src;
+  controller = attachMedia(video, url, { onLevels });
   video.addEventListener('loadedmetadata', () => {
     if (t) video.currentTime = t;
     if (wasPlaying) video.play().catch(() => {});
@@ -132,35 +148,42 @@ function setVideoSource(src, { keepTime = false } = {}) {
 function loadVideo(src) {
   player.setSource(video);
   video.muted = false; $('#mute').textContent = '🔊';
-  setVideoSource(src);
+  quality.classList.add('hidden');
+  // A bare HLS URL can still expose adaptive qualities.
+  playUrl(src, { onLevels: (levels) => fillQuality(levels.map((l) => ({ value: l.index, label: l.label })), 'hls') });
   showPlayer();
 }
 
 // Apply a parsed scene feed: configure projection/stereo, list qualities, play.
-const quality = $('#quality');
 function applyScene(scene) {
   player.setFormat({ projection: scene.projection, layout: scene.layout });
   reflectFormat(scene);
-
-  quality.innerHTML = '';
-  scene.sources.forEach((s, i) => {
-    const opt = document.createElement('option');
-    opt.value = String(i); opt.textContent = s.label;
-    quality.appendChild(opt);
-  });
-  quality.classList.toggle('hidden', scene.sources.length < 2);
-  quality._scene = scene;
-
   player.setSource(video);
   video.muted = false; $('#mute').textContent = '🔊';
-  setVideoSource(scene.sources[0].url);
+
+  const first = scene.sources[0];
+  if (isHlsUrl(first.url)) {
+    // Adaptive HLS scene: quality comes from the manifest's levels.
+    quality.classList.add('hidden');
+    playUrl(first.url, { onLevels: (levels) => fillQuality(levels.map((l) => ({ value: l.index, label: l.label })), 'hls') });
+  } else {
+    // Progressive scene: quality is the list of distinct source files.
+    quality._scene = scene;
+    fillQuality(scene.sources.map((s, i) => ({ value: i, label: s.label })), 'mp4');
+    playUrl(first.url);
+  }
   $('#hint').textContent = scene.title;
   $('#hint').classList.remove('gone');
   showPlayer();
 }
+
 quality.addEventListener('change', () => {
-  const s = quality._scene?.sources[Number(quality.value)];
-  if (s) setVideoSource(s.url, { keepTime: true });
+  if (quality._mode === 'hls') {
+    controller?.setLevel(Number(quality.value)); // seamless ABR level switch
+  } else {
+    const s = quality._scene?.sources[Number(quality.value)];
+    if (s) playUrl(s.url, { keepTime: true });
+  }
 });
 
 async function loadFromInput(url) {
