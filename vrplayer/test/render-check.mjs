@@ -81,6 +81,27 @@ try {
   if (!(right[0] > right[2])) fail(`right eye should be red-dominant, got ${right}`);
 
   if (!process.exitCode) console.log('PASS: projection rendered and SBS stereo routed correctly');
+
+  // --- end-to-end: load a deeplink scene through the real UI ---
+  await page.goto(`${base}/index.html`, { waitUntil: 'networkidle' });
+  await page.fill('#url', '/test/fixtures/scene.json');
+  await page.click('#loadUrl');
+  await page.waitForFunction(() => window.__player?.projection === '180', { timeout: 5000 })
+    .catch(() => {});
+  const feed = await page.evaluate(() => ({
+    projection: window.__player.projection,
+    layout: window.__player.layout,
+    qualityCount: document.querySelector('#quality').options.length,
+    qualityVisible: !document.querySelector('#quality').classList.contains('hidden'),
+    hint: document.querySelector('#hint').textContent,
+  }));
+  console.log('feed e2e =', JSON.stringify(feed));
+  if (feed.projection !== '180') fail(`deeplink should set projection 180 (got ${feed.projection})`);
+  if (feed.layout !== 'sbs') fail(`deeplink should set layout sbs (got ${feed.layout})`);
+  if (feed.qualityCount !== 3) fail(`expected 3 quality options (got ${feed.qualityCount})`);
+  if (!feed.qualityVisible) fail('quality selector should be visible for multi-source scene');
+  if (!feed.hint.includes('Beach')) fail(`hint should show scene title (got "${feed.hint}")`);
+  if (!process.exitCode) console.log('PASS: deeplink feed configured player + quality list');
 } finally {
   await browser.close();
   server.close();

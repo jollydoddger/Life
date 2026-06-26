@@ -2,6 +2,7 @@
 import { Player } from './player.js';
 import { VRButton } from 'three/addons/webxr/VRButton.js';
 import { buildTestPattern } from './testpattern.js';
+import { looksLikeFeed, loadFeed } from './feed.js';
 
 const $ = (sel) => document.querySelector(sel);
 
@@ -74,6 +75,17 @@ document.querySelectorAll('.seg').forEach((seg) => {
   });
 });
 
+// Reflect a format chosen programmatically (e.g. from a scene feed) in the UI.
+function reflectFormat({ projection, layout }) {
+  const set = (group, value) => {
+    const seg = document.querySelector(`.seg[data-group="${group}"]`);
+    seg?.querySelectorAll('button').forEach((b) =>
+      b.classList.toggle('active', b.dataset.value === value));
+  };
+  if (projection) set('projection', projection);
+  if (layout) set('layout', layout);
+}
+
 // ---------------------------------------------------------------- transport
 const seek = $('#seek');
 const timeEl = $('#time');
@@ -105,16 +117,68 @@ function showPlayer() {
   $('#ui').classList.remove('hidden');
   setTimeout(() => $('#hint').classList.add('gone'), 2500);
 }
+// Swap the <video> source, optionally preserving playhead + play state (used by
+// the quality switcher so changing resolution doesn't restart the clip).
+function setVideoSource(src, { keepTime = false } = {}) {
+  const t = keepTime ? video.currentTime : 0;
+  const wasPlaying = keepTime ? !video.paused : true;
+  video.src = src;
+  video.addEventListener('loadedmetadata', () => {
+    if (t) video.currentTime = t;
+    if (wasPlaying) video.play().catch(() => {});
+  }, { once: true });
+}
+
 function loadVideo(src) {
   player.setSource(video);
-  video.src = src;
   video.muted = false; $('#mute').textContent = '🔊';
-  video.play().catch(() => { /* needs gesture; user can hit play */ });
+  setVideoSource(src);
   showPlayer();
 }
+
+// Apply a parsed scene feed: configure projection/stereo, list qualities, play.
+const quality = $('#quality');
+function applyScene(scene) {
+  player.setFormat({ projection: scene.projection, layout: scene.layout });
+  reflectFormat(scene);
+
+  quality.innerHTML = '';
+  scene.sources.forEach((s, i) => {
+    const opt = document.createElement('option');
+    opt.value = String(i); opt.textContent = s.label;
+    quality.appendChild(opt);
+  });
+  quality.classList.toggle('hidden', scene.sources.length < 2);
+  quality._scene = scene;
+
+  player.setSource(video);
+  video.muted = false; $('#mute').textContent = '🔊';
+  setVideoSource(scene.sources[0].url);
+  $('#hint').textContent = scene.title;
+  $('#hint').classList.remove('gone');
+  showPlayer();
+}
+quality.addEventListener('change', () => {
+  const s = quality._scene?.sources[Number(quality.value)];
+  if (s) setVideoSource(s.url, { keepTime: true });
+});
+
+async function loadFromInput(url) {
+  if (looksLikeFeed(url)) {
+    try {
+      applyScene(await loadFeed(url));
+      return;
+    } catch (err) {
+      console.warn('feed load failed, trying as direct video:', err);
+      $('#hint').textContent = `Couldn't read scene feed (${err.message}) — loading as video`;
+    }
+  }
+  loadVideo(url);
+}
+
 $('#loadUrl').addEventListener('click', () => {
   const url = $('#url').value.trim();
-  if (url) loadVideo(url);
+  if (url) loadFromInput(url);
 });
 $('#url').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('#loadUrl').click(); });
 $('#file').addEventListener('change', (e) => {

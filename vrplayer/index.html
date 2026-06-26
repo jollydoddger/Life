@@ -43,6 +43,7 @@
         <button data-value="sbs">SBS</button>
         <button data-value="ou">Over/Under</button>
       </div>
+      <select id="quality" class="pill hidden" title="Video quality"></select>
       <button id="gyro" class="pill" title="Use phone motion to look around">Gyro</button>
       <button id="cardboard" class="pill" title="Split-screen for a Cardboard headset">Cardboard</button>
       <span id="vrslot"></span>
@@ -54,7 +55,7 @@
     <div class="loader-card">
       <h1>Orbit</h1>
       <p>Stereoscopic 180° / 360° video player</p>
-      <input id="url" type="text" placeholder="Paste a video URL (mp4 / m3u8 / webm)…" />
+      <input id="url" type="text" placeholder="Paste a video URL or a scene deeplink (.json)…" />
       <div class="loader-actions">
         <button id="loadUrl" class="primary">Load URL</button>
         <label class="filebtn">Open file<input id="file" type="file" accept="video/*" hidden /></label>

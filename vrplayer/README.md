@@ -18,8 +18,29 @@ python3 -m http.server 8123      # or: npm start
 # open http://localhost:8123/
 ```
 
-Then either paste a video URL, open a local file, or hit **Load test pattern**
-to see the built-in equirectangular calibration card.
+Then either paste a video URL, paste a **scene deeplink** (`.json`), open a local
+file, or hit **Load test pattern** to see the built-in calibration card.
+
+### Scene deeplinks
+
+Paste a DeoVR / SLR-style deeplink JSON URL and the player configures itself —
+projection, stereo layout, title, and a quality switcher — from the feed:
+
+```jsonc
+{
+  "title": "...", "videoLength": 612,
+  "is3d": true, "screenType": "dome", "stereoMode": "sbs",
+  "encodings": [
+    { "name": "h264", "videoSources": [
+      { "resolution": 1920, "url": "https://.../1080.mp4" } ] }
+  ]
+}
+```
+
+`screenType` → projection (`dome`/fisheye → 180°, `sphere` → 360°), `stereoMode`
+→ layout (`sbs`, `tb` → over/under, `off` → mono), and `encodings[].videoSources`
+become the quality list (H.264 preferred for browser playback). Cross-origin
+feeds and video need permissive CORS headers (or a proxy) to load.
 
 > For phone-in-headset and real WebXR, the page must be served over **HTTPS**
 > (WebXR and the iOS motion sensors require a secure context). `localhost` is
@@ -59,21 +80,30 @@ index.html      markup + import-map (maps "three" -> ./lib)
 styles.css      UI styling
 app.js          UI glue: loading, look controls, transport, view modes
 player.js       the engine: projection, stereo layers, render loop
+feed.js         DeoVR/SLR deeplink JSON -> normalized scene descriptor
 testpattern.js  equirectangular calibration pattern generator
 lib/            vendored three.js r160 + VRButton + StereoEffect
-test/render-check.mjs   headless render + stereo-routing assertion
+test/render-check.mjs    headless render + stereo-routing + feed e2e
+test/feed-parse.test.mjs unit tests for the deeplink parser
 ```
 
 ## Test
 
-`test/render-check.mjs` boots a throwaway server, renders the calibration
-pattern in headless Chromium (software WebGL), and asserts the SBS frame routes
-the left half to the left eye and the right half to the right eye.
+Two suites:
+
+- `npm test` (`test/render-check.mjs`) boots a throwaway server, renders the
+  calibration pattern in headless Chromium (software WebGL), asserts the SBS
+  frame routes the left half to the left eye and the right half to the right
+  eye, then loads a deeplink fixture end-to-end and checks the player
+  auto-configured projection / layout / quality list.
+- `npm run test:unit` (`test/feed-parse.test.mjs`) unit-tests the deeplink
+  parser — no browser required.
 
 ```bash
 npm install        # playwright (browser optional if one is already present)
 npm test
 # PASS: projection rendered and SBS stereo routed correctly
+# PASS: deeplink feed configured player + quality list
 ```
 
 Set `PW_CHROMIUM` to a Chromium binary if Playwright's bundled browser isn't
@@ -81,6 +111,6 @@ installed.
 
 ## Roadmap
 
-This is the playback core. Natural next layers: a library/browse grid, HLS
-(`.m3u8`) support via `hls.js`, and scene-feed parsing for sites that expose a
-JSON deeplink describing stream URLs, projection, and stereo layout.
+The playback core and scene-feed loading are done. Natural next layers: a
+library/browse grid, HLS (`.m3u8`) streaming via `hls.js`, and a true fisheye
+projection (MKX200-style 200° lenses currently approximate to a 180° dome).

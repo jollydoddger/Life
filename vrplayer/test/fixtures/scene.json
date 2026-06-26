@@ -1,0 +1,23 @@
+{
+  "title": "Test Scene — Beach 180",
+  "videoLength": 612,
+  "is3d": true,
+  "screenType": "dome",
+  "stereoMode": "sbs",
+  "videoThumbnail": "https://example.com/thumb.jpg",
+  "encodings": [
+    {
+      "name": "h265",
+      "videoSources": [
+        { "resolution": 2880, "url": "https://example.com/h265-2880.mp4" }
+      ]
+    },
+    {
+      "name": "h264",
+      "videoSources": [
+        { "resolution": 1920, "url": "https://example.com/h264-1920.mp4" },
+        { "resolution": 1080, "url": "https://example.com/h264-1080.mp4" }
+      ]
+    }
+  ]
+}
