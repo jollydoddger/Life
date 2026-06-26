@@ -8,6 +8,12 @@ import * as library from './library.js';
 
 const $ = (sel) => document.querySelector(sel);
 
+// Register the service worker so the app installs to the home screen and runs
+// offline. Scope is this directory (works under any GitHub Pages sub-path).
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
+}
+
 const canvas = $('#stage');
 const video = $('#media');
 const player = new Player(canvas, video);

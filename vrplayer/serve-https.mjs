@@ -26,6 +26,7 @@ const MIME = {
   '.css': 'text/css', '.json': 'application/json', '.mp4': 'video/mp4',
   '.webm': 'video/webm', '.m3u8': 'application/vnd.apple.mpegurl', '.ts': 'video/mp2t',
   '.png': 'image/png', '.jpg': 'image/jpeg', '.svg': 'image/svg+xml',
+  '.webmanifest': 'application/manifest+json',
 };
 
 function lanIP() {

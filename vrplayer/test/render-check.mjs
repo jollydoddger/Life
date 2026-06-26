@@ -19,7 +19,8 @@ import { fileURLToPath } from 'node:url';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const MIME = { '.html': 'text/html', '.js': 'text/javascript', '.mjs': 'text/javascript',
   '.css': 'text/css', '.mp4': 'video/mp4', '.json': 'application/json',
-  '.m3u8': 'application/vnd.apple.mpegurl', '.ts': 'video/mp2t' };
+  '.m3u8': 'application/vnd.apple.mpegurl', '.ts': 'video/mp2t',
+  '.png': 'image/png', '.webmanifest': 'application/manifest+json' };
 
 const server = http.createServer((req, res) => {
   const file = path.join(ROOT, decodeURIComponent(req.url.split('?')[0]));
@@ -156,6 +157,32 @@ try {
   if (!afterClick.loaderHidden) fail('clicking a tile should start playback (loader still visible)');
   if (afterClick.projection !== '180') fail(`tile load should configure projection 180 (got ${afterClick.projection})`);
   if (!process.exitCode) console.log('PASS: library tile rendered and loaded its scene');
+
+  // --- PWA: service worker registers and precaches the app shell ---
+  const pwaCtx = await browser.newContext();
+  const pwaPage = await pwaCtx.newPage();
+  await pwaPage.goto(`${base}/index.html`, { waitUntil: 'load' });
+  const pwa = await pwaPage.evaluate(async () => {
+    const reg = await Promise.race([
+      navigator.serviceWorker.ready,
+      new Promise((r) => setTimeout(() => r(null), 8000)),
+    ]);
+    const out = { active: !!reg?.active, app: false, three: false, hls: false, manifest: null };
+    for (const n of await caches.keys()) {
+      const c = await caches.open(n);
+      out.app = out.app || !!(await c.match('./app.js'));
+      out.three = out.three || !!(await c.match('./lib/three.module.js'));
+      out.hls = out.hls || !!(await c.match('./lib/hls.mjs'));
+    }
+    out.manifest = await fetch('manifest.webmanifest').then((r) => r.json()).then((m) => m.short_name).catch(() => null);
+    return out;
+  });
+  console.log('pwa =', JSON.stringify(pwa));
+  if (!pwa.active) fail('service worker did not activate');
+  if (!(pwa.app && pwa.three && pwa.hls)) fail(`app shell not fully precached: ${JSON.stringify(pwa)}`);
+  if (pwa.manifest !== 'Orbit') fail(`manifest short_name should be Orbit (got ${pwa.manifest})`);
+  if (!process.exitCode) console.log('PASS: PWA service worker registered and precached the app shell');
+  await pwaCtx.close();
 } finally {
   await browser.close();
   server.close();

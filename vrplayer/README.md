@@ -10,7 +10,26 @@ whole thing runs from any static file server (and offline).
 
 ## Run it
 
-A static server is required (ES-module imports don't work over `file://`).
+It's a client-side web app — it runs entirely in the phone's browser. You just
+need to serve the static files once over HTTPS.
+
+### Install on your Android phone (recommended — no computer needed)
+
+Host it free on **GitHub Pages**, then install it like an app:
+
+1. In the GitHub repo: **Settings → Pages → Build and deployment**.
+   Set **Source: Deploy from a branch**, pick this branch (or `main` after
+   merging), folder **`/ (root)`**, and Save.
+2. After a minute, the app is live at:
+   **`https://jollydoddger.github.io/Life/vrplayer/`**
+3. Open that URL in **Chrome on the phone** → menu **⋮ → Add to Home screen**.
+   Orbit installs as a fullscreen app with its own icon.
+4. Launch it from the home screen, load a video / **test pattern**, tap
+   **Cardboard**, grant motion access, and drop the phone in the headset.
+
+Because it's a PWA, after the first load the whole app (including three.js and
+hls.js) is cached on the phone and runs **offline** — only the videos themselves
+need a connection.
 
 ### On your computer (quick check)
 
@@ -122,6 +141,7 @@ media.js        attach source to <video>: HLS (hls.js) / native / progressive
 library.js      persistent saved-scene library (localStorage)
 testpattern.js  equirectangular calibration pattern generator
 serve-https.mjs LAN HTTPS dev server (self-signed) for phone/headset testing
+manifest.webmanifest + sw.js + icons/   PWA: installable, offline app shell
 lib/            vendored three.js r160 + VRButton + StereoEffect + hls.js
 test/render-check.mjs    headless render + stereo-routing + feed e2e
 test/feed-parse.test.mjs unit tests for the deeplink parser
@@ -137,7 +157,8 @@ Two suites:
   eye, then loads a deeplink fixture end-to-end and checks the player
   auto-configured projection / layout / quality list, and finally loads an HLS
   master playlist and confirms hls.js attached and listed its bitrate levels,
-  and seeds a library tile to confirm it renders and loads on click.
+  seeds a library tile to confirm it renders and loads on click, and registers
+  the service worker to confirm the app shell precaches for offline use.
 - `npm run test:unit` (`test/feed-parse.test.mjs`) unit-tests the deeplink
   parser — no browser required.
 
