@@ -83,6 +83,7 @@ export class Player {
     // Look state for pointer / gyro control.
     this.lon = 0;       // yaw, degrees
     this.lat = 0;       // pitch, degrees
+    this.yawOffset = 0; // recentre offset (radians), applied in gyro mode
     this.orientation = null; // {alpha,beta,gamma,screen} when gyro active
 
     this.meshes = [];
@@ -189,6 +190,18 @@ export class Player {
     this.lat = Math.max(-85, Math.min(85, this.lat + dLat));
   }
 
+  // Make whatever is currently in front the new centre of the video.
+  recenter() {
+    if (this.orientation) {
+      const q = new THREE.Quaternion();
+      this._deviceQuaternion(this.orientation, q);
+      const f = new THREE.Vector3(0, 0, -1).applyQuaternion(q);
+      this.yawOffset = Math.atan2(f.z, f.x); // rotate current heading onto +X (content centre)
+    } else {
+      this.lon = 0; this.lat = 0;
+    }
+  }
+
   // ---- render loop ---------------------------------------------------------
 
   _applyPointerView() {
@@ -202,21 +215,26 @@ export class Player {
     this.camera.lookAt(target);
   }
 
-  _applyDeviceOrientation(o) {
-    // Standard W3C deviceorientation -> quaternion conversion.
+  // Standard W3C deviceorientation -> quaternion conversion (writes into `out`).
+  _deviceQuaternion(o, out) {
     const zee = new THREE.Vector3(0, 0, 1);
-    const euler = new THREE.Euler();
     const q0 = new THREE.Quaternion();
     const q1 = new THREE.Quaternion(-Math.sqrt(0.5), 0, 0, Math.sqrt(0.5)); // -PI/2 about X
     const deg = THREE.MathUtils.degToRad;
-    const alpha = deg(o.alpha || 0);
-    const beta = deg(o.beta || 0);
-    const gamma = deg(o.gamma || 0);
-    const screen = deg(o.screen || 0);
-    euler.set(beta, alpha, -gamma, 'YXZ');
-    this.camera.quaternion.setFromEuler(euler);
-    this.camera.quaternion.multiply(q1);
-    this.camera.quaternion.multiply(q0.setFromAxisAngle(zee, -screen));
+    out.setFromEuler(new THREE.Euler(deg(o.beta || 0), deg(o.alpha || 0), -deg(o.gamma || 0), 'YXZ'));
+    out.multiply(q1);
+    out.multiply(q0.setFromAxisAngle(zee, -deg(o.screen || 0)));
+    return out;
+  }
+
+  _applyDeviceOrientation(o) {
+    this._deviceQuaternion(o, this.camera.quaternion);
+    // Recentre offset: rotate the whole view about world-up so the chosen
+    // heading reads as forward (centre of the video).
+    if (this.yawOffset) {
+      this.camera.quaternion.premultiply(
+        new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), this.yawOffset));
+    }
   }
 
   _render(time, frame) {

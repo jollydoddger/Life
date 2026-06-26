@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Orbit VR — watch any video in stereoscopic VR
 // @namespace    https://github.com/jollydoddger/Life
-// @version      0.3.2
+// @version      0.3.3
 // @description  Adds a "VR" button to video pages. Plays the page's own video — or, on sites that hide it (e.g. SLR), fetches the scene's real stream via its deeplink using your logged-in session — in stereoscopic 180/360/fisheye with Cardboard + head tracking.
 // @author       Orbit
 // @match        *://*/*
@@ -24,7 +24,7 @@
   if (window.__orbitVR) return;          // guard against double-injection
   window.__orbitVR = true;
 
-  const VERSION = '0.3.2';
+  const VERSION = '0.3.3';
   // Tampermonkey's privileged request (bypasses CORS, carries cookies). Supports
   // both the classic (GM_xmlhttpRequest) and GM4 (GM.xmlHttpRequest) names.
   const gmXHR = (typeof GM_xmlhttpRequest === 'function') ? GM_xmlhttpRequest
@@ -405,7 +405,11 @@
     stereo.eyeSep = 0.064;
 
     let projection = fmt.projection, layout = fmt.layout, fov = fmt.fov || 180, mode = 'flat';
-    let orientation = null, lon = 0, lat = 0, meshes = [];
+    let orientation = null, lon = 0, lat = 0, meshes = [], yawOffset = 0;
+    const WORLD_UP = new THREE.Vector3(0, 1, 0);
+    const Q1 = new THREE.Quaternion(-Math.SQRT1_2, 0, 0, Math.SQRT1_2);
+    const ZEE = new THREE.Vector3(0, 0, 1);
+    const _qoff = new THREE.Quaternion();
 
     function eyeTexture(eye) {
       const tex = new THREE.VideoTexture(video);
@@ -444,12 +448,24 @@
       const phi = THREE.MathUtils.degToRad(90 - lat), theta = THREE.MathUtils.degToRad(lon);
       camera.lookAt(Math.sin(phi) * Math.cos(theta), Math.cos(phi), Math.sin(phi) * Math.sin(theta));
     }
-    function applyOrientation(o) {
+    function deviceQuat(o, out) {
       const d = THREE.MathUtils.degToRad;
-      const e = new THREE.Euler(d(o.beta || 0), d(o.alpha || 0), -d(o.gamma || 0), 'YXZ');
-      camera.quaternion.setFromEuler(e);
-      camera.quaternion.multiply(new THREE.Quaternion(-Math.SQRT1_2, 0, 0, Math.SQRT1_2));
-      camera.quaternion.multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), -d(o.screen || 0)));
+      out.setFromEuler(new THREE.Euler(d(o.beta || 0), d(o.alpha || 0), -d(o.gamma || 0), 'YXZ'));
+      out.multiply(Q1);
+      out.multiply(_qoff.setFromAxisAngle(ZEE, -d(o.screen || 0)));
+      return out;
+    }
+    function applyOrientation(o) {
+      deviceQuat(o, camera.quaternion);
+      // Recentre: rotate the whole view about world-up so the chosen heading is forward.
+      if (yawOffset) camera.quaternion.premultiply(_qoff.setFromAxisAngle(WORLD_UP, yawOffset));
+    }
+    // Make whatever you're currently looking at the new forward (centre of video).
+    function recenter() {
+      if (orientation) {
+        const f = new THREE.Vector3(0, 0, -1).applyQuaternion(deviceQuat(orientation, new THREE.Quaternion()));
+        yawOffset = Math.atan2(f.z, f.x); // rotate current heading onto +X (content centre)
+      } else { lon = 0; lat = 0; }
     }
     function renderStereo() {
       camera.updateMatrixWorld();
@@ -487,6 +503,7 @@
       setMode(m) { mode = m; resize(); },
       setOrientation(o) { orientation = o; },
       look(dx, dy) { lon += dx; lat = Math.max(-85, Math.min(85, lat + dy)); },
+      recenter,
       camera, scene, renderer,
       dispose() {
         window.removeEventListener('resize', resize);
@@ -543,6 +560,7 @@
       bar.innerHTML = '';
       bar.appendChild(projSelect());
       seg([['mono', 'Mono'], ['sbs', 'SBS'], ['ou', 'OU']], () => engine.layout, (v) => engine.setLayout(v)).forEach((b) => bar.appendChild(b));
+      bar.appendChild(mk('⟲ Recenter', () => engine.recenter(), false));
       bar.appendChild(mk(engine.mode === 'cardboard' ? '◑ Cardboard' : '◐ Cardboard', cardboard, engine.mode === 'cardboard'));
       bar.appendChild(mk(orientationOn ? '⦿ Gyro' : '○ Gyro', gyro, orientationOn));
       bar.appendChild(mk('✕ Exit', () => { stopGyro(); onClose(); }, false));
@@ -554,6 +572,9 @@
     dom.addEventListener('pointerdown', (e) => { if (orientationOn) return; drag = true; lx = e.clientX; ly = e.clientY; });
     dom.addEventListener('pointermove', (e) => { if (!drag) return; engine.look((e.clientX - lx) * -0.12, (e.clientY - ly) * 0.12); lx = e.clientX; ly = e.clientY; });
     addEventListener('pointerup', () => { drag = false; });
+    // While gyro/Cardboard drives the view, a tap on the screen recenters —
+    // handy inside the headset where you can't reach the button.
+    dom.addEventListener('click', () => { if (orientationOn) engine.recenter(); });
 
     let orientationOn = false;
     function onOrient(e) {

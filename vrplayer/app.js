@@ -68,6 +68,11 @@ $('#gyro').addEventListener('click', () => {
   player.orientation ? disableGyro() : enableGyro();
 });
 
+// Recenter: button, plus tap-the-screen while gyro/Cardboard is driving the view
+// (so you can recenter from inside the headset).
+$('#recenter').addEventListener('click', () => player.recenter());
+canvas.addEventListener('click', () => { if (player.orientation) player.recenter(); });
+
 // Cardboard = the phone-in-headset flow: one tap enters split-screen stereo,
 // turns on head tracking, and goes fullscreen so it fills the lenses.
 $('#cardboard').addEventListener('click', async () => {
