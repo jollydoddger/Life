@@ -35,36 +35,48 @@ canvas.addEventListener('pointercancel', endDrag);
 // WebXR button (real headset). Hidden gracefully if unsupported.
 $('#vrslot').appendChild(VRButton.createButton(player.renderer));
 
-$('#cardboard').addEventListener('click', () => {
-  const on = player.mode !== 'cardboard';
-  player.setMode(on ? 'cardboard' : 'flat');
-  $('#cardboard').classList.toggle('active', on);
-});
-
-// Gyroscope look (phones). iOS needs an explicit permission gesture.
-$('#gyro').addEventListener('click', async () => {
-  if (player.orientation) {            // turn off
-    window.removeEventListener('deviceorientation', onOrient);
-    player.setOrientation(null);
-    $('#gyro').classList.remove('active');
-    return;
-  }
+// Gyroscope look (phones). iOS needs an explicit permission gesture, which a
+// button tap provides. Returns whether motion tracking is now active.
+async function enableGyro() {
+  if (player.orientation) return true;
   try {
     const DOE = window.DeviceOrientationEvent;
     if (DOE && typeof DOE.requestPermission === 'function') {
-      const res = await DOE.requestPermission();
-      if (res !== 'granted') return;
+      if (await DOE.requestPermission() !== 'granted') return false;
     }
-    window.addEventListener('deviceorientation', onOrient);
-    $('#gyro').classList.add('active');
-  } catch (err) {
-    console.warn('gyro unavailable', err);
-  }
-});
+  } catch (err) { console.warn('gyro permission failed', err); return false; }
+  window.addEventListener('deviceorientation', onOrient);
+  $('#gyro').classList.add('active');
+  return true;
+}
+function disableGyro() {
+  window.removeEventListener('deviceorientation', onOrient);
+  player.setOrientation(null);
+  $('#gyro').classList.remove('active');
+}
 function onOrient(e) {
   const screenAngle = window.screen?.orientation?.angle ?? window.orientation ?? 0;
   player.setOrientation({ alpha: e.alpha, beta: e.beta, gamma: e.gamma, screen: screenAngle });
 }
+$('#gyro').addEventListener('click', () => {
+  player.orientation ? disableGyro() : enableGyro();
+});
+
+// Cardboard = the phone-in-headset flow: one tap enters split-screen stereo,
+// turns on head tracking, and goes fullscreen so it fills the lenses.
+$('#cardboard').addEventListener('click', async () => {
+  const on = player.mode !== 'cardboard';
+  player.setMode(on ? 'cardboard' : 'flat');
+  $('#cardboard').classList.toggle('active', on);
+  if (on) {
+    await enableGyro();
+    try { await document.documentElement.requestFullscreen?.(); } catch { /* denied */ }
+    screen.orientation?.lock?.('landscape').catch(() => {});
+  } else {
+    disableGyro();
+    if (document.fullscreenElement) document.exitFullscreen?.();
+  }
+});
 
 // ---------------------------------------------------------------- format toggles
 document.querySelectorAll('.seg').forEach((seg) => {

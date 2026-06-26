@@ -10,13 +10,36 @@ whole thing runs from any static file server (and offline).
 
 ## Run it
 
-A static server is required (ES-module imports don't work over `file://`):
+A static server is required (ES-module imports don't work over `file://`).
+
+### On your computer (quick check)
 
 ```bash
 cd vrplayer
 python3 -m http.server 8123      # or: npm start
 # open http://localhost:8123/
 ```
+
+`localhost` is a secure context, so everything works except the actual gyro
+(your computer has none). Good for checking projection, stereo, and the UI.
+
+### On your phone, in a Cardboard headset
+
+Phones need **HTTPS** to expose motion sensors, so use the bundled HTTPS server
+(self-signs a cert via `openssl` on first run):
+
+```bash
+cd vrplayer
+node serve-https.mjs             # or: npm run serve:phone
+```
+
+It prints a `https://<your-LAN-IP>:8443/` URL. On the phone (same Wi-Fi):
+
+1. Open that URL; accept the one-time certificate warning (Advanced → Proceed).
+2. Load a video / deeplink, or **Load test pattern**.
+3. Tap **Cardboard** — this goes fullscreen, asks for motion access (allow it),
+   and splits the screen for the two lenses with head tracking.
+4. Drop the phone in the headset.
 
 Then either paste a video URL (progressive `mp4`/`webm` **or** an HLS `.m3u8`
 stream), paste a **scene deeplink** (`.json`), open a local file, or hit **Load
@@ -68,7 +91,7 @@ feeds and video need permissive CORS headers (or a proxy) to load.
 | **360° / 180°** | Spherical vs forward-hemisphere projection |
 | **Mono / SBS / Over-Under** | Stereo packing of the source frame |
 | **Gyro** | Use phone orientation to look around (asks permission on iOS) |
-| **Cardboard** | Split-screen stereo for a phone-in-Cardboard headset |
+| **Cardboard** | One tap: fullscreen + split-screen stereo + head tracking |
 | **Enter VR** | WebXR immersive session (shown only if the device supports it) |
 | Transport | Play/pause, scrub, mute |
 
@@ -98,6 +121,7 @@ feed.js         DeoVR/SLR deeplink JSON -> normalized scene descriptor
 media.js        attach source to <video>: HLS (hls.js) / native / progressive
 library.js      persistent saved-scene library (localStorage)
 testpattern.js  equirectangular calibration pattern generator
+serve-https.mjs LAN HTTPS dev server (self-signed) for phone/headset testing
 lib/            vendored three.js r160 + VRButton + StereoEffect + hls.js
 test/render-check.mjs    headless render + stereo-routing + feed e2e
 test/feed-parse.test.mjs unit tests for the deeplink parser
