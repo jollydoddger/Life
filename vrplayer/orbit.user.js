@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Orbit VR — watch any video in stereoscopic VR
 // @namespace    https://github.com/jollydoddger/Life
-// @version      0.2.0
+// @version      0.2.1
 // @description  Adds a "VR" button to video pages. Plays the page's own video in stereoscopic 180/360 with Cardboard split-screen + head tracking. Because it runs on the site, it uses your existing login and the site's video directly (no CORS wall).
 // @author       Orbit
 // @match        *://*/*
@@ -19,8 +19,8 @@
   if (window.__orbitVR) return;          // guard against double-injection
   window.__orbitVR = true;
 
-  const THREE = window.THREE;
-  if (!THREE) { console.warn('[Orbit] three.js failed to load'); return; }
+  const VERSION = '0.2.1';
+  const THREE = window.THREE;             // loaded via @require (may be missing if that failed)
 
   // Equidistant fisheye dome (SLR/DeoVR mkx200/mkx220/rf52/fisheye). Forward=+X.
   function fisheyeGeometry(radius, fovDeg) {
@@ -105,8 +105,11 @@
     font: '600 14px system-ui, sans-serif', color: '#fff',
     background: 'linear-gradient(135deg,#6c8cff,#5b78ff)', boxShadow: '0 8px 24px rgba(0,0,0,.45)',
   });
-  launch.title = 'Watch this video in VR';
-  launch.addEventListener('click', start);
+  launch.title = 'Watch this video in VR (Orbit ' + VERSION + ')';
+  launch.addEventListener('click', () => {
+    try { start(); }
+    catch (e) { alert('Orbit v' + VERSION + ' error:\n' + (e && e.message ? e.message : e)); }
+  });
 
   // Show the button as soon as the script is active (proof it's installed),
   // whether or not a video is detected yet. Tapping with no video explains what
@@ -142,12 +145,17 @@
 
   // ---- the VR overlay + engine --------------------------------------------
   function start() {
+    if (!THREE) {
+      alert('Orbit v' + VERSION + ': the VR engine (three.js) didn\'t load.\n'
+        + 'Close this tab, reopen the scene, and try again — or check your connection.');
+      return;
+    }
     const video = pickVideo();
     if (!video) {
       let shadowHosts = 0;
       document.querySelectorAll('*').forEach((el) => { if (el.shadowRoot) shadowHosts++; });
       const frames = document.querySelectorAll('iframe').length;
-      alert('Orbit: no playable video found yet.\n\n'
+      alert('Orbit v' + VERSION + ': no playable video found yet.\n\n'
         + `(diagnostics — videos:${document.querySelectorAll('video').length} `
         + `shadowRoots:${shadowHosts} iframes:${frames})\n\n`
         + 'Make sure the scene is actually playing, then tap VR again.');
