@@ -7,8 +7,15 @@
 <body style="font-family:system-ui;background:#111;color:#eee">
   <h1>MockTube VR — a pretend VR video site</h1>
   <p>(stands in for a real site so the userscript can be tested offline)</p>
-  <video id="v" playsinline muted style="width:480px;height:240px;background:#000"></video>
+  <!-- The video lives inside a shadow DOM, like SLR's custom player, so the
+       userscript's deep video finder (shadow/iframe piercing) is exercised. -->
+  <div id="host"></div>
   <script>
+    const root = document.getElementById('host').attachShadow({ mode: 'open' });
+    const v = document.createElement('video');
+    v.playsInline = true; v.muted = true; v.setAttribute('style', 'width:480px;height:240px;background:#000');
+    root.appendChild(v);
+
     // A same-origin video via canvas.captureStream: LEFT half red, RIGHT half
     // blue — so SBS per-eye routing is verifiable (left eye red, right eye blue).
     const cv = document.createElement('canvas'); cv.width = 1280; cv.height = 640;
@@ -20,7 +27,6 @@
       cx.fillText('L', 300, 330); cx.fillText('R', 940, 330);
       f++; requestAnimationFrame(draw);
     })();
-    const v = document.getElementById('v');
     v.srcObject = cv.captureStream(15);
     v.play();
   </script>

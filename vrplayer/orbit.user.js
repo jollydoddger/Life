@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Orbit VR — watch any video in stereoscopic VR
 // @namespace    https://github.com/jollydoddger/Life
-// @version      0.1.0
+// @version      0.2.0
 // @description  Adds a "VR" button to video pages. Plays the page's own video in stereoscopic 180/360 with Cardboard split-screen + head tracking. Because it runs on the site, it uses your existing login and the site's video directly (no CORS wall).
 // @author       Orbit
 // @match        *://*/*
@@ -47,12 +47,28 @@
   }
 
   // ---- find the most relevant <video> on the page -------------------------
+  // Custom players (like SLR's) often hide the <video> inside a shadow DOM or a
+  // same-origin iframe, so search those too — a plain querySelectorAll misses it.
+  function deepVideos() {
+    const out = new Set();
+    const visit = (root) => {
+      if (!root || !root.querySelectorAll) return;
+      root.querySelectorAll('video').forEach((v) => out.add(v));
+      root.querySelectorAll('*').forEach((el) => { if (el.shadowRoot) visit(el.shadowRoot); });
+    };
+    visit(document);
+    document.querySelectorAll('iframe').forEach((f) => {
+      try { if (f.contentDocument) visit(f.contentDocument); } catch { /* cross-origin */ }
+    });
+    return [...out];
+  }
+
   function pickVideo() {
-    const vids = [...document.querySelectorAll('video')].filter((v) => v.videoWidth || v.readyState);
+    const vids = deepVideos().filter((v) => v.videoWidth > 0 || v.currentSrc || v.srcObject || v.readyState > 0);
     if (!vids.length) return null;
-    // prefer the largest, breaking ties toward the one that's playing
+    // prefer the largest, breaking ties toward the one that's actually playing
     return vids.sort((a, b) => {
-      const area = (v) => (v.videoWidth || v.clientWidth) * (v.videoHeight || v.clientHeight);
+      const area = (v) => (v.videoWidth || v.clientWidth || 0) * (v.videoHeight || v.clientHeight || 0);
       return (area(b) - area(a)) || ((b.paused ? 0 : 1) - (a.paused ? 0 : 1));
     })[0];
   }
@@ -127,7 +143,16 @@
   // ---- the VR overlay + engine --------------------------------------------
   function start() {
     const video = pickVideo();
-    if (!video) { alert('Orbit: no video found yet — press play on the scene first, then tap VR.'); return; }
+    if (!video) {
+      let shadowHosts = 0;
+      document.querySelectorAll('*').forEach((el) => { if (el.shadowRoot) shadowHosts++; });
+      const frames = document.querySelectorAll('iframe').length;
+      alert('Orbit: no playable video found yet.\n\n'
+        + `(diagnostics — videos:${document.querySelectorAll('video').length} `
+        + `shadowRoots:${shadowHosts} iframes:${frames})\n\n`
+        + 'Make sure the scene is actually playing, then tap VR again.');
+      return;
+    }
 
     const overlay = document.createElement('div');
     Object.assign(overlay.style, {

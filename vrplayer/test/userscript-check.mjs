@@ -34,8 +34,11 @@ page.on('pageerror', (e) => fail('page error: ' + e.message));
 
 try {
   await page.goto(`${base}/test/fixtures/mocksite.html`, { waitUntil: 'load' });
-  // wait for the page's video to actually have frames
-  await page.waitForFunction(() => { const v = document.querySelector('video'); return v && v.videoWidth > 0; }, { timeout: 8000 });
+  // wait for the page's (shadow-DOM) video to actually have frames
+  await page.waitForFunction(() => {
+    const v = document.getElementById('host')?.shadowRoot?.querySelector('video');
+    return v && v.videoWidth > 0;
+  }, { timeout: 8000 });
 
   // userscript manager would load @require first, then the script:
   await page.addScriptTag({ path: path.join(ROOT, 'lib/three.umd.min.js') });
