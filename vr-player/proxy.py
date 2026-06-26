@@ -11,6 +11,7 @@ Usage:
 
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import urllib.request, urllib.error, urllib.parse
+import http.cookiejar
 import gzip, zlib, re, sys
 
 PORT = int(sys.argv[1]) if len(sys.argv) > 1 else 8082
@@ -26,6 +27,13 @@ DROP_HEADERS = {
 
 UA = ('Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 '
       '(KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36')
+
+# Persistent cookie jar — survives across pages (age gates, login sessions, etc.)
+_jar    = http.cookiejar.CookieJar()
+_opener = urllib.request.build_opener(
+    urllib.request.HTTPCookieProcessor(_jar),
+    urllib.request.HTTPRedirectHandler(),
+)
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -69,7 +77,7 @@ class Handler(BaseHTTPRequestHandler):
         try:
             req = urllib.request.Request(url, data=body, headers=hdrs,
                                          method='POST' if body else 'GET')
-            with urllib.request.urlopen(req, timeout=20) as resp:
+            with _opener.open(req, timeout=20) as resp:
                 raw  = resp.read()
                 ct   = resp.headers.get('Content-Type', '')
                 enc  = resp.headers.get('Content-Encoding', '')
