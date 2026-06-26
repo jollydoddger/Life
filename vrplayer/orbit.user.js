@@ -22,6 +22,30 @@
   const THREE = window.THREE;
   if (!THREE) { console.warn('[Orbit] three.js failed to load'); return; }
 
+  // Equidistant fisheye dome (SLR/DeoVR mkx200/mkx220/rf52/fisheye). Forward=+X.
+  function fisheyeGeometry(radius, fovDeg) {
+    const half = THREE.MathUtils.degToRad(fovDeg / 2), W = 128, H = 96;
+    const pos = [], uv = [], idx = [];
+    for (let j = 0; j <= H; j++) {
+      const t = j / H, theta = half * t, rN = 0.5 * t;
+      const sinT = Math.sin(theta), cosT = Math.cos(theta);
+      for (let i = 0; i <= W; i++) {
+        const phi = 2 * Math.PI * (i / W), cphi = Math.cos(phi), sphi = Math.sin(phi);
+        pos.push(cosT * radius, sinT * cphi * radius, -sinT * sphi * radius);
+        uv.push(0.5 - rN * sphi, 0.5 + rN * cphi);
+      }
+    }
+    for (let j = 0; j < H; j++) for (let i = 0; i < W; i++) {
+      const a = j * (W + 1) + i, b = a + 1, c = a + (W + 1), d = c + 1;
+      idx.push(a, c, b, b, c, d);
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+    g.setIndex(idx); g.computeVertexNormals();
+    return g;
+  }
+
   // ---- find the most relevant <video> on the page -------------------------
   function pickVideo() {
     const vids = [...document.querySelectorAll('video')].filter((v) => v.videoWidth || v.readyState);
@@ -33,14 +57,26 @@
     })[0];
   }
 
-  // ---- naive format autodetect from page text -----------------------------
+  // ---- format autodetect from page text + site defaults -------------------
   function guessFormat() {
     const s = (document.title + ' ' + location.href).toLowerCase();
-    const projection = /\b180\b|dome|fisheye|mkx|vrca/.test(s) ? '180'
-      : /\b360\b|sphere/.test(s) ? '360' : '360';
-    const layout = /\bsbs\b|side.?by.?side|lr\b/.test(s) ? 'sbs'
-      : /\btb\b|over.?under|top.?bottom|ou\b/.test(s) ? 'ou' : 'mono';
-    return { projection, layout };
+    let projection = '360', fov = 180;
+    if (/mkx220|vrca220|\b220\b/.test(s)) { projection = 'fisheye'; fov = 220; }
+    else if (/mkx200|\b200\b/.test(s)) { projection = 'fisheye'; fov = 200; }
+    else if (/rf52|fisheye190|\b190\b/.test(s)) { projection = 'fisheye'; fov = 190; }
+    else if (/fisheye/.test(s)) { projection = 'fisheye'; fov = 180; }
+    else if (/\b180\b|dome/.test(s)) projection = '180';
+    else if (/\b360\b|sphere/.test(s)) projection = '360';
+
+    let layout = /\bsbs\b|side.?by.?side|\blr\b/.test(s) ? 'sbs'
+      : /\btb\b|over.?under|top.?bottom|\bou\b/.test(s) ? 'ou' : 'mono';
+
+    // Site default: SLR's catalogue is overwhelmingly 200° fisheye SBS, so start
+    // there unless the page text clearly says otherwise.
+    if (/sexlikereal\.com/.test(location.host) && projection === '360' && layout === 'mono') {
+      projection = 'fisheye'; fov = 200; layout = 'sbs';
+    }
+    return { projection, fov, layout };
   }
 
   // ---- floating launch button ---------------------------------------------
@@ -91,7 +127,7 @@
     const stereo = new THREE.StereoCamera();
     stereo.eyeSep = 0.064;
 
-    let projection = fmt.projection, layout = fmt.layout, mode = 'flat';
+    let projection = fmt.projection, layout = fmt.layout, fov = fmt.fov || 180, mode = 'flat';
     let orientation = null, lon = 0, lat = 0, meshes = [];
 
     function eyeTexture(eye) {
@@ -103,6 +139,7 @@
       return tex;
     }
     function geometry() {
+      if (projection === 'fisheye') return fisheyeGeometry(500, fov);
       const g = projection === '180'
         ? new THREE.SphereGeometry(500, 64, 40, Math.PI / 2, Math.PI, 0, Math.PI)
         : new THREE.SphereGeometry(500, 64, 40);
@@ -113,11 +150,12 @@
     function build() {
       for (const m of meshes) { scene.remove(m); m.geometry.dispose(); m.material.map.dispose(); m.material.dispose(); }
       meshes = [];
+      const side = projection === 'fisheye' ? THREE.DoubleSide : THREE.FrontSide;
       const eyes = layout === 'mono'
         ? [{ eye: 'left', layers: [1, 2] }]
         : [{ eye: 'left', layers: [1] }, { eye: 'right', layers: [2] }];
       for (const { eye, layers } of eyes) {
-        const mesh = new THREE.Mesh(geometry(), new THREE.MeshBasicMaterial({ map: eyeTexture(eye) }));
+        const mesh = new THREE.Mesh(geometry(), new THREE.MeshBasicMaterial({ map: eyeTexture(eye), side }));
         mesh.layers.disableAll();
         layers.forEach((l) => mesh.layers.enable(l));
         scene.add(mesh); meshes.push(mesh);
@@ -161,8 +199,8 @@
     window.addEventListener('resize', resize); resize();
 
     return {
-      get projection() { return projection; }, get layout() { return layout; }, get mode() { return mode; },
-      setProjection(p) { projection = p; build(); },
+      get projection() { return projection; }, get layout() { return layout; }, get fov() { return fov; }, get mode() { return mode; },
+      setProjection(p, f) { projection = p; if (f) fov = f; build(); },
       setLayout(l) { layout = l; build(); },
       setMode(m) { mode = m; resize(); },
       setOrientation(o) { orientation = o; },
@@ -199,15 +237,33 @@
       const b = mk(label, () => { set(val); refresh(); }, get() === val);
       b.dataset.val = val; return b;
     });
-    let buttons = [];
+    function projSelect() {
+      const sel = document.createElement('select');
+      Object.assign(sel.style, {
+        padding: '8px', borderRadius: '9px', border: '1px solid rgba(255,255,255,.12)',
+        background: 'rgba(255,255,255,.05)', color: '#fff', font: 'inherit',
+      });
+      const opts = [['360', '360°'], ['180', '180°'], ['f180', 'Fish 180°'],
+        ['f190', 'Fish 190°'], ['f200', 'MKX200'], ['f220', 'Fish 220°']];
+      const cur = engine.projection === 'fisheye' ? 'f' + engine.fov : engine.projection;
+      for (const [v, l] of opts) {
+        const o = document.createElement('option'); o.value = v; o.textContent = l;
+        if (v === cur) o.selected = true; sel.appendChild(o);
+      }
+      sel.addEventListener('change', () => {
+        const v = sel.value;
+        if (v[0] === 'f') engine.setProjection('fisheye', parseInt(v.slice(1), 10));
+        else engine.setProjection(v);
+      });
+      return sel;
+    }
     function refresh() {
-      bar.innerHTML = ''; buttons = [];
-      seg([['360', '360°'], ['180', '180°']], () => engine.projection, (v) => engine.setProjection(v)).forEach((b) => buttons.push(b));
-      seg([['mono', 'Mono'], ['sbs', 'SBS'], ['ou', 'OU']], () => engine.layout, (v) => engine.setLayout(v)).forEach((b) => buttons.push(b));
-      buttons.push(mk(engine.mode === 'cardboard' ? '◑ Cardboard' : '◐ Cardboard', cardboard, engine.mode === 'cardboard'));
-      buttons.push(mk(orientationOn ? '⦿ Gyro' : '○ Gyro', gyro, orientationOn));
-      buttons.push(mk('✕ Exit', () => { stopGyro(); onClose(); }, false));
-      buttons.forEach((b) => bar.appendChild(b));
+      bar.innerHTML = '';
+      bar.appendChild(projSelect());
+      seg([['mono', 'Mono'], ['sbs', 'SBS'], ['ou', 'OU']], () => engine.layout, (v) => engine.setLayout(v)).forEach((b) => bar.appendChild(b));
+      bar.appendChild(mk(engine.mode === 'cardboard' ? '◑ Cardboard' : '◐ Cardboard', cardboard, engine.mode === 'cardboard'));
+      bar.appendChild(mk(orientationOn ? '⦿ Gyro' : '○ Gyro', gyro, orientationOn));
+      bar.appendChild(mk('✕ Exit', () => { stopGyro(); onClose(); }, false));
     }
 
     // drag to look (when gyro off)

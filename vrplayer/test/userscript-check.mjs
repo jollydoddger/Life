@@ -46,9 +46,10 @@ try {
   await page.click('#orbit-launch');
   await page.waitForFunction(() => !!window.__orbitEngine, { timeout: 5000 });
 
-  const fmt = await page.evaluate(() => ({ projection: window.__orbitEngine.projection, layout: window.__orbitEngine.layout }));
+  const fmt = await page.evaluate(() => ({ projection: window.__orbitEngine.projection, fov: window.__orbitEngine.fov, layout: window.__orbitEngine.layout }));
   console.log('autodetected =', JSON.stringify(fmt));
-  if (fmt.projection !== '180') fail(`title "180" should autodetect projection 180 (got ${fmt.projection})`);
+  if (fmt.projection !== 'fisheye') fail(`title "MKX200" should autodetect fisheye (got ${fmt.projection})`);
+  if (fmt.fov !== 200) fail(`MKX200 should autodetect fov 200 (got ${fmt.fov})`);
   if (fmt.layout !== 'sbs') fail(`title "SBS" should autodetect layout sbs (got ${fmt.layout})`);
 
   function sampleEye(layer) {

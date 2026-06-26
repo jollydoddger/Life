@@ -6,8 +6,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-let failed = 0;
-const ok = (cond, msg) => { if (!cond) { console.error('FAIL:', msg); failed++; } };
+let failed = 0, total = 0;
+const ok = (cond, msg) => { total++; if (!cond) { console.error('FAIL:', msg); failed++; } };
 
 // --- representative dome/SBS scene with mixed codecs ---
 const scene = parseDeoVR(JSON.parse(
@@ -30,8 +30,14 @@ ok(parseDeoVR({ screenType: 'sphere', stereoMode: 'tb', is3d: true,
   videoSources: [{ url: 'x', resolution: 1080 }] }).layout === 'ou', 'tb -> ou');
 ok(parseDeoVR({ screenType: 'flat', stereoMode: 'off', is3d: false,
   videoSources: [{ url: 'x' }] }).layout === 'mono', 'off/not-3d -> mono');
-ok(parseDeoVR({ screenType: 'fisheye190', stereoMode: 'sbs', is3d: true,
-  videoSources: [{ url: 'x' }] }).projection === '180', 'fisheye -> 180');
+// fisheye lenses -> fisheye projection with the right FOV
+const mkx = parseDeoVR({ screenType: 'mkx200', stereoMode: 'sbs', is3d: true, videoSources: [{ url: 'x', resolution: 2880 }] });
+ok(mkx.projection === 'fisheye' && mkx.fov === 200, `mkx200 -> fisheye 200 (got ${mkx.projection}/${mkx.fov})`);
+const rf = parseDeoVR({ screenType: 'fisheye190', stereoMode: 'sbs', is3d: true, videoSources: [{ url: 'x' }] });
+ok(rf.projection === 'fisheye' && rf.fov === 190, `fisheye190 -> fisheye 190 (got ${rf.projection}/${rf.fov})`);
+const v220 = parseDeoVR({ screenType: 'vrca220', stereoMode: 'sbs', is3d: true, videoSources: [{ url: 'x' }] });
+ok(v220.projection === 'fisheye' && v220.fov === 220, `vrca220 -> fisheye 220 (got ${v220.projection}/${v220.fov})`);
+ok(parseDeoVR({ screenType: 'rf52', stereoMode: 'cuv', is3d: true, videoSources: [{ url: 'x' }] }).layout === 'sbs', 'cuv -> sbs');
 
 // --- error + detection helpers ---
 let threw = false;
@@ -41,4 +47,4 @@ ok(looksLikeFeed('https://x/y/deeplink.json'), 'detects .json deeplink');
 ok(!looksLikeFeed('https://x/y/video.mp4'), 'does not flag plain mp4');
 
 if (failed) { console.error(`\n${failed} assertion(s) failed`); process.exit(1); }
-console.log('PASS: feed parser (10 assertions)');
+console.log(`PASS: feed parser (${total} assertions)`);

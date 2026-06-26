@@ -39,10 +39,14 @@
       <button id="mute" class="icon" title="Mute">🔇</button>
     </div>
     <div class="row formats">
-      <div class="seg" data-group="projection">
-        <button data-value="360" class="active">360°</button>
-        <button data-value="180">180°</button>
-      </div>
+      <select id="projection" class="pill" title="Projection / lens">
+        <option value="360">360°</option>
+        <option value="180">180°</option>
+        <option value="fish180">Fisheye 180°</option>
+        <option value="fish190">Fisheye 190° · RF52</option>
+        <option value="fish200">Fisheye 200° · MKX200</option>
+        <option value="fish220">Fisheye 220°</option>
+      </select>
       <div class="seg" data-group="layout">
         <button data-value="mono" class="active">Mono</button>
         <button data-value="sbs">SBS</button>

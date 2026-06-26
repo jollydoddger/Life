@@ -85,6 +85,30 @@ try {
 
   if (!process.exitCode) console.log('PASS: projection rendered and SBS stereo routed correctly');
 
+  // --- fisheye (mkx200) projection renders + routes SBS per eye ---
+  async function sampleFisheye(eye) {
+    return page.evaluate((eye) => {
+      const p = window.__player;
+      p.setFormat({ projection: 'fisheye', fov: 200, layout: 'sbs' });
+      return import('./testpattern.js').then(({ buildTestPattern }) => {
+        p.setSource(buildTestPattern({ projection: 'fisheye', layout: 'sbs' }));
+        p.renderer.setAnimationLoop(null);
+        p.camera.layers.set(eye);
+        p.lon = 0; p.lat = 0; p.camera.lookAt(1, 0, 0);
+        p.renderer.render(p.scene, p.camera);
+        const gl = p.renderer.getContext(), w = gl.drawingBufferWidth, h = gl.drawingBufferHeight, px = new Uint8Array(4);
+        gl.readPixels(Math.floor(w * 0.5), Math.floor(h * 0.72), 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px);
+        return [px[0], px[1], px[2]];
+      });
+    }, eye);
+  }
+  const fLeft = await sampleFisheye(1), fRight = await sampleFisheye(2);
+  console.log('fisheye left =', fLeft, ' right =', fRight);
+  if (!(fLeft[0] + fLeft[1] + fLeft[2] > 30)) fail('fisheye frame appears black — nothing rendered');
+  if (!(fLeft[2] > fLeft[0])) fail(`fisheye left eye should be blue-dominant, got ${fLeft}`);
+  if (!(fRight[0] > fRight[2])) fail(`fisheye right eye should be red-dominant, got ${fRight}`);
+  if (!process.exitCode) console.log('PASS: fisheye (mkx200) projection rendered and SBS routed correctly');
+
   // --- end-to-end: load a deeplink scene through the real UI ---
   await page.goto(`${base}/index.html`, { waitUntil: 'networkidle' });
   await page.fill('#url', '/test/fixtures/scene.json');

@@ -85,6 +85,7 @@ $('#cardboard').addEventListener('click', async () => {
 });
 
 // ---------------------------------------------------------------- format toggles
+// layout is a segmented control; projection is a dropdown (it has fisheye FOVs).
 document.querySelectorAll('.seg').forEach((seg) => {
   seg.addEventListener('click', (e) => {
     const btn = e.target.closest('button');
@@ -95,15 +96,22 @@ document.querySelectorAll('.seg').forEach((seg) => {
   });
 });
 
+// Map the projection dropdown's value <-> {projection, fov}.
+const PROJ = {
+  '360': { projection: '360' }, '180': { projection: '180' },
+  fish180: { projection: 'fisheye', fov: 180 }, fish190: { projection: 'fisheye', fov: 190 },
+  fish200: { projection: 'fisheye', fov: 200 }, fish220: { projection: 'fisheye', fov: 220 },
+};
+const projKey = (projection, fov) => (projection === 'fisheye' ? 'fish' + (fov || 180) : projection);
+$('#projection').addEventListener('change', (e) => player.setFormat(PROJ[e.target.value]));
+
 // Reflect a format chosen programmatically (e.g. from a scene feed) in the UI.
-function reflectFormat({ projection, layout }) {
-  const set = (group, value) => {
-    const seg = document.querySelector(`.seg[data-group="${group}"]`);
-    seg?.querySelectorAll('button').forEach((b) =>
-      b.classList.toggle('active', b.dataset.value === value));
-  };
-  if (projection) set('projection', projection);
-  if (layout) set('layout', layout);
+function reflectFormat({ projection, layout, fov }) {
+  if (projection) $('#projection').value = projKey(projection, fov);
+  if (layout) {
+    document.querySelector('.seg[data-group="layout"]')?.querySelectorAll('button')
+      .forEach((b) => b.classList.toggle('active', b.dataset.value === layout));
+  }
 }
 
 // ---------------------------------------------------------------- transport
@@ -180,14 +188,14 @@ function loadVideo(src) {
   playUrl(src, { onLevels: (levels) => fillQuality(levels.map((l) => ({ value: l.index, label: l.label })), 'hls') });
   setCurrent(src.startsWith('blob:') ? null : {
     title: titleFromUrl(src), url: src, thumbnail: '', kind: 'video',
-    projection: player.projection, layout: player.layout,
+    projection: player.projection, layout: player.layout, fov: player.fov,
   });
   showPlayer();
 }
 
 // Apply a parsed scene feed: configure projection/stereo, list qualities, play.
 function applyScene(scene, feedUrl) {
-  player.setFormat({ projection: scene.projection, layout: scene.layout });
+  player.setFormat({ projection: scene.projection, layout: scene.layout, fov: scene.fov });
   reflectFormat(scene);
   player.setSource(video);
   video.muted = false; $('#mute').textContent = '🔊';
@@ -207,7 +215,7 @@ function applyScene(scene, feedUrl) {
   $('#hint').classList.remove('gone');
   setCurrent(feedUrl ? {
     title: scene.title, url: feedUrl, thumbnail: scene.thumbnail, kind: 'feed',
-    projection: scene.projection, layout: scene.layout,
+    projection: scene.projection, layout: scene.layout, fov: scene.fov,
   } : null);
   showPlayer();
 }
@@ -292,7 +300,7 @@ function renderLibrary() {
         return;
       }
       if (item.kind === 'video' && (item.projection || item.layout)) {
-        player.setFormat({ projection: item.projection, layout: item.layout });
+        player.setFormat({ projection: item.projection, layout: item.layout, fov: item.fov });
         reflectFormat(item);
       }
       loadFromInput(item.url);

@@ -17,14 +17,18 @@
 // We map screenType -> projection, stereoMode -> stereo layout, and flatten the
 // encodings into a quality list (browser-playable codecs first).
 
-const DOME_HINTS = ['dome', '180', 'mkx', 'rf52', 'fisheye', 'vrca', '220', '190', '200'];
-
+// screenType -> { projection, fov }. SLR/DeoVR fisheye lenses map to specific
+// fields of view: fisheye=180, rf52/fisheye190=190, mkx200=200, mkx220/vrca220=220.
 function pickProjection(screenType) {
   const s = String(screenType || '').toLowerCase();
-  if (s.includes('sphere') || s === '360') return '360';
-  if (DOME_HINTS.some((h) => s.includes(h))) return '180';
-  // "flat" and unknowns fall back to 360 (the player has no flat-plane mode yet)
-  return '360';
+  if (s.includes('sphere') || s === '360') return { projection: '360' };
+  if (s.includes('mkx220') || s.includes('vrca220') || s.includes('220')) return { projection: 'fisheye', fov: 220 };
+  if (s.includes('mkx200') || s.includes('200')) return { projection: 'fisheye', fov: 200 };
+  if (s.includes('rf52') || s.includes('190')) return { projection: 'fisheye', fov: 190 };
+  if (s.includes('fisheye')) return { projection: 'fisheye', fov: 180 };
+  if (s.includes('dome') || s === '180') return { projection: '180' };
+  // "flat" and unknowns fall back to an equirect dome
+  return { projection: '180' };
 }
 
 function pickLayout(stereoMode, is3d) {
@@ -32,6 +36,7 @@ function pickLayout(stereoMode, is3d) {
   if (is3d === false || m === 'off' || m === 'mono' || m === '') return 'mono';
   if (m === 'sbs' || m === 'lr') return 'sbs';
   if (m === 'tb' || m === 'ou' || m === 'topbottom') return 'ou';
+  if (m === 'cuv') return 'sbs'; // RF52 custom-UV — approximate as SBS
   return is3d ? 'sbs' : 'mono';
 }
 
@@ -55,7 +60,7 @@ export function parseDeoVR(data) {
   if (!data || typeof data !== 'object') throw new Error('not a deeplink object');
 
   const is3d = data.is3d;
-  const projection = pickProjection(data.screenType);
+  const proj = pickProjection(data.screenType);
   const layout = pickLayout(data.stereoMode, is3d);
 
   const sources = [];
@@ -81,7 +86,8 @@ export function parseDeoVR(data) {
     title: data.title || data.name || 'Untitled scene',
     thumbnail: data.videoThumbnail || data.thumbnailUrl || data.thumbnail || '',
     duration: Number(data.videoLength || data.duration || 0),
-    projection,
+    projection: proj.projection,
+    fov: proj.fov,
     layout,
     sources,
   };

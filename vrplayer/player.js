@@ -20,12 +20,48 @@ import { StereoEffect } from 'three/addons/effects/StereoEffect.js';
 
 const SPHERE_RADIUS = 500;
 
+// Equidistant fisheye dome (the format SLR/DeoVR call mkx200, mkx220, rf52,
+// fisheye190, fisheye). The lens maps angle-from-forward linearly to image
+// radius, so a ray at angle θ samples radius (θ / (fov/2)) * 0.5 of the circle,
+// which is inscribed in the eye's image square. Forward = +X, up = +Y,
+// right = +Z; per-eye SBS/OU cropping is still handled by texture offset/repeat.
+function fisheyeGeometry(radius, fovDeg) {
+  const half = THREE.MathUtils.degToRad(fovDeg / 2);
+  const W = 128, H = 96;
+  const pos = [], uv = [], idx = [];
+  for (let j = 0; j <= H; j++) {
+    const t = j / H;
+    const theta = half * t;
+    const rN = 0.5 * t;                       // image radius, 0..0.5 (equidistant)
+    const sinT = Math.sin(theta), cosT = Math.cos(theta);
+    for (let i = 0; i <= W; i++) {
+      const phi = 2 * Math.PI * (i / W);
+      const cphi = Math.cos(phi), sphi = Math.sin(phi);
+      pos.push(cosT * radius, sinT * cphi * radius, -sinT * sphi * radius);
+      uv.push(0.5 - rN * sphi, 0.5 + rN * cphi); // un-mirror horizontally; +v = up
+    }
+  }
+  for (let j = 0; j < H; j++) {
+    for (let i = 0; i < W; i++) {
+      const a = j * (W + 1) + i, b = a + 1, c = a + (W + 1), d = c + 1;
+      idx.push(a, c, b, b, c, d);
+    }
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+  g.setIndex(idx);
+  g.computeVertexNormals();
+  return g;
+}
+
 export class Player {
   constructor(canvas, source) {
     this.canvas = canvas;
     this.source = source; // <video> or <canvas>
 
-    this.projection = '360';   // '360' | '180'
+    this.projection = '360';   // '360' | '180' | 'fisheye'
+    this.fov = 180;            // fisheye field of view in degrees (180/190/200/220)
     this.layout = 'mono';      // 'mono' | 'sbs' | 'ou'
     this.mode = 'flat';        // 'flat' | 'cardboard' | 'xr'
 
@@ -86,6 +122,9 @@ export class Player {
   }
 
   _geometry() {
+    if (this.projection === 'fisheye') {
+      return fisheyeGeometry(SPHERE_RADIUS, this.fov);
+    }
     let geo;
     if (this.projection === '180') {
       // Forward-facing hemisphere centred on -Z.
@@ -116,8 +155,11 @@ export class Player {
       ? [{ eye: 'left', layers: [1, 2] }]                 // same surface both eyes
       : [{ eye: 'left', layers: [1] }, { eye: 'right', layers: [2] }];
 
+    // Fisheye dome is viewed from the centre; render both faces so winding can't
+    // hide it. Equirect uses scale(-1,1,1) + FrontSide.
+    const side = this.projection === 'fisheye' ? THREE.DoubleSide : THREE.FrontSide;
     for (const { eye, layers } of eyes) {
-      const material = new THREE.MeshBasicMaterial({ map: this._eyeTexture(eye) });
+      const material = new THREE.MeshBasicMaterial({ map: this._eyeTexture(eye), side });
       const mesh = new THREE.Mesh(this._geometry(), material);
       mesh.layers.disableAll();
       for (const l of layers) mesh.layers.enable(l);
@@ -126,9 +168,10 @@ export class Player {
     }
   }
 
-  setFormat({ projection, layout }) {
+  setFormat({ projection, layout, fov }) {
     if (projection) this.projection = projection;
     if (layout) this.layout = layout;
+    if (fov) this.fov = fov;
     this._buildScreen();
   }
 

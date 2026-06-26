@@ -36,6 +36,7 @@ export function add(item) {
     kind: item.kind || 'video',
     projection: item.projection,
     layout: item.layout,
+    fov: item.fov,
   });
   persist(items);
   return items;

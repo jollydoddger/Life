@@ -2,8 +2,8 @@
 
 A small, self-contained WebXR video player for flat-screen, phone-in-Cardboard,
 and full WebXR headsets. Point it at a video URL or a local file and it projects
-the footage onto a sphere (360°) or forward hemisphere (180°), with proper
-side-by-side / over-under stereo separation per eye.
+the footage onto a sphere (360°), forward hemisphere (180°), or a fisheye dome
+(MKX200/190/220), with proper side-by-side / over-under stereo separation per eye.
 
 No build step, no bundler, no CDN — `three.js` is vendored under `lib/`, so the
 whole thing runs from any static file server (and offline).
@@ -25,8 +25,19 @@ same-origin access to the video, no CORS wall — and overlays the Orbit stereo
 renderer on top of the site's player.
 
 `orbit.user.js` adds a floating **🜨 VR** button to any page with a video. Tap it
-and the current video plays in stereoscopic 180°/360°, with projection/stereo
-toggles, **Cardboard** split-screen, and gyro head tracking.
+and the current video plays in stereoscopic 180° / 360° / **fisheye** (the
+`mkx200` / `mkx220` / `rf52` lenses SLR uses), with projection/stereo toggles,
+**Cardboard** split-screen, and gyro head tracking.
+
+### SexLikeReal (SLR)
+
+On `sexlikereal.com` the script defaults to **MKX200 (200° fisheye) + SBS**,
+which is SLR's most common format, so most scenes look right immediately. If a
+particular scene looks wrong (too zoomed, doubled, or warped), use the on-screen
+**projection** dropdown to switch lens (MKX200 / Fish 190° / Fish 220° / 180°)
+and the **Mono/SBS/OU** buttons — the page title usually tells you (e.g.
+"…MKX200" or "…180°"). Play the scene on SLR first (so its video is loaded and
+your subscription is authenticated), then tap **🜨 VR**.
 
 ### Install on Android
 
@@ -144,7 +155,7 @@ feeds and video need permissive CORS headers (or a proxy) to load.
 | Control | What it does |
 |---|---|
 | Drag | Look around (desktop / touch) |
-| **360° / 180°** | Spherical vs forward-hemisphere projection |
+| **Projection** | 360° / 180° equirect, or fisheye 180/190/200(MKX200)/220 |
 | **Mono / SBS / Over-Under** | Stereo packing of the source frame |
 | **Gyro** | Use phone orientation to look around (asks permission on iOS) |
 | **Cardboard** | One tap: fullscreen + split-screen stereo + head tracking |
@@ -215,7 +226,7 @@ installed.
 
 ## Roadmap
 
-The playback core, scene-feed loading, HLS streaming, and a saved-scene library
-are done. The main remaining piece is a true fisheye projection — MKX200-style
-200° lenses currently approximate to a 180° dome; a lens-mapping shader would
-sharpen the edges.
+The playback core, scene-feed loading, HLS streaming, a saved-scene library,
+equidistant fisheye projection (MKX200/190/220), and the on-site userscript are
+all done. Possible next steps: reading SLR's deeplink JSON directly for
+exact per-scene projection metadata, and a library/browse grid of saved scenes.
