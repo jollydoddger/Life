@@ -138,6 +138,14 @@
     }
     .nav-btn:active { color:var(--text); }
     .nav-btn:disabled { opacity:.25; cursor:default; }
+    .nav-btn.active { color:var(--accent); }
+
+    /* Proxy notice strip */
+    #proxy-notice {
+      display:none; background:rgba(0,212,255,.12); border-bottom:1px solid rgba(0,212,255,.3);
+      padding:6px 12px; font-size:12px; color:var(--accent); text-align:center; flex-shrink:0;
+    }
+    #proxy-notice.show { display:block; }
 
     #url-input-wrap {
       flex:1; display:flex; align-items:center;
@@ -480,7 +488,11 @@
         placeholder="192.168.1.100:8080">
       <button id="go-btn">Go</button>
     </div>
+    <button class="nav-btn" id="proxy-btn" title="Bypass iframe blocks via local proxy">🔓</button>
   </div>
+
+  <!-- Proxy notice -->
+  <div id="proxy-notice">🔓 Proxy active — routing through localhost:8082</div>
 
   <!-- Iframe -->
   <div id="browser-frame-wrap">

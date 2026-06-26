@@ -728,7 +728,9 @@ function switchTab(name) {
 }
 
 // ── Browse / iframe ─────────────────────────────────────────────────────────
-const VIDEO_EXTS = /\.(mp4|webm|mkv|m4v|mov|avi|ogv|ts|m3u8|mpd)(\?.*)?$/i;
+const VIDEO_EXTS  = /\.(mp4|webm|mkv|m4v|mov|avi|ogv|ts|m3u8|mpd)(\?.*)?$/i;
+const PROXY_BASE  = 'http://localhost:8082';
+let   proxyMode   = false;
 
 const frame          = $('browser-frame');
 const urlField       = $('url-field');
@@ -749,10 +751,27 @@ function navigateTo(url) {
   url = normaliseUrl(url);
   if (!url) return;
   browseStart.classList.add('hidden');
-  frame.src = url;
+  frame.src = proxyMode ? `${PROXY_BASE}/${url}` : url;
   pushHistory(url);
   updateUrlBar(url);
 }
+
+// Proxy toggle
+$('proxy-btn').addEventListener('click', () => {
+  proxyMode = !proxyMode;
+  $('proxy-btn').classList.toggle('active', proxyMode);
+  $('proxy-notice').classList.toggle('show', proxyMode);
+  if (proxyMode) {
+    flash('🔓 Proxy on — run proxy.py in Termux first');
+    // Re-navigate current page through proxy
+    const cur = iframeHistory[historyPos];
+    if (cur) { frame.src = `${PROXY_BASE}/${cur}`; }
+  } else {
+    flash('Proxy off');
+    const cur = iframeHistory[historyPos];
+    if (cur) { frame.src = cur; }
+  }
+});
 
 function normaliseUrl(raw) {
   raw = raw.trim();
