@@ -9,7 +9,8 @@
     "serve:phone": "node serve-https.mjs",
     "test": "node test/render-check.mjs",
     "test:unit": "node test/feed-parse.test.mjs",
-    "test:userscript": "node test/userscript-check.mjs"
+    "test:userscript": "node test/userscript-check.mjs",
+    "test:slr": "node test/slr-deeplink-check.mjs"
   },
   "devDependencies": {
     "playwright": "^1.44.0"

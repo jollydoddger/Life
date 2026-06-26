@@ -31,19 +31,22 @@ and the current video plays in stereoscopic 180° / 360° / **fisheye** (the
 
 ### SexLikeReal (SLR) — important
 
-SLR's website does **not** expose its video to the page (their player decodes it
-privately and paints a flat preview to a `<canvas>`; there is no `<video>`
-element a script can read). That's deliberate content-protection, so the
-userscript **cannot** stream SLR scenes — it will report "no playable video
-found". This is a wall no in-browser script can get around.
+SLR's website doesn't expose its video as a `<video>` element (their player
+decodes it privately and paints to a `<canvas>`). So when the userscript finds no
+reachable video, it tries a **deeplink route**: it locates the scene's DeoVR
+deeplink on the page and fetches the scene JSON **with your logged-in session**,
+then plays SLR's real stream directly in the viewer — **nothing is saved to your
+phone**. This works when SLR serves that stream in a browser-renderable way; if
+the stream is cross-origin protected, the viewer says so.
 
-**The reliable way to watch SLR in VR on Android:** use SLR's subscriber
-**Download** button to save the scene (pick an `MKX200`/fisheye or `180 SBS`
-file), then open it in the **standalone Orbit player → Open file**. Local files
-have no CORS/canvas problem, and Orbit auto-detects the format from the filename
-(e.g. `..._MKX200_SBS.mp4` → fisheye 200° SBS), so it's one tap to Cardboard.
+**Most reliable fallback — download & open:** if the deeplink stream can't be
+rendered, use SLR's subscriber **Download** button to save the scene (an `MKX200`
+/ fisheye or `180 SBS` file), then open it in the **standalone Orbit player →
+Open file**. Local files have no CORS/canvas problem, and Orbit auto-detects the
+format from the filename (e.g. `..._MKX200_SBS.mp4` → fisheye 200° SBS), so it's
+one tap to Cardboard.
 
-The userscript below still works on sites that *do* expose their video.
+The userscript also works on other sites that expose their video directly.
 
 ### Other sites — the userscript
 

@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Mock SLR scene — canvas player, no &lt;video&gt;</title>
+</head>
+<body style="font-family:system-ui;background:#111;color:#eee">
+  <h1>Mock SLR scene</h1>
+  <p>Simulates SLR: the player is a &lt;canvas&gt; with no reachable &lt;video&gt;,
+     but the page exposes a DeoVR deeplink to the scene JSON.</p>
+  <canvas width="320" height="160" style="background:#000"></canvas>
+  <a id="dl" href="#">Stream in VR headset</a>
+  <script>
+    // DeoVR deeplinks wrap the JSON URL: deovr://https://host/....json
+    document.getElementById('dl').setAttribute(
+      'href', 'deovr://' + location.origin + '/test/fixtures/slr-deeplink.json');
+  </script>
+</body>
+</html>

@@ -1,13 +1,14 @@
 // ==UserScript==
 // @name         Orbit VR — watch any video in stereoscopic VR
 // @namespace    https://github.com/jollydoddger/Life
-// @version      0.2.2
-// @description  Adds a "VR" button to video pages. Plays the page's own video in stereoscopic 180/360 with Cardboard split-screen + head tracking. Because it runs on the site, it uses your existing login and the site's video directly (no CORS wall).
+// @version      0.3.0
+// @description  Adds a "VR" button to video pages. Plays the page's own video — or, on sites that hide it (e.g. SLR), fetches the scene's real stream via its deeplink using your logged-in session — in stereoscopic 180/360/fisheye with Cardboard + head tracking.
 // @author       Orbit
 // @match        *://*/*
 // @run-at       document-idle
 // @grant        none
 // @require      https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js
+// @require      https://cdn.jsdelivr.net/npm/hls.js@1.5.13/dist/hls.light.min.js
 // ==/UserScript==
 //
 // Install on Android with Kiwi Browser or Firefox + Tampermonkey. See the
@@ -19,7 +20,7 @@
   if (window.__orbitVR) return;          // guard against double-injection
   window.__orbitVR = true;
 
-  const VERSION = '0.2.2';
+  const VERSION = '0.3.0';
   const THREE = window.THREE;             // loaded via @require (may be missing if that failed)
 
   // Equidistant fisheye dome (SLR/DeoVR mkx200/mkx220/rf52/fisheye). Forward=+X.
@@ -180,14 +181,25 @@
       return;
     }
     const video = pickVideo();
-    if (!video) {
-      alert('Orbit v' + VERSION + ': no playable video found in this frame.\n\n'
-        + diagnostics() + '\n\n'
-        + 'If an iframe below shows a host and is cross-origin, the video lives there '
-        + 'and the browser blocks this frame from reaching it.');
-      return;
-    }
+    if (video) { launchViewer(video, guessFormat()); return; }
+    // No reachable <video> in this frame (e.g. SLR's canvas player) — try to
+    // fetch the scene's real stream via its deeplink, using the logged-in session.
+    deeplinkRoute();
+  }
 
+  // Show the cross-origin / can't-render message.
+  function showTaint(status, overlay, engine) {
+    if (engine) engine.dispose();
+    status.style.background = 'rgba(60,20,24,.92)'; status.style.color = '#ffd0d0';
+    status.style.opacity = '1';
+    status.innerHTML = '⚠ The video is <b>cross-origin protected</b>, so the browser blocks rendering it. '
+      + 'This stream can\'t be shown here. <u>Tap to close</u>';
+    status.onclick = () => overlay.remove();
+  }
+
+  // Build the fullscreen overlay + engine around a <video> (from the page or a
+  // stream we created). Handles taint detection now and once frames arrive.
+  function launchViewer(video, fmt) {
     const overlay = document.createElement('div');
     Object.assign(overlay.style, {
       position: 'fixed', inset: '0', zIndex: 2147483647, background: '#000', touchAction: 'none',
@@ -195,30 +207,99 @@
     const canvas = document.createElement('canvas');
     Object.assign(canvas.style, { width: '100%', height: '100%', display: 'block' });
     overlay.appendChild(canvas);
-    document.body.appendChild(overlay);
-
-    const fmt = guessFormat();
     const status = statusBar();
     overlay.appendChild(status);
-
-    const tex = videoTextureStatus(video);
-    if (tex === 'tainted') {
-      status.style.background = 'rgba(60,20,24,.92)'; status.style.color = '#ffd0d0';
-      status.innerHTML = '⚠ This video is <b>cross-origin protected</b>, so the browser blocks rendering it (you\'d see a black screen). '
-        + 'SLR\'s full streams may require their native app. The script works on sites whose video allows it. '
-        + '<u>Tap to close</u>';
-      status.addEventListener('click', () => overlay.remove());
-      return;
-    }
+    document.body.appendChild(overlay);
 
     const lens = fmt.projection === 'fisheye' ? `fisheye ${fmt.fov}°` : `${fmt.projection}`;
-    status.textContent = `Orbit · ${video.videoWidth}×${video.videoHeight} · ${lens} · ${fmt.layout}`
-      + (tex === 'notready' ? ' · (still loading…)' : '');
-    setTimeout(() => { status.style.transition = 'opacity .6s'; status.style.opacity = '0'; }, 3500);
+    const setStatus = () => {
+      status.textContent = `Orbit v${VERSION} · ${video.videoWidth || '…'}×${video.videoHeight || '…'} · ${lens} · ${fmt.layout}`;
+    };
+    setStatus();
+    video.addEventListener('loadedmetadata', setStatus, { once: true });
+    setTimeout(() => { status.style.transition = 'opacity .6s'; status.style.opacity = '0'; }, 4000);
 
     const engine = buildEngine(canvas, video, fmt);
     window.__orbitEngine = engine;       // for the automated test harness
     overlay.appendChild(buildControls(engine, () => { engine.dispose(); overlay.remove(); }));
+
+    // Cross-origin texture check — now if ready, else once the first frame loads.
+    const check = () => { if (videoTextureStatus(video) === 'tainted') showTaint(status, overlay, engine); };
+    if (video.videoWidth) check();
+    else video.addEventListener('loadeddata', check, { once: true });
+  }
+
+  // ---- SLR-style deeplink route: fetch the real stream and play it --------
+  // Find a DeoVR/HereSphere deeplink the page exposes (it points at a JSON we
+  // can fetch with the logged-in session).
+  function findDeeplinkUrl() {
+    const sel = 'a[href^="deovr://"],a[href^="heresphere://"],a[href*="/deovr"],a[href$=".json"]';
+    for (const a of document.querySelectorAll(sel)) {
+      let h = a.getAttribute('href') || '';
+      h = h.replace(/^deovr:\/\//i, '').replace(/^heresphere:\/\//i, '');
+      if (/^https?:\/\//i.test(h)) return h;
+    }
+    const m = document.documentElement.innerHTML.match(/(?:deovr|heresphere):\/\/(https?:\/\/[^"'\s<>\\]+)/i);
+    return m ? m[1] : null;
+  }
+
+  // Minimal DeoVR JSON parser -> { projection, fov, layout, sources[] }.
+  function parseDeoVRMini(data) {
+    const s = String(data.screenType || '').toLowerCase();
+    let projection = '180', fov;
+    if (s.includes('sphere') || s === '360') projection = '360';
+    else if (s.includes('mkx220') || s.includes('vrca220') || s.includes('220')) { projection = 'fisheye'; fov = 220; }
+    else if (s.includes('mkx200') || s.includes('200')) { projection = 'fisheye'; fov = 200; }
+    else if (s.includes('rf52') || s.includes('190')) { projection = 'fisheye'; fov = 190; }
+    else if (s.includes('fisheye')) { projection = 'fisheye'; fov = 180; }
+    else if (s.includes('dome') || s === '180') projection = '180';
+    const m = String(data.stereoMode || '').toLowerCase();
+    const layout = (data.is3d === false || m === 'off' || m === '') ? 'mono'
+      : (m === 'tb' ? 'ou' : 'sbs'); // sbs/cuv/lr/unknown-3d -> sbs
+    const sources = [];
+    const push = (u, h, c) => { if (u) sources.push({ url: u, height: +h || 0, codec: String(c || '').toLowerCase() }); };
+    (data.encodings || []).forEach((e) => (e.videoSources || []).forEach((x) => push(x.url, x.resolution ?? x.height, e.name)));
+    if (!sources.length && Array.isArray(data.videoSources)) data.videoSources.forEach((x) => push(x.url, x.resolution ?? x.height, x.codec));
+    const rank = (c) => (/264|avc/.test(c) ? 0 : /m3u8|hls/.test(c) ? 1 : /265|hevc/.test(c) ? 3 : 2);
+    sources.sort((a, b) => rank(a.codec) - rank(b.codec) || b.height - a.height);
+    return { projection, fov, layout, sources };
+  }
+
+  async function deeplinkRoute() {
+    const dl = findDeeplinkUrl();
+    if (!dl) {
+      alert('Orbit v' + VERSION + ': no video in this frame, and no scene deeplink found.\n\n'
+        + diagnostics() + '\n\nThis page may not expose a stream the script can reach.');
+      return;
+    }
+    let data;
+    try {
+      data = await fetch(dl, { credentials: 'include' }).then((r) => r.json());
+    } catch (e) {
+      alert('Orbit: found a scene deeplink but couldn\'t read it:\n' + dl + '\n\n' + e);
+      return;
+    }
+    let scene;
+    try { scene = parseDeoVRMini(data); } catch (e) { alert('Orbit: scene data not understood.\n' + e); return; }
+    if (!scene.sources.length) { alert('Orbit: the scene deeplink has no stream URL.'); return; }
+
+    const src = scene.sources[0];
+    const v = document.createElement('video');
+    v.playsInline = true; v.crossOrigin = 'anonymous'; v.preload = 'auto'; v.loop = false;
+    window.__orbitVideo = v;
+    if (/\.m3u8(\?|$)/i.test(src.url) && window.Hls && window.Hls.isSupported()) {
+      const hls = new window.Hls(); hls.loadSource(src.url); hls.attachMedia(v);
+    } else {
+      v.src = src.url;
+    }
+    // If a credentialed/anon cross-origin load errors, retry once without
+    // crossOrigin (it will play, though it may not be renderable).
+    v.addEventListener('error', function onerr() {
+      v.removeEventListener('error', onerr);
+      if (v.crossOrigin) { v.crossOrigin = null; v.src = src.url; v.play().catch(() => {}); }
+    }, { once: true });
+    v.play().catch(() => {});
+    launchViewer(v, scene);
   }
 
   // ---- stereoscopic engine (compact port of the Orbit player) -------------

@@ -1,0 +1,14 @@
+{
+  "title": "Mock SLR Scene — MKX200",
+  "is3d": true,
+  "screenType": "mkx200",
+  "stereoMode": "sbs",
+  "videoLength": 1800,
+  "encodings": [
+    { "name": "h265", "videoSources": [ { "resolution": 2880, "url": "/media/scene_h265_2880.mp4" } ] },
+    { "name": "h264", "videoSources": [
+      { "resolution": 1920, "url": "/media/scene_h264_1920.mp4" },
+      { "resolution": 1080, "url": "/media/scene_h264_1080.mp4" }
+    ] }
+  ]
+}
