@@ -152,6 +152,17 @@ try {
   if (!hls.visible) fail('quality selector should be visible for HLS levels');
   if (!process.exitCode) console.log('PASS: HLS stream attached and adaptive levels listed');
 
+  // --- filename autodetect (SLR downloads named like ..._MKX200_SBS.mp4) ---
+  await page.goto(`${base}/index.html`, { waitUntil: 'networkidle' });
+  await page.fill('#url', 'https://example.com/Ella_Peach_5400_MKX200_SBS.mp4');
+  await page.click('#loadUrl');
+  await page.waitForFunction(() => window.__player?.projection === 'fisheye', { timeout: 3000 }).catch(() => {});
+  const guess = await page.evaluate(() => ({ projection: window.__player.projection, fov: window.__player.fov, layout: window.__player.layout }));
+  console.log('filename guess =', JSON.stringify(guess));
+  if (guess.projection !== 'fisheye' || guess.fov !== 200) fail(`MKX200 filename should set fisheye 200 (got ${JSON.stringify(guess)})`);
+  if (guess.layout !== 'sbs') fail(`SBS filename should set sbs (got ${guess.layout})`);
+  if (!process.exitCode) console.log('PASS: filename autodetect set fisheye 200 SBS');
+
   // --- library: a seeded scene renders as a tile and loads on click ---
   await page.addInitScript(() => {
     localStorage.setItem('orbit.library.v1', JSON.stringify([{

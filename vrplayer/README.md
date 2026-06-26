@@ -29,7 +29,23 @@ and the current video plays in stereoscopic 180° / 360° / **fisheye** (the
 `mkx200` / `mkx220` / `rf52` lenses SLR uses), with projection/stereo toggles,
 **Cardboard** split-screen, and gyro head tracking.
 
-### SexLikeReal (SLR)
+### SexLikeReal (SLR) — important
+
+SLR's website does **not** expose its video to the page (their player decodes it
+privately and paints a flat preview to a `<canvas>`; there is no `<video>`
+element a script can read). That's deliberate content-protection, so the
+userscript **cannot** stream SLR scenes — it will report "no playable video
+found". This is a wall no in-browser script can get around.
+
+**The reliable way to watch SLR in VR on Android:** use SLR's subscriber
+**Download** button to save the scene (pick an `MKX200`/fisheye or `180 SBS`
+file), then open it in the **standalone Orbit player → Open file**. Local files
+have no CORS/canvas problem, and Orbit auto-detects the format from the filename
+(e.g. `..._MKX200_SBS.mp4` → fisheye 200° SBS), so it's one tap to Cardboard.
+
+The userscript below still works on sites that *do* expose their video.
+
+### Other sites — the userscript
 
 On `sexlikereal.com` the script defaults to **MKX200 (200° fisheye) + SBS**,
 which is SLR's most common format, so most scenes look right immediately. If a

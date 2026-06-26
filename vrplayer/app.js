@@ -242,14 +242,36 @@ async function loadFromInput(url) {
   loadVideo(url);
 }
 
+// Guess projection/stereo from a filename or URL (SLR downloads are named like
+// "Title_..._MKX200_SBS.mp4"), so opening a downloaded scene auto-configures.
+function guessFormatFromText(text) {
+  const s = (text || '').toLowerCase();
+  const g = {};
+  if (/mkx220|vrca220|[_\- ]220/.test(s)) { g.projection = 'fisheye'; g.fov = 220; }
+  else if (/mkx200|[_\- ]200/.test(s)) { g.projection = 'fisheye'; g.fov = 200; }
+  else if (/rf52|fisheye190|[_\- ]190/.test(s)) { g.projection = 'fisheye'; g.fov = 190; }
+  else if (/fisheye/.test(s)) { g.projection = 'fisheye'; g.fov = 180; }
+  else if (/(^|[^\d])180([^\d]|$)/.test(s)) g.projection = '180';
+  else if (/(^|[^\d])360([^\d]|$)/.test(s)) g.projection = '360';
+  if (/(^|[_\-. ])(sbs|lr)([_\-. ]|$)/.test(s) || /side.?by.?side/.test(s)) g.layout = 'sbs';
+  else if (/(^|[_\-. ])(tb|ou)([_\-. ]|$)/.test(s) || /over.?under|top.?bottom/.test(s)) g.layout = 'ou';
+  return g;
+}
+function applyGuess(text) {
+  const g = guessFormatFromText(text);
+  if (g.projection || g.layout) { player.setFormat(g); reflectFormat({ projection: g.projection, layout: g.layout, fov: g.fov }); }
+}
+
 $('#loadUrl').addEventListener('click', () => {
   const url = $('#url').value.trim();
-  if (url) loadFromInput(url);
+  if (!url) return;
+  applyGuess(url);            // feeds override this with exact metadata; direct videos keep it
+  loadFromInput(url);
 });
 $('#url').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('#loadUrl').click(); });
 $('#file').addEventListener('change', (e) => {
   const f = e.target.files[0];
-  if (f) loadVideo(URL.createObjectURL(f));
+  if (f) { applyGuess(f.name); loadVideo(URL.createObjectURL(f)); }
 });
 
 // Built-in equirect calibration / test pattern (no network needed).
