@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Orbit VR — watch any video in stereoscopic VR
 // @namespace    https://github.com/jollydoddger/Life
-// @version      0.2.1
+// @version      0.2.2
 // @description  Adds a "VR" button to video pages. Plays the page's own video in stereoscopic 180/360 with Cardboard split-screen + head tracking. Because it runs on the site, it uses your existing login and the site's video directly (no CORS wall).
 // @author       Orbit
 // @match        *://*/*
@@ -19,7 +19,7 @@
   if (window.__orbitVR) return;          // guard against double-injection
   window.__orbitVR = true;
 
-  const VERSION = '0.2.1';
+  const VERSION = '0.2.2';
   const THREE = window.THREE;             // loaded via @require (may be missing if that failed)
 
   // Equidistant fisheye dome (SLR/DeoVR mkx200/mkx220/rf52/fisheye). Forward=+X.
@@ -63,6 +63,24 @@
     return [...out];
   }
 
+  // Detailed report of where media might be hiding (for diagnosing sites like
+  // SLR that embed the player in an iframe).
+  function diagnostics() {
+    const lines = [];
+    lines.push(`videos(top):${document.querySelectorAll('video').length} canvas(top):${document.querySelectorAll('canvas').length}`);
+    let shadowHosts = 0; document.querySelectorAll('*').forEach((el) => { if (el.shadowRoot) shadowHosts++; });
+    lines.push(`shadowRoots:${shadowHosts}  three:${window.THREE ? 'yes' : 'NO'}`);
+    const ifr = [...document.querySelectorAll('iframe')];
+    lines.push(`iframes:${ifr.length}`);
+    ifr.forEach((f, i) => {
+      let acc = 'cross-origin', vids = '?';
+      try { const d = f.contentDocument; if (d) { acc = 'same-origin'; vids = d.querySelectorAll('video').length; } } catch { /* cross-origin */ }
+      let host = ''; try { host = new URL(f.src || '', location.href).host || '(srcdoc)'; } catch { host = '?'; }
+      lines.push(`· iframe${i}: ${acc} · ${host} · vids:${vids}`);
+    });
+    return lines.join('\n');
+  }
+
   function pickVideo() {
     const vids = deepVideos().filter((v) => v.videoWidth > 0 || v.currentSrc || v.srcObject || v.readyState > 0);
     if (!vids.length) return null;
@@ -96,14 +114,22 @@
   }
 
   // ---- floating launch button ---------------------------------------------
+  // The script runs in every frame (Tampermonkey @match *://*/*). When a site
+  // (like SLR) puts its <video> in a cross-origin iframe, only the script
+  // instance *inside* that iframe can reach the video — so in a subframe we show
+  // the button on the video itself (top-centre), and only when a video exists.
+  const inIframe = window.top !== window.self;
   const launch = document.createElement('button');
   launch.id = 'orbit-launch';
-  launch.textContent = '🜨 VR';
+  launch.textContent = inIframe ? '🜨 VR ▶' : '🜨 VR';
   Object.assign(launch.style, {
-    position: 'fixed', zIndex: 2147483646, right: '14px', bottom: '14px',
+    position: 'fixed', zIndex: 2147483646,
     padding: '10px 14px', borderRadius: '12px', border: '0', cursor: 'pointer',
     font: '600 14px system-ui, sans-serif', color: '#fff',
     background: 'linear-gradient(135deg,#6c8cff,#5b78ff)', boxShadow: '0 8px 24px rgba(0,0,0,.45)',
+    ...(inIframe
+      ? { left: '50%', top: '12px', transform: 'translateX(-50%)' }
+      : { right: '14px', bottom: '14px' }),
   });
   launch.title = 'Watch this video in VR (Orbit ' + VERSION + ')';
   launch.addEventListener('click', () => {
@@ -111,11 +137,14 @@
     catch (e) { alert('Orbit v' + VERSION + ' error:\n' + (e && e.message ? e.message : e)); }
   });
 
-  // Show the button as soon as the script is active (proof it's installed),
-  // whether or not a video is detected yet. Tapping with no video explains what
-  // to do; tapping with a video starts VR.
+  // Top frame: always show the button (proof it's installed). Inside a subframe:
+  // only show it once that frame actually contains a video (so ad iframes stay
+  // clean and the button lands on the real player frame).
   const watch = setInterval(() => {
-    if (document.body && !document.body.contains(launch)) document.body.appendChild(launch);
+    if (!document.body) return;
+    const show = inIframe ? !!pickVideo() : true;
+    if (show && !document.body.contains(launch)) document.body.appendChild(launch);
+    else if (!show && document.body.contains(launch)) launch.remove();
   }, 1200);
 
   // Cross-origin videos can't be uploaded to WebGL (the canvas would be
@@ -152,13 +181,10 @@
     }
     const video = pickVideo();
     if (!video) {
-      let shadowHosts = 0;
-      document.querySelectorAll('*').forEach((el) => { if (el.shadowRoot) shadowHosts++; });
-      const frames = document.querySelectorAll('iframe').length;
-      alert('Orbit v' + VERSION + ': no playable video found yet.\n\n'
-        + `(diagnostics — videos:${document.querySelectorAll('video').length} `
-        + `shadowRoots:${shadowHosts} iframes:${frames})\n\n`
-        + 'Make sure the scene is actually playing, then tap VR again.');
+      alert('Orbit v' + VERSION + ': no playable video found in this frame.\n\n'
+        + diagnostics() + '\n\n'
+        + 'If an iframe below shows a host and is cross-origin, the video lives there '
+        + 'and the browser blocks this frame from reaching it.');
       return;
     }
 
