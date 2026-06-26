@@ -4,6 +4,7 @@ import { VRButton } from 'three/addons/webxr/VRButton.js';
 import { buildTestPattern } from './testpattern.js';
 import { looksLikeFeed, loadFeed } from './feed.js';
 import { attachMedia, isHlsUrl } from './media.js';
+import * as library from './library.js';
 
 const $ = (sel) => document.querySelector(sel);
 
@@ -145,17 +146,29 @@ function playUrl(url, { keepTime = false, onLevels } = {}) {
   }, { once: true });
 }
 
+// The thing currently on screen, in a form the library can persist.
+let currentItem = null;
+function setCurrent(item) { currentItem = item; updateSaveState(); }
+function titleFromUrl(url) {
+  try { return decodeURIComponent(url.split('/').pop().split('?')[0]) || url; }
+  catch { return url; }
+}
+
 function loadVideo(src) {
   player.setSource(video);
   video.muted = false; $('#mute').textContent = '🔊';
   quality.classList.add('hidden');
   // A bare HLS URL can still expose adaptive qualities.
   playUrl(src, { onLevels: (levels) => fillQuality(levels.map((l) => ({ value: l.index, label: l.label })), 'hls') });
+  setCurrent(src.startsWith('blob:') ? null : {
+    title: titleFromUrl(src), url: src, thumbnail: '', kind: 'video',
+    projection: player.projection, layout: player.layout,
+  });
   showPlayer();
 }
 
 // Apply a parsed scene feed: configure projection/stereo, list qualities, play.
-function applyScene(scene) {
+function applyScene(scene, feedUrl) {
   player.setFormat({ projection: scene.projection, layout: scene.layout });
   reflectFormat(scene);
   player.setSource(video);
@@ -174,6 +187,10 @@ function applyScene(scene) {
   }
   $('#hint').textContent = scene.title;
   $('#hint').classList.remove('gone');
+  setCurrent(feedUrl ? {
+    title: scene.title, url: feedUrl, thumbnail: scene.thumbnail, kind: 'feed',
+    projection: scene.projection, layout: scene.layout,
+  } : null);
   showPlayer();
 }
 
@@ -189,7 +206,7 @@ quality.addEventListener('change', () => {
 async function loadFromInput(url) {
   if (looksLikeFeed(url)) {
     try {
-      applyScene(await loadFeed(url));
+      applyScene(await loadFeed(url), url);
       return;
     } catch (err) {
       console.warn('feed load failed, trying as direct video:', err);
@@ -214,5 +231,57 @@ $('#demo').addEventListener('click', () => {
   const c = buildTestPattern({ layout: player.layout, projection: player.projection });
   document.body.appendChild(c); c.style.display = 'none';
   player.setSource(c);
+  setCurrent(null);
   showPlayer();
 });
+
+// ---------------------------------------------------------------- library
+const saveBtn = $('#save');
+function updateSaveState() {
+  saveBtn.disabled = !currentItem;
+  saveBtn.classList.toggle('active', !!currentItem && library.has(currentItem.url));
+}
+saveBtn.addEventListener('click', () => {
+  if (!currentItem) return;
+  if (library.has(currentItem.url)) library.remove(library.load().find((i) => i.url === currentItem.url)?.id);
+  else library.add(currentItem);
+  updateSaveState();
+  renderLibrary();
+});
+
+function renderLibrary() {
+  const items = library.load();
+  const tiles = $('#tiles');
+  tiles.innerHTML = '';
+  $('#library').classList.toggle('hidden', items.length === 0);
+  for (const item of items) {
+    const tile = document.createElement('div');
+    tile.className = 'tile';
+    tile.title = item.title;
+    const initial = (item.title || '?').trim().charAt(0).toUpperCase();
+    tile.innerHTML = `
+      ${item.thumbnail
+        ? `<img class="tile-thumb" src="${item.thumbnail}" loading="lazy"
+             onerror="this.remove()" alt="" />`
+        : ''}
+      <div class="tile-fallback">${initial}</div>
+      <span class="tile-badge">${item.kind === 'feed' ? 'SCENE' : 'VIDEO'}</span>
+      <button class="tile-remove" title="Remove">✕</button>
+      <div class="tile-title">${item.title}</div>`;
+    tile.addEventListener('click', (e) => {
+      if (e.target.closest('.tile-remove')) {
+        library.remove(item.id); renderLibrary(); updateSaveState();
+        return;
+      }
+      if (item.kind === 'video' && (item.projection || item.layout)) {
+        player.setFormat({ projection: item.projection, layout: item.layout });
+        reflectFormat(item);
+      }
+      loadFromInput(item.url);
+    });
+    tiles.appendChild(tile);
+  }
+}
+
+renderLibrary();
+updateSaveState();

@@ -45,6 +45,7 @@
         <button data-value="ou">Over/Under</button>
       </div>
       <select id="quality" class="pill hidden" title="Video quality"></select>
+      <button id="save" class="pill" title="Save this scene to your library">★ Save</button>
       <button id="gyro" class="pill" title="Use phone motion to look around">Gyro</button>
       <button id="cardboard" class="pill" title="Split-screen for a Cardboard headset">Cardboard</button>
       <span id="vrslot"></span>
@@ -62,6 +63,10 @@
         <label class="filebtn">Open file<input id="file" type="file" accept="video/*" hidden /></label>
       </div>
       <button id="demo" class="ghost">Load test pattern</button>
+      <div id="library" class="library hidden">
+        <div class="library-head">Library</div>
+        <div id="tiles" class="tiles"></div>
+      </div>
     </div>
   </div>
 

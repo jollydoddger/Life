@@ -126,6 +126,36 @@ try {
     fail(`level labels missing Auto/1080p (got ${hls.labels})`);
   if (!hls.visible) fail('quality selector should be visible for HLS levels');
   if (!process.exitCode) console.log('PASS: HLS stream attached and adaptive levels listed');
+
+  // --- library: a seeded scene renders as a tile and loads on click ---
+  await page.addInitScript(() => {
+    localStorage.setItem('orbit.library.v1', JSON.stringify([{
+      id: 'seed1', title: 'Seeded Beach', url: '/test/fixtures/scene.json',
+      thumbnail: '', kind: 'feed', projection: '180', layout: 'sbs',
+    }]));
+  });
+  await page.goto(`${base}/index.html`, { waitUntil: 'networkidle' });
+  const lib = await page.evaluate(() => ({
+    tiles: document.querySelectorAll('#tiles .tile').length,
+    visible: !document.querySelector('#library').classList.contains('hidden'),
+    title: document.querySelector('.tile-title')?.textContent,
+  }));
+  console.log('library =', JSON.stringify(lib));
+  if (lib.tiles !== 1) fail(`expected 1 library tile (got ${lib.tiles})`);
+  if (!lib.visible) fail('library grid should be visible when items exist');
+  if (lib.title !== 'Seeded Beach') fail(`tile title wrong (got ${lib.title})`);
+
+  await page.click('#tiles .tile');
+  await page.waitForFunction(
+    () => document.querySelector('#loader').classList.contains('hidden')
+      && window.__player.projection === '180', { timeout: 5000 }).catch(() => {});
+  const afterClick = await page.evaluate(() => ({
+    loaderHidden: document.querySelector('#loader').classList.contains('hidden'),
+    projection: window.__player.projection,
+  }));
+  if (!afterClick.loaderHidden) fail('clicking a tile should start playback (loader still visible)');
+  if (afterClick.projection !== '180') fail(`tile load should configure projection 180 (got ${afterClick.projection})`);
+  if (!process.exitCode) console.log('PASS: library tile rendered and loaded its scene');
 } finally {
   await browser.close();
   server.close();
