@@ -1,15 +1,16 @@
 // ==UserScript==
 // @name         Orbit VR — watch any video in stereoscopic VR
 // @namespace    https://github.com/jollydoddger/Life
-// @version      0.3.0
+// @version      0.3.1
 // @description  Adds a "VR" button to video pages. Plays the page's own video — or, on sites that hide it (e.g. SLR), fetches the scene's real stream via its deeplink using your logged-in session — in stereoscopic 180/360/fisheye with Cardboard + head tracking.
 // @author       Orbit
 // @match        *://*/*
 // @run-at       document-idle
 // @grant        none
 // @require      https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js
-// @require      https://cdn.jsdelivr.net/npm/hls.js@1.5.13/dist/hls.light.min.js
 // ==/UserScript==
+// Note: hls.js is loaded lazily (only if a scene streams via .m3u8) so a CDN
+// hiccup can never stop the whole script from running.
 //
 // Install on Android with Kiwi Browser or Firefox + Tampermonkey. See the
 // project README for the step-by-step. To restrict it to specific sites, edit
@@ -20,7 +21,7 @@
   if (window.__orbitVR) return;          // guard against double-injection
   window.__orbitVR = true;
 
-  const VERSION = '0.3.0';
+  const VERSION = '0.3.1';
   const THREE = window.THREE;             // loaded via @require (may be missing if that failed)
 
   // Equidistant fisheye dome (SLR/DeoVR mkx200/mkx220/rf52/fisheye). Forward=+X.
@@ -265,6 +266,19 @@
     return { projection, fov, layout, sources };
   }
 
+  // Load hls.js on demand (only for .m3u8 streams). Resolves true if available.
+  function ensureHls() {
+    if (window.Hls) return Promise.resolve(true);
+    return new Promise((resolve) => {
+      const s = document.createElement('script');
+      s.src = 'https://cdn.jsdelivr.net/npm/hls.js@1.5.13/dist/hls.light.min.js';
+      s.onload = () => resolve(!!window.Hls);
+      s.onerror = () => resolve(false);
+      document.head.appendChild(s);
+      setTimeout(() => resolve(!!window.Hls), 6000);
+    });
+  }
+
   async function deeplinkRoute() {
     const dl = findDeeplinkUrl();
     if (!dl) {
@@ -287,8 +301,12 @@
     const v = document.createElement('video');
     v.playsInline = true; v.crossOrigin = 'anonymous'; v.preload = 'auto'; v.loop = false;
     window.__orbitVideo = v;
-    if (/\.m3u8(\?|$)/i.test(src.url) && window.Hls && window.Hls.isSupported()) {
-      const hls = new window.Hls(); hls.loadSource(src.url); hls.attachMedia(v);
+    if (/\.m3u8(\?|$)/i.test(src.url)) {
+      if (await ensureHls() && window.Hls.isSupported()) {
+        const hls = new window.Hls(); hls.loadSource(src.url); hls.attachMedia(v);
+      } else {
+        v.src = src.url; // native HLS (Safari); Android Chrome will likely fail -> message
+      }
     } else {
       v.src = src.url;
     }
