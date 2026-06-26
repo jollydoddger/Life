@@ -402,11 +402,14 @@ function showLibrary() {
   stopPlayer();
   viewPlayer.classList.remove('active');
   viewLib.classList.add('active');
+  document.getElementById('tab-bar').style.display = 'flex';
   if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
 }
 function goPlayer() {
   viewLib.classList.remove('active');
+  viewBrowse?.classList.remove('active');
   viewPlayer.classList.add('active');
+  document.getElementById('tab-bar').style.display = 'none';
 }
 
 // ── Player ──────────────────────────────────────────────────────────────────
@@ -709,6 +712,225 @@ function fmt(s) {
   if (!isFinite(s)) return '0:00';
   return `${Math.floor(s/60)}:${String(Math.floor(s%60)).padStart(2,'0')}`;
 }
+
+// ── Tab bar ────────────────────────────────────────────────────────────────────
+const viewBrowse = $('view-browse');
+
+document.querySelectorAll('.tab').forEach(tab => {
+  tab.addEventListener('click', () => switchTab(tab.dataset.tab));
+});
+
+function switchTab(name) {
+  document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === name));
+  viewLib.classList.toggle('active', name === 'library');
+  viewBrowse.classList.toggle('active', name === 'browse');
+  if (name === 'browse') $('url-field').focus();
+}
+
+// ── Browse / iframe ─────────────────────────────────────────────────────────
+const VIDEO_EXTS = /\.(mp4|webm|mkv|m4v|mov|avi|ogv|ts|m3u8|mpd)(\?.*)?$/i;
+
+const frame          = $('browser-frame');
+const urlField       = $('url-field');
+const urlScheme      = $('url-scheme');
+const navBack        = $('nav-back');
+const navFwd         = $('nav-fwd');
+const navRefresh     = $('nav-refresh');
+const browseStart    = $('browse-start');
+const playIntercept  = $('play-intercept');
+const interceptLabel = $('intercept-label');
+let pendingVideoUrl  = '';
+let pendingVideoTitle = '';
+// Simple history stack (iframe doesn't give us clean access to its history length)
+let iframeHistory = [];
+let historyPos = -1;
+
+function navigateTo(url) {
+  url = normaliseUrl(url);
+  if (!url) return;
+  browseStart.classList.add('hidden');
+  frame.src = url;
+  pushHistory(url);
+  updateUrlBar(url);
+}
+
+function normaliseUrl(raw) {
+  raw = raw.trim();
+  if (!raw) return '';
+  if (/^https?:\/\//i.test(raw)) return raw;
+  return 'http://' + raw;
+}
+
+function pushHistory(url) {
+  // Truncate forward history
+  iframeHistory = iframeHistory.slice(0, historyPos + 1);
+  iframeHistory.push(url);
+  historyPos = iframeHistory.length - 1;
+  updateNavBtns();
+}
+
+function updateNavBtns() {
+  navBack.disabled = historyPos <= 0;
+  navFwd.disabled  = historyPos >= iframeHistory.length - 1;
+}
+
+function updateUrlBar(url) {
+  try {
+    const u = new URL(url);
+    urlScheme.textContent = u.protocol + '//';
+    urlField.value = u.host + u.pathname + u.search;
+  } catch {
+    urlField.value = url;
+    urlScheme.textContent = '';
+  }
+}
+
+// Go button / Enter
+function goToUrl() {
+  const raw = (urlScheme.textContent + urlField.value).trim() || urlField.value.trim();
+  navigateTo(raw);
+}
+$('go-btn').addEventListener('click', goToUrl);
+urlField.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); goToUrl(); } });
+urlField.addEventListener('focus', () => {
+  // Show full URL in field on focus
+  urlScheme.textContent = '';
+});
+urlField.addEventListener('blur', () => {
+  // Restore scheme display
+  try {
+    const full = normaliseUrl(urlField.value);
+    updateUrlBar(full);
+  } catch {}
+});
+
+navBack.addEventListener('click', () => {
+  if (historyPos > 0) {
+    historyPos--;
+    frame.src = iframeHistory[historyPos];
+    updateUrlBar(iframeHistory[historyPos]);
+    updateNavBtns();
+  }
+});
+
+navFwd.addEventListener('click', () => {
+  if (historyPos < iframeHistory.length - 1) {
+    historyPos++;
+    frame.src = iframeHistory[historyPos];
+    updateUrlBar(iframeHistory[historyPos]);
+    updateNavBtns();
+  }
+});
+
+navRefresh.addEventListener('click', () => {
+  try { frame.contentWindow.location.reload(); }
+  catch { frame.src = frame.src; }
+});
+
+// iframe load handler
+frame.addEventListener('load', () => {
+  let currentUrl = '';
+  try {
+    currentUrl = frame.contentWindow.location.href;
+    if (currentUrl === 'about:blank') return;
+    updateUrlBar(currentUrl);
+    // Only push if URL actually changed (not a reload)
+    if (currentUrl !== iframeHistory[historyPos]) {
+      pushHistory(currentUrl);
+    }
+  } catch {
+    // Cross-origin: best-guess from frame.src
+    currentUrl = frame.src;
+  }
+
+  hideIntercept();
+
+  // Check if the current URL is itself a video
+  if (VIDEO_EXTS.test(currentUrl)) {
+    showIntercept(currentUrl, deriveTitle(currentUrl));
+    return;
+  }
+
+  // Try to inject into same-origin page
+  injectVideoLinks();
+});
+
+function injectVideoLinks() {
+  try {
+    const doc = frame.contentDocument;
+    if (!doc || !doc.body) return;
+
+    // Inject highlight styles
+    if (!doc.getElementById('vr-injected')) {
+      const s = doc.createElement('style');
+      s.id = 'vr-injected';
+      s.textContent = `
+        a.__vr-video {
+          outline: 2px solid #00d4ff !important;
+          outline-offset: 2px;
+          border-radius: 3px;
+          position: relative;
+        }
+        a.__vr-video::after {
+          content: ' ▶ VR';
+          color: #00d4ff;
+          font-size: .75em;
+          font-weight: 700;
+          letter-spacing: .04em;
+        }
+      `;
+      doc.head.appendChild(s);
+    }
+
+    // Mark and intercept video links
+    doc.querySelectorAll('a[href]').forEach(a => {
+      const href = a.href;
+      if (!href || a.__vrBound) return;
+      if (VIDEO_EXTS.test(href)) {
+        a.classList.add('__vr-video');
+        a.__vrBound = true;
+        a.addEventListener('click', e => {
+          e.preventDefault();
+          e.stopPropagation();
+          showIntercept(href, a.textContent.trim() || deriveTitle(href));
+        });
+      }
+    });
+  } catch {
+    // Cross-origin — silently skip injection
+  }
+}
+
+function showIntercept(url, title) {
+  pendingVideoUrl   = url;
+  pendingVideoTitle = title || deriveTitle(url);
+  interceptLabel.textContent = pendingVideoTitle;
+  playIntercept.classList.add('show');
+}
+
+function hideIntercept() {
+  playIntercept.classList.remove('show');
+  pendingVideoUrl = '';
+}
+
+$('intercept-play-btn').addEventListener('click', () => {
+  if (!pendingVideoUrl) return;
+  const vid = {
+    id: Date.now(),
+    url: pendingVideoUrl,
+    title: pendingVideoTitle,
+    thumb: '',
+    stereoMode: 'mono',
+  };
+  // Add to library if not already there
+  if (!library.find(v => v.url === vid.url)) {
+    library.unshift(vid); saveLib(); renderLibrary();
+  }
+  hideIntercept();
+  openPlayer(vid);
+});
+
+$('intercept-dismiss').addEventListener('click', hideIntercept);
 
 // ── Boot ──────────────────────────────────────────────────────────────────────
 renderLibrary();
