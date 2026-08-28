@@ -28,6 +28,8 @@ import java.util.zip.ZipOutputStream
 object Sync {
     const val PATH_ROUTE = "/waymark/route"
     const val PATH_KEY = "/waymark/key"
+    const val PATH_STYLE = "/waymark/style"
+    const val PATH_RECORD = "/waymark/record"
 
     private val TILE_ENTRY = Regex("""\d{1,2}/\d{1,7}/\d{1,7}\.png""")
 
@@ -55,6 +57,31 @@ object Sync {
     suspend fun sendKey(ctx: Context, key: String) {
         val req = PutDataMapRequest.create(PATH_KEY).apply {
             dataMap.putString("key", key)
+            dataMap.putLong("stamp", System.currentTimeMillis())
+        }.asPutDataRequest().setUrgent()
+        Wearable.getDataClient(ctx).putDataItem(req).await()
+    }
+
+    /** His colours, so the wrist and the pocket draw the same map. */
+    suspend fun sendStyle(ctx: Context, route: Int, arrow: Int, trail: Int) {
+        val req = PutDataMapRequest.create(PATH_STYLE).apply {
+            dataMap.putInt("route", route)
+            dataMap.putInt("arrow", arrow)
+            dataMap.putInt("trail", trail)
+            dataMap.putLong("stamp", System.currentTimeMillis())
+        }.asPutDataRequest().setUrgent()
+        Wearable.getDataClient(ctx).putDataItem(req).await()
+    }
+
+    /**
+     * Start/stop recording on the other device too, so one press covers both.
+     * Each device then records from its own GPS — which is what makes the
+     * trail right on whichever screen he happens to look at, and means no
+     * geometry has to cross the link while he walks.
+     */
+    suspend fun sendRecording(ctx: Context, on: Boolean) {
+        val req = PutDataMapRequest.create(PATH_RECORD).apply {
+            dataMap.putBoolean("on", on)
             dataMap.putLong("stamp", System.currentTimeMillis())
         }.asPutDataRequest().setUrgent()
         Wearable.getDataClient(ctx).putDataItem(req).await()

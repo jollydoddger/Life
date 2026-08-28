@@ -4,6 +4,9 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <application
         android:label="@string/app_name"
@@ -34,5 +37,13 @@
         <activity
             android:name=".SettingsActivity"
             android:exported="false" />
+
+        <!-- Keeps the trail growing with the screen off. Only ever started
+             from the visible app, which is what keeps this clear of
+             ACCESS_BACKGROUND_LOCATION. -->
+        <service
+            android:name="com.jollydoddger.waymark.shared.TrackingService"
+            android:exported="false"
+            android:foregroundServiceType="location" />
     </application>
 </manifest>

@@ -10,6 +10,7 @@ import android.graphics.Rect
 import android.graphics.RectF
 import android.util.AttributeSet
 import android.view.GestureDetector
+import android.view.HapticFeedbackConstants
 import android.view.MotionEvent
 import android.view.ScaleGestureDetector
 import android.view.View
@@ -42,7 +43,9 @@ class BngMapView @JvmOverloads constructor(
     private val density = resources.displayMetrics.density
     private val bias = min(ln(density.toDouble()) / ln(2.0), 1.25)
     private val minZl = 1.0
-    private val maxZl = TileGrid.MAX_Z + bias + 0.5
+    // +1.0 past the density-corrected native level = 2x magnification of
+    // OS's finest tiles: bigger for tired eyes and gloved taps, still legible.
+    private val maxZl = TileGrid.MAX_Z + bias + 1.0
 
     private var centreE = 400_000.0 // mid-GB until a fix or a route arrives
     private var centreN = 300_000.0
@@ -54,6 +57,14 @@ class BngMapView @JvmOverloads constructor(
 
     var routeReversed = false
         set(v) { field = v; invalidate() }
+
+    /** Where he has already been this walk; drawn under the route. */
+    private var trailPts: List<En> = emptyList()
+
+    fun setTrail(points: List<En>) {
+        trailPts = points
+        invalidate()
+    }
 
     private var fixE = 0.0
     private var fixN = 0.0
@@ -102,12 +113,30 @@ class BngMapView @JvmOverloads constructor(
         invalidate()
     }
 
+    /** His colours, from Prefs on the phone and over the link on the watch. */
+    fun setColours(route: Int, arrow: Int, trail: Int) {
+        routePaint.color = route
+        routeArrowPaint.color = route
+        herePaint.color = arrow
+        trailPaint.color = trail
+        invalidate()
+    }
+
     fun zoomIn() = setZoom(zl + 1.0)
     fun zoomOut() = setZoom(zl - 1.0)
 
+    /**
+     * Follow me again, and zoom right in while doing it: the button is asked
+     * "where am I", and an answer at a mile to the inch is not one.
+     */
     fun recentre() {
         follow = true
-        if (hasFix) { centreE = fixE; centreN = fixN } else centreOnRoute()
+        if (hasFix) {
+            centreE = fixE; centreN = fixN
+            setZoom(maxZl)
+        } else {
+            centreOnRoute()
+        }
         invalidate()
     }
 
@@ -143,10 +172,18 @@ class BngMapView @JvmOverloads constructor(
         strokeJoin = Paint.Join.ROUND; strokeCap = Paint.Cap.ROUND
     }
     private val routePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        style = Paint.Style.STROKE; color = Color.argb(200, 30, 98, 208)
+        style = Paint.Style.STROKE; color = Colours.DEFAULT_ROUTE
         strokeJoin = Paint.Join.ROUND; strokeCap = Paint.Cap.ROUND
     }
-    private val arrowFill = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.argb(230, 30, 98, 208) }
+    private val trailPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE; color = Colours.DEFAULT_TRAIL
+        strokeJoin = Paint.Join.ROUND; strokeCap = Paint.Cap.ROUND
+    }
+    // The route's direction arrowheads and the you-arrow are separately
+    // coloured, so neither can be left wearing the other's colour.
+    private val routeArrowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Colours.DEFAULT_ROUTE }
+    private val herePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Colours.DEFAULT_ARROW }
+    private val staleHerePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.argb(200, 128, 128, 128) }
     private val arrowOutline = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE; color = Color.WHITE
     }
@@ -158,6 +195,7 @@ class BngMapView @JvmOverloads constructor(
         if (width == 0 || height == 0) return
         canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), bgPaint)
         drawTiles(canvas)
+        drawTrail(canvas)
         drawRoute(canvas)
         drawHere(canvas)
     }
@@ -207,6 +245,17 @@ class BngMapView @JvmOverloads constructor(
         }
     }
 
+    private fun drawTrail(canvas: Canvas) {
+        val pts = trailPts
+        if (pts.size < 2) return
+        val m = mpp(zl)
+        path.rewind()
+        path.moveTo(sx(pts[0].e, m), sy(pts[0].n, m))
+        for (i in 1 until pts.size) path.lineTo(sx(pts[i].e, m), sy(pts[i].n, m))
+        trailPaint.strokeWidth = 4f * density
+        canvas.drawPath(path, trailPaint)
+    }
+
     private fun drawRoute(canvas: Canvas) {
         val pts = routePts
         if (pts.size < 2) return
@@ -236,12 +285,12 @@ class BngMapView @JvmOverloads constructor(
             val n = a.n + (b.n - a.n) * f
             var bearing = Math.toDegrees(atan2(b.e - a.e, b.n - a.n))
             if (routeReversed) bearing += 180
-            drawArrowHead(canvas, sx(e, m), sy(n, m), bearing.toFloat(), 7f * density)
+            drawArrowHead(canvas, sx(e, m), sy(n, m), bearing.toFloat(), 7f * density, routeArrowPaint)
             d += spacing
         }
     }
 
-    private fun drawArrowHead(canvas: Canvas, x: Float, y: Float, bearingDeg: Float, r: Float) {
+    private fun drawArrowHead(canvas: Canvas, x: Float, y: Float, bearingDeg: Float, r: Float, fill: Paint) {
         canvas.save()
         canvas.translate(x, y)
         canvas.rotate(bearingDeg)
@@ -251,7 +300,7 @@ class BngMapView @JvmOverloads constructor(
         path.lineTo(0f, r * 0.45f)
         path.lineTo(-r * 0.8f, r)
         path.close()
-        canvas.drawPath(path, arrowFill)
+        canvas.drawPath(path, fill)
         canvas.drawPath(path, arrowOutline)
         canvas.restore()
     }
@@ -262,16 +311,16 @@ class BngMapView @JvmOverloads constructor(
         val x = sx(fixE, m)
         val y = sy(fixN, m)
         val r = 11f * density
-        arrowFill.color = if (fixStale) Color.argb(200, 128, 128, 128) else Color.argb(240, 30, 98, 208)
+        // A stale fix goes visibly grey rather than sitting confidently wrong.
+        val fill = if (fixStale) staleHerePaint else herePaint
         arrowOutline.strokeWidth = 2.5f * density
         val h = headingDeg
         if (h == null) {
-            canvas.drawCircle(x, y, r * 0.55f, arrowFill)
+            canvas.drawCircle(x, y, r * 0.55f, fill)
             canvas.drawCircle(x, y, r * 0.55f, arrowOutline)
         } else {
-            drawArrowHead(canvas, x, y, h.toFloat(), r)
+            drawArrowHead(canvas, x, y, h.toFloat(), r, fill)
         }
-        arrowFill.color = Color.argb(230, 30, 98, 208)
         arrowOutline.strokeWidth = 1.5f * density
     }
 
@@ -287,9 +336,32 @@ class BngMapView @JvmOverloads constructor(
             invalidate()
             return true
         }
-        override fun onDoubleTap(e: MotionEvent): Boolean {
-            zoomAround(e.x, e.y, zl + 1.0)
+        // Tap to zoom in, hold to zoom out. The watch's physical Back key
+        // cannot do this: on Wear OS it is the same navigation path as
+        // swipe-to-dismiss, so intercepting it for zoom would take away the
+        // way out of the app. The screen is the honest place for it.
+        override fun onSingleTapUp(e: MotionEvent): Boolean {
+            zoomStep(e, +1.0)
             return true
+        }
+
+        override fun onLongPress(e: MotionEvent) {
+            // A zoom you cannot watch happen on a wrist needs to be felt.
+            performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+            zoomStep(e, -1.0)
+        }
+
+        /**
+         * Zoom toward whatever was tapped — unless we are following, in which
+         * case zoom about the centre, so the arrow he is watching stays under
+         * his eye instead of sliding off and snapping back on the next fix.
+         */
+        private fun zoomStep(e: MotionEvent, by: Double) {
+            if (follow) {
+                zoomAround(width / 2f, height / 2f, zl + by)
+            } else {
+                zoomAround(e.x, e.y, zl + by)
+            }
         }
     })
 

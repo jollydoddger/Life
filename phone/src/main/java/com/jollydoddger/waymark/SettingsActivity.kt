@@ -8,8 +8,15 @@ import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
+import android.graphics.Color
+import android.graphics.drawable.GradientDrawable
+import android.view.View
 import com.jollydoddger.waymark.shared.Bng
+import com.jollydoddger.waymark.shared.Colours
+import com.jollydoddger.waymark.shared.Prefs.arrowColour
 import com.jollydoddger.waymark.shared.Prefs.osApiKey
+import com.jollydoddger.waymark.shared.Prefs.routeColour
+import com.jollydoddger.waymark.shared.Prefs.trailColour
 import com.jollydoddger.waymark.shared.Sync
 import com.jollydoddger.waymark.shared.TileGrid
 import kotlinx.coroutines.CoroutineScope
@@ -84,6 +91,44 @@ class SettingsActivity : Activity() {
             addView(test, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
         }
 
+        fun heading(text: String) = TextView(this).apply {
+            this.text = text
+            textSize = 16f
+            setPadding(0, dp(20), 0, dp(6))
+        }
+
+        // A fixed palette rather than a colour wheel: six choices are one
+        // glanceable row, hittable with a cold thumb, and every one of them
+        // reads against pale OS map paper — which free choice cannot promise.
+        fun swatches(current: () -> Int, choose: (Int) -> Unit): LinearLayout {
+            val row = LinearLayout(this)
+            val cells = mutableListOf<Pair<View, Int>>()
+            fun repaint() {
+                cells.forEach { (view, colour) ->
+                    view.background = GradientDrawable().apply {
+                        shape = GradientDrawable.OVAL
+                        setColor(colour)
+                        // The chosen one wears a ring, so it is obvious which is on.
+                        setStroke(dp(if (colour == current()) 4 else 1), Color.DKGRAY)
+                    }
+                }
+            }
+            Colours.PALETTE.forEach { (name, colour) ->
+                val cell = View(this).apply {
+                    contentDescription = name
+                    setOnClickListener {
+                        choose(colour)
+                        repaint()
+                        pushStyle()
+                    }
+                }
+                cells.add(cell to colour)
+                row.addView(cell, LinearLayout.LayoutParams(dp(44), dp(44)).apply { rightMargin = dp(10) })
+            }
+            repaint()
+            return row
+        }
+
         val col = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(20), dp(28), dp(20), dp(20))
@@ -95,8 +140,31 @@ class SettingsActivity : Activity() {
             addView(result, LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT,
             ).apply { topMargin = dp(12) })
+
+            addView(heading("Route line"))
+            addView(swatches({ routeColour }) { routeColour = it })
+            addView(heading("Your arrow"))
+            addView(swatches({ arrowColour }) { arrowColour = it })
+            addView(heading("Recorded trail"))
+            addView(swatches({ trailColour }) { trailColour = it })
+            addView(TextView(this@SettingsActivity).apply {
+                textSize = 13f
+                setPadding(0, dp(10), 0, 0)
+                text = "Colours apply to the watch as well."
+            })
         }
         setContentView(ScrollView(this).apply { addView(col) })
+    }
+
+    /** One app on two devices, so the wrist gets the same colours. */
+    private fun pushStyle() {
+        scope.launch {
+            try {
+                Sync.sendStyle(this@SettingsActivity, routeColour, arrowColour, trailColour)
+            } catch (e: Exception) {
+                // Watch out of range; it picks the colours up when it reconnects.
+            }
+        }
     }
 
     private suspend fun testKey(key: String): String = withContext(Dispatchers.IO) {

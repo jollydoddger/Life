@@ -6,6 +6,10 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Color
 import android.net.Uri
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.IntentFilter
+import android.os.Build
 import android.os.Bundle
 import android.view.Gravity
 import android.view.View
@@ -17,10 +21,17 @@ import com.jollydoddger.waymark.shared.BngMapView
 import com.jollydoddger.waymark.shared.Corridor
 import com.jollydoddger.waymark.shared.Gpx
 import com.jollydoddger.waymark.shared.Locator
+import com.jollydoddger.waymark.shared.Prefs.arrowColour
 import com.jollydoddger.waymark.shared.Prefs.osApiKey
+import com.jollydoddger.waymark.shared.Prefs.recording
+import com.jollydoddger.waymark.shared.Prefs.routeColour
 import com.jollydoddger.waymark.shared.Prefs.routeReversed
+import com.jollydoddger.waymark.shared.Prefs.trailColour
+import com.jollydoddger.waymark.shared.Prefs.wantRecording
 import com.jollydoddger.waymark.shared.RouteStore
 import com.jollydoddger.waymark.shared.Sync
+import com.jollydoddger.waymark.shared.TrackingService
+import com.jollydoddger.waymark.shared.TrailStore
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -39,9 +50,17 @@ class MainActivity : Activity() {
     private lateinit var map: BngMapView
     private lateinit var status: TextView
     private lateinit var recentreBtn: Button
+    private lateinit var recordBtn: Button
     private var locator: Locator? = null
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private var importJob: Job? = null
+
+    private val trailWatcher = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            map.setTrail(TrailStore.points(this@MainActivity))
+            paintRecordButton()
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -63,11 +82,12 @@ class MainActivity : Activity() {
             say(if (routeReversed) "Arrows now point back the way" else "Arrows point the route's own way")
         }
         recentreBtn = roundButton("◉") { map.recentre() }
+        recordBtn = roundButton("●") { toggleRecording() }
         val settingsBtn = roundButton("⚙") { startActivity(Intent(this, SettingsActivity::class.java)) }
 
         val buttons = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            listOf(importBtn, reverseBtn, recentreBtn, settingsBtn).forEach {
+            listOf(importBtn, reverseBtn, recentreBtn, recordBtn, settingsBtn).forEach {
                 addView(it, LinearLayout.LayoutParams(dp(64), dp(56)).apply { topMargin = dp(6) })
             }
         }
@@ -98,10 +118,7 @@ class MainActivity : Activity() {
         setContentView(root)
 
         map.routeReversed = routeReversed
-        map.onFollowChanged = { following ->
-            recentreBtn.visibility = if (following) View.GONE else View.VISIBLE
-        }
-        recentreBtn.visibility = View.GONE
+        map.setColours(routeColour, arrowColour, trailColour)
 
         if (checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
             requestPermissions(
@@ -129,6 +146,18 @@ class MainActivity : Activity() {
     override fun onResume() {
         super.onResume()
         map.setRoute(RouteStore.load(this))
+        map.setTrail(TrailStore.points(this))
+        map.setColours(routeColour, arrowColour, trailColour)
+        // A Start pressed on the watch while this app was closed waits here.
+        if (wantRecording && !recording) TrackingService.start(this)
+        paintRecordButton()
+        val filter = IntentFilter(TrackingService.BROADCAST_TRAIL)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            registerReceiver(trailWatcher, filter, Context.RECEIVER_NOT_EXPORTED)
+        } else {
+            @Suppress("UnspecifiedRegisterReceiverFlag")
+            registerReceiver(trailWatcher, filter)
+        }
         if (osApiKey.isEmpty()) {
             say("No map without a key — tap here to enter your OS Maps API key")
         }
@@ -139,6 +168,7 @@ class MainActivity : Activity() {
     }
 
     override fun onPause() {
+        try { unregisterReceiver(trailWatcher) } catch (e: IllegalArgumentException) { }
         locator?.stop()
         locator = null
         super.onPause()
@@ -147,6 +177,40 @@ class MainActivity : Activity() {
     override fun onDestroy() {
         scope.cancel()
         super.onDestroy()
+    }
+
+    private fun toggleRecording() {
+        val turningOn = !recording
+        if (turningOn) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+            ) {
+                // Recording shows an ongoing notification; ask before promising.
+                requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 3)
+            }
+            TrailStore.clear(this)
+            map.setTrail(emptyList())
+            TrackingService.start(this)
+            say("Recording — leaving a trail behind you")
+        } else {
+            TrackingService.stop(this)
+            say("Stopped. The trail stays on the map until you start again.")
+        }
+        recording = turningOn
+        wantRecording = turningOn
+        paintRecordButton()
+        scope.launch {
+            try {
+                Sync.sendRecording(this@MainActivity, turningOn)
+            } catch (e: Exception) {
+                // Watch out of range: this phone still records itself, and the
+                // watch picks the wish up when it next connects.
+            }
+        }
+    }
+
+    private fun paintRecordButton() {
+        recordBtn.text = if (recording) "■" else "●"
     }
 
     private fun say(msg: String) {

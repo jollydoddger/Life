@@ -43,11 +43,33 @@ update, from any computer on the same Wi-Fi as the watch:
 
 ## Using it
 
-- **Phone**: GPX button imports a file; pinch or double-tap to zoom; drag to
-  look around and ◉ snaps back to you; ⇄ flips the route arrows; ⚙ is the key.
-- **Watch**: the bottom button does everything — **press** to zoom in,
-  **press twice** to zoom out, **hold** to leave the app (swiping right from
-  the left edge also leaves, as usual). ⇄ and ◉ sit at the bottom of the map.
+**Zoom, on both devices: tap the map to zoom in, press and hold to zoom out.**
+Pinch works on the phone too. The watch's physical bottom button is left alone
+on purpose — on Wear OS it is the same navigation path as swipe-to-dismiss, so
+an app that steals it for zoom is an app you cannot reliably get out of.
+
+**Phone** — the buttons down the right-hand side:
+
+| | |
+|---|---|
+| GPX | import a route file |
+| ⇄ | flip the direction of the arrows along the route |
+| ◉ | centre on you, and zoom right in |
+| ● | start recording a trail (■ stops it) |
+| ⚙ | API key, and the line / arrow / trail colours |
+
+**Watch** — three controls, at the edges where a round screen has most room:
+**◉ on the left** centres on you and zooms in, **● on the right** starts and
+stops recording, and **⇄ at the bottom** flips the route arrows.
+
+**Recording a walk.** Press ● on either device and both start, so the trail is
+there on whichever screen you look at. It keeps running with the screen off and
+the phone in a pocket, which is the point — that needs an ongoing notification
+while it runs, and it does use battery on both devices. Press ■ on either to
+stop. Starting again clears the previous trail; only the current walk is kept.
+One caveat worth knowing: a Start pressed on the phone while the *watch app is
+closed* cannot wake it (Android forbids background apps from starting this kind
+of service), so the watch begins its own trail the moment you next open it.
 
 Both maps are always north-up, like the paper they're printed from; the arrow
 is you, rotated to the compass (corrected to grid north). A grey arrow means
