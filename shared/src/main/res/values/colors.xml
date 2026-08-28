@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- OS-paper teal-green; the arrow sits on it. -->
+    <color name="ic_launcher_background">#1D5B4F</color>
+</resources>

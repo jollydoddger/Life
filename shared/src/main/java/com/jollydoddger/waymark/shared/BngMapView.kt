@@ -1,0 +1,321 @@
+package com.jollydoddger.waymark.shared
+
+import android.annotation.SuppressLint
+import android.content.Context
+import android.graphics.Canvas
+import android.graphics.Color
+import android.graphics.Paint
+import android.graphics.Path
+import android.graphics.Rect
+import android.graphics.RectF
+import android.util.AttributeSet
+import android.view.GestureDetector
+import android.view.MotionEvent
+import android.view.ScaleGestureDetector
+import android.view.View
+import kotlin.math.atan2
+import kotlin.math.hypot
+import kotlin.math.ln
+import kotlin.math.min
+import kotlin.math.pow
+import kotlin.math.roundToInt
+
+/**
+ * The map: OS Leisure tiles, the route line with direction arrows, and the
+ * you-arrow — all in British National Grid metres with a plain linear
+ * transform to the screen. North-up always; it is a paper map.
+ *
+ * Zoom is continuous ([zl]: metres-per-pixel = 896 / 2^zl, so whole numbers
+ * land on the OS pyramid's own levels). Tiles are drawn from the pyramid
+ * level nearest the current zoom minus a density bias, so the paper map's
+ * lettering comes out roughly physical-print size on a dense screen rather
+ * than microscopic. While a tile loads, its area is filled by scaling up the
+ * nearest coarser tile already in memory.
+ */
+class BngMapView @JvmOverloads constructor(
+    context: Context,
+    attrs: AttributeSet? = null,
+) : View(context, attrs) {
+
+    val tiles = TileStore(context).also { it.onTileReady = { postInvalidateOnAnimation() } }
+
+    private val density = resources.displayMetrics.density
+    private val bias = min(ln(density.toDouble()) / ln(2.0), 1.25)
+    private val minZl = 1.0
+    private val maxZl = TileGrid.MAX_Z + bias + 0.5
+
+    private var centreE = 400_000.0 // mid-GB until a fix or a route arrives
+    private var centreN = 300_000.0
+    private var zl = 6.0
+
+    private var route: Route? = null
+    private var routePts: List<En> = emptyList() // decimated for drawing
+    private var cumDist: DoubleArray = DoubleArray(0)
+
+    var routeReversed = false
+        set(v) { field = v; invalidate() }
+
+    private var fixE = 0.0
+    private var fixN = 0.0
+    private var hasFix = false
+    private var fixStale = false
+    private var headingDeg: Double? = null
+
+    /** Follow-mode: the map tracks the fix until a drag says otherwise. */
+    var follow = true
+        private set(v) {
+            if (field != v) { field = v; onFollowChanged?.invoke(v) }
+        }
+    var onFollowChanged: ((Boolean) -> Unit)? = null
+
+    private fun mpp(z: Double) = 896.0 / 2.0.pow(z)
+
+    // --- public surface -----------------------------------------------------
+
+    fun setRoute(r: Route?) {
+        route = r
+        if (r == null) {
+            routePts = emptyList(); cumDist = DoubleArray(0)
+        } else {
+            // Cap the drawn polyline; a 20k-point GPX gains nothing on screen.
+            val stride = (r.points.size / 1500) + 1
+            routePts = r.points.filterIndexed { i, _ -> i % stride == 0 || i == r.points.size - 1 }
+            cumDist = DoubleArray(routePts.size)
+            for (i in 1 until routePts.size) {
+                cumDist[i] = cumDist[i - 1] +
+                    hypot(routePts[i].e - routePts[i - 1].e, routePts[i].n - routePts[i - 1].n)
+            }
+            if (!hasFix) centreOnRoute()
+        }
+        invalidate()
+    }
+
+    fun setFix(e: Double, n: Double, stale: Boolean) {
+        fixE = e; fixN = n; hasFix = true; fixStale = stale
+        if (follow) { centreE = e; centreN = n }
+        invalidate()
+    }
+
+    /** Grid bearing, degrees clockwise from grid north; null = no compass. */
+    fun setHeading(deg: Double?) {
+        headingDeg = deg
+        invalidate()
+    }
+
+    fun zoomIn() = setZoom(zl + 1.0)
+    fun zoomOut() = setZoom(zl - 1.0)
+
+    fun recentre() {
+        follow = true
+        if (hasFix) { centreE = fixE; centreN = fixN } else centreOnRoute()
+        invalidate()
+    }
+
+    private fun setZoom(z: Double) {
+        zl = z.coerceIn(minZl, maxZl)
+        invalidate()
+    }
+
+    private fun centreOnRoute() {
+        val pts = routePts.ifEmpty { return }
+        centreE = (pts.minOf { it.e } + pts.maxOf { it.e }) / 2
+        centreN = (pts.minOf { it.n } + pts.maxOf { it.n }) / 2
+        if (width > 0) {
+            val spanE = (pts.maxOf { it.e } - pts.minOf { it.e }) * 1.3 + 1.0
+            val spanN = (pts.maxOf { it.n } - pts.minOf { it.n }) * 1.3 + 1.0
+            val need = maxOf(spanE / width, spanN / height)
+            setZoom(ln(896.0 / need) / ln(2.0))
+        }
+    }
+
+    override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
+        super.onSizeChanged(w, h, oldw, oldh)
+        // A route set before layout couldn't pick its zoom; do it now.
+        if (oldw == 0 && routePts.isNotEmpty() && !hasFix) centreOnRoute()
+    }
+
+    // --- drawing ------------------------------------------------------------
+
+    private val tilePaint = Paint().apply { isFilterBitmap = true }
+    private val bgPaint = Paint().apply { color = Color.rgb(232, 234, 229) }
+    private val casingPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE; color = Color.argb(190, 255, 255, 255)
+        strokeJoin = Paint.Join.ROUND; strokeCap = Paint.Cap.ROUND
+    }
+    private val routePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE; color = Color.argb(200, 30, 98, 208)
+        strokeJoin = Paint.Join.ROUND; strokeCap = Paint.Cap.ROUND
+    }
+    private val arrowFill = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.argb(230, 30, 98, 208) }
+    private val arrowOutline = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE; color = Color.WHITE
+    }
+    private val path = Path()
+    private val srcRect = Rect()
+    private val dstRect = RectF()
+
+    override fun onDraw(canvas: Canvas) {
+        if (width == 0 || height == 0) return
+        canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), bgPaint)
+        drawTiles(canvas)
+        drawRoute(canvas)
+        drawHere(canvas)
+    }
+
+    private fun sx(e: Double, m: Double) = (width / 2f + (e - centreE) / m).toFloat()
+    private fun sy(n: Double, m: Double) = (height / 2f - (n - centreN) / m).toFloat()
+
+    private fun drawTiles(canvas: Canvas) {
+        val m = mpp(zl)
+        val level = (zl - bias).roundToInt().coerceIn(0, TileGrid.MAX_Z)
+        val scale = TileGrid.METRES_PER_PX[level] / m // tile px → screen px
+        val span = TileGrid.tileSpan(level)
+
+        val west = centreE - width / 2.0 * m
+        val east = centreE + width / 2.0 * m
+        val north = centreN + height / 2.0 * m
+        val south = centreN - height / 2.0 * m
+        val x0 = TileGrid.tileX(west, level)
+        val x1 = TileGrid.tileX(east, level)
+        val y0 = TileGrid.tileY(north, level)
+        val y1 = TileGrid.tileY(south, level)
+
+        for (x in x0..x1) for (y in y0..y1) {
+            val left = sx(TileGrid.tileWest(x, level), m)
+            val top = sy(TileGrid.tileNorth(y, level), m)
+            val size = (span / m).toFloat()
+            dstRect.set(left, top, left + size, top + size)
+
+            val bmp = tiles.bitmap(level, x, y)
+            if (bmp != null) {
+                srcRect.set(0, 0, bmp.width, bmp.height)
+                canvas.drawBitmap(bmp, srcRect, dstRect, tilePaint)
+            } else {
+                // A coarser tile already in memory beats a grey square.
+                for (up in 1..3) {
+                    val zp = level - up
+                    if (zp < 0) break
+                    val parent = tiles.peek(zp, x shr up, y shr up) ?: continue
+                    val q = TileGrid.TILE_PX shr up
+                    val sxq = (x and ((1 shl up) - 1)) * q
+                    val syq = (y and ((1 shl up) - 1)) * q
+                    srcRect.set(sxq, syq, sxq + q, syq + q)
+                    canvas.drawBitmap(parent, srcRect, dstRect, tilePaint)
+                    break
+                }
+            }
+        }
+    }
+
+    private fun drawRoute(canvas: Canvas) {
+        val pts = routePts
+        if (pts.size < 2) return
+        val m = mpp(zl)
+
+        path.rewind()
+        path.moveTo(sx(pts[0].e, m), sy(pts[0].n, m))
+        for (i in 1 until pts.size) path.lineTo(sx(pts[i].e, m), sy(pts[i].n, m))
+        casingPaint.strokeWidth = 9 * density
+        routePaint.strokeWidth = 5.5f * density
+        canvas.drawPath(path, casingPaint)
+        canvas.drawPath(path, routePaint)
+
+        // Direction arrows, one every ~140 dp of screen along the line.
+        val total = cumDist.last()
+        val spacing = 140.0 * density * m
+        if (total < spacing / 2) return
+        arrowOutline.strokeWidth = 1.5f * density
+        var d = spacing / 2
+        var seg = 1
+        while (d < total) {
+            while (seg < cumDist.size && cumDist[seg] < d) seg++
+            if (seg >= cumDist.size) break
+            val a = pts[seg - 1]; val b = pts[seg]
+            val f = ((d - cumDist[seg - 1]) / (cumDist[seg] - cumDist[seg - 1])).coerceIn(0.0, 1.0)
+            val e = a.e + (b.e - a.e) * f
+            val n = a.n + (b.n - a.n) * f
+            var bearing = Math.toDegrees(atan2(b.e - a.e, b.n - a.n))
+            if (routeReversed) bearing += 180
+            drawArrowHead(canvas, sx(e, m), sy(n, m), bearing.toFloat(), 7f * density)
+            d += spacing
+        }
+    }
+
+    private fun drawArrowHead(canvas: Canvas, x: Float, y: Float, bearingDeg: Float, r: Float) {
+        canvas.save()
+        canvas.translate(x, y)
+        canvas.rotate(bearingDeg)
+        path.rewind()
+        path.moveTo(0f, -r)
+        path.lineTo(r * 0.8f, r)
+        path.lineTo(0f, r * 0.45f)
+        path.lineTo(-r * 0.8f, r)
+        path.close()
+        canvas.drawPath(path, arrowFill)
+        canvas.drawPath(path, arrowOutline)
+        canvas.restore()
+    }
+
+    private fun drawHere(canvas: Canvas) {
+        if (!hasFix) return
+        val m = mpp(zl)
+        val x = sx(fixE, m)
+        val y = sy(fixN, m)
+        val r = 11f * density
+        arrowFill.color = if (fixStale) Color.argb(200, 128, 128, 128) else Color.argb(240, 30, 98, 208)
+        arrowOutline.strokeWidth = 2.5f * density
+        val h = headingDeg
+        if (h == null) {
+            canvas.drawCircle(x, y, r * 0.55f, arrowFill)
+            canvas.drawCircle(x, y, r * 0.55f, arrowOutline)
+        } else {
+            drawArrowHead(canvas, x, y, h.toFloat(), r)
+        }
+        arrowFill.color = Color.argb(230, 30, 98, 208)
+        arrowOutline.strokeWidth = 1.5f * density
+    }
+
+    // --- touch --------------------------------------------------------------
+
+    private val gestures = GestureDetector(context, object : GestureDetector.SimpleOnGestureListener() {
+        override fun onDown(e: MotionEvent) = true
+        override fun onScroll(e1: MotionEvent?, e2: MotionEvent, dx: Float, dy: Float): Boolean {
+            val m = mpp(zl)
+            centreE += dx * m
+            centreN -= dy * m
+            follow = false
+            invalidate()
+            return true
+        }
+        override fun onDoubleTap(e: MotionEvent): Boolean {
+            zoomAround(e.x, e.y, zl + 1.0)
+            return true
+        }
+    })
+
+    private val scaler = ScaleGestureDetector(context, object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
+        override fun onScale(d: ScaleGestureDetector): Boolean {
+            zoomAround(d.focusX, d.focusY, zl + ln(d.scaleFactor.toDouble()) / ln(2.0))
+            return true
+        }
+    })
+
+    /** Zoom keeping the world point under (fx, fy) fixed on screen. */
+    private fun zoomAround(fx: Float, fy: Float, newZl: Double) {
+        val m1 = mpp(zl)
+        val we = centreE + (fx - width / 2.0) * m1
+        val wn = centreN - (fy - height / 2.0) * m1
+        zl = newZl.coerceIn(minZl, maxZl)
+        val m2 = mpp(zl)
+        centreE = we - (fx - width / 2.0) * m2
+        centreN = wn + (fy - height / 2.0) * m2
+        invalidate()
+    }
+
+    @SuppressLint("ClickableViewAccessibility")
+    override fun onTouchEvent(event: MotionEvent): Boolean {
+        val a = scaler.onTouchEvent(event)
+        val b = gestures.onTouchEvent(event)
+        return a || b || super.onTouchEvent(event)
+    }
+}

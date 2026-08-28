@@ -1,0 +1,86 @@
+name: Build APKs
+
+on:
+  push:
+    branches: [main, 'claude/**']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      # No --stacktrace: on a configuration failure it buries the actual
+      # message under a few hundred lines of Gradle internals.
+      #
+      # Teed to a file so the next step can quote it. `shell: bash` brings
+      # pipefail with it, so the pipe does not swallow Gradle's exit code and
+      # turn a failed build into a green tick.
+      - name: Build and test
+        shell: bash
+        run: ./gradlew :shared:testDebugUnitTest :phone:assembleDebug :wear:assembleDebug 2>&1 | tee /tmp/build.log
+
+      # A failed build that nobody can read costs a round trip of guessing at
+      # the cause. Published to a branch over git rather than to an issue or
+      # the Actions log API: git is the one channel that reliably works from
+      # every client here, so `git show origin/ci-logs:build-failure.log`
+      # always gets the compiler's own words. Force-pushed and orphaned, so it
+      # holds exactly one log and never accumulates history.
+      - name: Publish the failure log
+        if: failure()
+        shell: bash
+        run: |
+          cp /tmp/build.log /tmp/build-failure.log
+          git checkout --orphan ci-logs
+          git rm -rq --cached . || true
+          cp /tmp/build-failure.log build-failure.log
+          git add -f build-failure.log
+          git -c user.name='github-actions[bot]' \
+              -c user.email='github-actions[bot]@users.noreply.github.com' \
+              commit -qm "Build failure: run #$GITHUB_RUN_NUMBER on $GITHUB_SHA"
+          git push -f origin ci-logs
+
+      # Stable names: the phone APK is installed by tapping the release link,
+      # the watch one is adb-installed, and both instructions name these files.
+      - name: Collect APKs
+        shell: bash
+        run: |
+          mkdir -p /tmp/apks
+          cp phone/build/outputs/apk/debug/*.apk /tmp/apks/waymark-phone.apk
+          cp wear/build/outputs/apk/debug/*.apk /tmp/apks/waymark-watch.apk
+
+      - name: Upload APK artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: waymark-debug
+          path: /tmp/apks/*.apk
+          if-no-files-found: error
+
+      # A release asset is a direct .apk link, far easier to install from a
+      # phone than unzipping an Actions artifact.
+      - name: Publish rolling debug release
+        if: github.ref == 'refs/heads/main'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest-debug
+          name: Latest debug build
+          body: Automatically built from ${{ github.sha }}. Debug-signed, for sideloading.
+          prerelease: true
+          files: /tmp/apks/*.apk
