@@ -77,9 +77,14 @@ of service), so the watch begins its own trail the moment you next open it. And
 the **watch screen going dark does not stop a recording** — the trail is kept by
 a background service, not by the map being on show.
 
-**The watch screen** stays lit while you're using it and then sleeps after the
-idle time set on the phone (default 2 minutes; "Never" is an option). Any touch
-wakes it straight back to the map.
+**The watch screen.** Waymark holds it awake for the time set on the phone
+(default 2 minutes, from 3 seconds up, or "Never"), and any touch restarts the
+clock. It cannot switch the display off itself — no app can without device-admin
+powers — so when the hold expires your watch's own screen timeout takes over.
+That makes the short settings mean "stop interfering and let the watch behave
+normally", which is also the kindest to the battery, since the watch then really
+sleeps instead of being held awake. For darker sooner, lower the watch's own
+Settings → Display → Screen timeout.
 
 Both maps are always north-up, like the paper they're printed from; the arrow
 is you, rotated to the compass (corrected to grid north). A grey arrow means

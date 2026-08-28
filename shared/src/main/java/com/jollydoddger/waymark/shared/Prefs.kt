@@ -16,8 +16,19 @@ object Prefs {
     /** Two minutes lit: long enough to read a map, short enough to matter. */
     const val DEFAULT_SCREEN_TIMEOUT_SEC = 120
 
-    /** Offered on the phone; 0 means never sleep. */
+    /**
+     * Offered on the phone; 0 means never let go.
+     *
+     * This is how long Waymark *holds* the watch screen awake, not when the
+     * screen goes off — an app cannot switch a display off without
+     * device-admin powers. Once the hold expires the watch's own screen
+     * timeout applies, so the shortest settings amount to "stop interfering
+     * and let the watch behave normally", which is also the state in which it
+     * genuinely sleeps rather than being held awake.
+     */
     val SCREEN_TIMEOUTS: List<Pair<String, Int>> = listOf(
+        "3s" to 3,
+        "10s" to 10,
         "30s" to 30,
         "1 min" to 60,
         "2 min" to 120,

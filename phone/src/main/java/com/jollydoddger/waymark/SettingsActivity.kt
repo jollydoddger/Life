@@ -6,6 +6,7 @@ import android.text.InputType
 import android.widget.Button
 import android.widget.EditText
 import android.widget.LinearLayout
+import android.widget.HorizontalScrollView
 import android.widget.ScrollView
 import android.widget.TextView
 import android.graphics.Color
@@ -187,14 +188,22 @@ class SettingsActivity : Activity() {
             addView(heading("Recorded trail"))
             addView(swatches({ trailColour }) { trailColour = it })
 
-            addView(heading("Watch screen stays on for"))
-            addView(choices(Prefs.SCREEN_TIMEOUTS, { screenTimeoutSec }) { screenTimeoutSec = it })
+            addView(heading("Waymark holds the watch screen on for"))
+            addView(HorizontalScrollView(this@SettingsActivity).apply {
+                isHorizontalScrollBarEnabled = false
+                addView(choices(Prefs.SCREEN_TIMEOUTS, { screenTimeoutSec }) { screenTimeoutSec = it })
+            })
             addView(TextView(this@SettingsActivity).apply {
                 textSize = 13f
                 setPadding(0, dp(8), 0, 0)
-                text = "Everything on this screen applies to the watch too — it has no " +
-                    "settings of its own. The watch screen sleeping does not stop a " +
-                    "recording; the trail keeps going either way."
+                text = "An app can't switch a watch display off, only stop it sleeping. " +
+                    "After this long, your watch's own screen timeout takes over — so the " +
+                    "short settings mean \"let the watch behave normally\", which is also " +
+                    "the kindest to its battery. For darker sooner, lower the watch's own " +
+                    "Settings \u2192 Display \u2192 Screen timeout.\n\n" +
+                    "Everything on this screen applies to the watch too — it has no settings " +
+                    "of its own. A dark watch screen does not stop a recording; the trail " +
+                    "keeps going either way."
             })
         }
         setContentView(ScrollView(this).apply { addView(col) })
