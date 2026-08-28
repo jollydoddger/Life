@@ -56,20 +56,30 @@ an app that steals it for zoom is an app you cannot reliably get out of.
 | ⇄ | flip the direction of the arrows along the route |
 | ◉ | centre on you, and zoom right in |
 | ● | start recording a trail (■ stops it) |
-| ⚙ | API key, and the line / arrow / trail colours |
+| ⚙ | API key, colours, and the watch's screen timeout |
 
-**Watch** — three controls, at the edges where a round screen has most room:
-**◉ on the left** centres on you and zooms in, **● on the right** starts and
-stops recording, and **⇄ at the bottom** flips the route arrows.
+**Watch** — one button. **◉ at the middle of the left edge** centres on you and
+zooms in. There is room on a 45mm circle for a map and almost nothing else, so
+everything else is set on the phone and follows across: colours, arrow
+direction, recording, and how long the watch screen stays lit.
 
-**Recording a walk.** Press ● on either device and both start, so the trail is
-there on whichever screen you look at. It keeps running with the screen off and
-the phone in a pocket, which is the point — that needs an ongoing notification
-while it runs, and it does use battery on both devices. Press ■ on either to
-stop. Starting again clears the previous trail; only the current walk is kept.
-One caveat worth knowing: a Start pressed on the phone while the *watch app is
+**Recording a walk.** Press ● on the phone. Both devices record — each from its
+own GPS — so the trail is there on whichever screen you look at, with no button
+needed on the wrist. It keeps running with the screen off and the phone in a
+pocket, which is the point: that needs an ongoing notification while it runs,
+and it does use battery on both devices. Stop it with ■ on the phone, or from
+the **Stop** action on the watch's own notification. Starting again clears the
+previous trail; only the current walk is kept.
+
+Two caveats worth knowing. A Start pressed on the phone while the *watch app is
 closed* cannot wake it (Android forbids background apps from starting this kind
-of service), so the watch begins its own trail the moment you next open it.
+of service), so the watch begins its own trail the moment you next open it. And
+the **watch screen going dark does not stop a recording** — the trail is kept by
+a background service, not by the map being on show.
+
+**The watch screen** stays lit while you're using it and then sleeps after the
+idle time set on the phone (default 2 minutes; "Never" is an option). Any touch
+wakes it straight back to the map.
 
 Both maps are always north-up, like the paper they're printed from; the arrow
 is you, rotated to the compass (corrected to grid north). A grey arrow means

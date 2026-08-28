@@ -13,6 +13,18 @@ import android.content.SharedPreferences
 object Prefs {
     private const val FILE = "waymark"
 
+    /** Two minutes lit: long enough to read a map, short enough to matter. */
+    const val DEFAULT_SCREEN_TIMEOUT_SEC = 120
+
+    /** Offered on the phone; 0 means never sleep. */
+    val SCREEN_TIMEOUTS: List<Pair<String, Int>> = listOf(
+        "30s" to 30,
+        "1 min" to 60,
+        "2 min" to 120,
+        "5 min" to 300,
+        "Never" to 0,
+    )
+
     private fun p(ctx: Context): SharedPreferences =
         ctx.getSharedPreferences(FILE, Context.MODE_PRIVATE)
 
@@ -36,6 +48,15 @@ object Prefs {
     var Context.trailColour: Int
         get() = p(this).getInt("trailColour", Colours.DEFAULT_TRAIL)
         set(v) = p(this).edit().putInt("trailColour", v).apply()
+
+    /**
+     * How long the watch holds its screen on before letting it sleep. Only the
+     * watch honours it — the phone is left to its own system timeout. Set on
+     * the phone and synced, because the watch has no room for settings.
+     */
+    var Context.screenTimeoutSec: Int
+        get() = p(this).getInt("screenTimeoutSec", DEFAULT_SCREEN_TIMEOUT_SEC)
+        set(v) = p(this).edit().putInt("screenTimeoutSec", v).apply()
 
     /**
      * Whether a walk is being recorded. Kept here rather than in the service

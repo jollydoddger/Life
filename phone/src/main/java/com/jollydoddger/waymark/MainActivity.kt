@@ -79,7 +79,18 @@ class MainActivity : Activity() {
         val reverseBtn = roundButton("⇄") {
             routeReversed = !routeReversed
             map.routeReversed = routeReversed
-            say(if (routeReversed) "Arrows now point back the way" else "Arrows point the route's own way")
+            say(
+                if (routeReversed) "Arrows now point back the way — sending to the watch"
+                else "Arrows point the route's own way — sending to the watch",
+            )
+            // The watch has no ⇄ of its own any more, so this has to travel.
+            scope.launch {
+                try {
+                    Sync.sendStyle(this@MainActivity)
+                } catch (e: Exception) {
+                    say("Flipped here. The watch will follow when you next open it.")
+                }
+            }
         }
         recentreBtn = roundButton("◉") { map.recentre() }
         recordBtn = roundButton("●") { toggleRecording() }

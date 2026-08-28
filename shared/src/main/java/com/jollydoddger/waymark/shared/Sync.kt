@@ -2,9 +2,18 @@ package com.jollydoddger.waymark.shared
 
 import android.content.Context
 import com.google.android.gms.wearable.Asset
+import com.google.android.gms.wearable.DataMap
 import com.google.android.gms.wearable.DataMapItem
 import com.google.android.gms.wearable.PutDataMapRequest
 import com.google.android.gms.wearable.Wearable
+import com.jollydoddger.waymark.shared.Prefs.arrowColour
+import com.jollydoddger.waymark.shared.Prefs.osApiKey
+import com.jollydoddger.waymark.shared.Prefs.recording
+import com.jollydoddger.waymark.shared.Prefs.routeColour
+import com.jollydoddger.waymark.shared.Prefs.routeReversed
+import com.jollydoddger.waymark.shared.Prefs.screenTimeoutSec
+import com.jollydoddger.waymark.shared.Prefs.trailColour
+import com.jollydoddger.waymark.shared.Prefs.wantRecording
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
@@ -62,16 +71,35 @@ object Sync {
         Wearable.getDataClient(ctx).putDataItem(req).await()
     }
 
-    /** His colours, so the wrist and the pocket draw the same map. */
-    suspend fun sendStyle(ctx: Context, route: Int, arrow: Int, trail: Int) {
+    /**
+     * Everything about how the map looks and behaves, set on the phone.
+     * Reversal rides along because the watch no longer has a ⇄ button of its
+     * own — without this, flipping the arrows on the phone would leave the
+     * wrist pointing the other way for ever.
+     */
+    suspend fun sendStyle(
+        ctx: Context,
+        route: Int,
+        arrow: Int,
+        trail: Int,
+        reversed: Boolean,
+        screenTimeoutSec: Int,
+    ) {
         val req = PutDataMapRequest.create(PATH_STYLE).apply {
             dataMap.putInt("route", route)
             dataMap.putInt("arrow", arrow)
             dataMap.putInt("trail", trail)
+            dataMap.putBoolean("reversed", reversed)
+            dataMap.putInt("timeout", screenTimeoutSec)
             dataMap.putLong("stamp", System.currentTimeMillis())
         }.asPutDataRequest().setUrgent()
         Wearable.getDataClient(ctx).putDataItem(req).await()
     }
+
+    /** Convenience: send whatever the phone currently holds. */
+    suspend fun sendStyle(ctx: Context) = sendStyle(
+        ctx, ctx.routeColour, ctx.arrowColour, ctx.trailColour, ctx.routeReversed, ctx.screenTimeoutSec,
+    )
 
     /**
      * Start/stop recording on the other device too, so one press covers both.
@@ -85,6 +113,67 @@ object Sync {
             dataMap.putLong("stamp", System.currentTimeMillis())
         }.asPutDataRequest().setUrgent()
         Wearable.getDataClient(ctx).putDataItem(req).await()
+    }
+
+    // --- receiving -----------------------------------------------------------
+    //
+    // One set of appliers, used by both the change-event path and the pull
+    // below. Two copies of this logic would drift, and a colour that arrives
+    // down one route but not the other is exactly the bug this round fixes.
+
+    fun applyKey(ctx: Context, data: DataMap) {
+        val key = data.getString("key")
+        if (!key.isNullOrEmpty()) ctx.osApiKey = key
+    }
+
+    fun applyStyle(ctx: Context, data: DataMap) {
+        ctx.routeColour = data.getInt("route", Colours.DEFAULT_ROUTE)
+        ctx.arrowColour = data.getInt("arrow", Colours.DEFAULT_ARROW)
+        ctx.trailColour = data.getInt("trail", Colours.DEFAULT_TRAIL)
+        ctx.routeReversed = data.getBoolean("reversed", false)
+        ctx.screenTimeoutSec = data.getInt("timeout", Prefs.DEFAULT_SCREEN_TIMEOUT_SEC)
+    }
+
+    /**
+     * Records what the phone asked for. Starting is left to the open app — a
+     * foreground service cannot be launched from the background on modern
+     * Android — but a *stop* is honoured immediately wherever it arrives,
+     * because a Stop on the phone must never leave the watch recording.
+     */
+    fun applyRecordWish(ctx: Context, data: DataMap) {
+        val on = data.getBoolean("on", false)
+        ctx.wantRecording = on
+        if (!on && ctx.recording) TrackingService.stop(ctx)
+    }
+
+    /**
+     * Ask the Data Layer what the current settings are, rather than waiting to
+     * be told.
+     *
+     * Change events are a one-shot delivery: if the watch was asleep, out of
+     * range, or its background listener was throttled when the phone sent, the
+     * old value simply stays for ever, because nothing ever asks again. Data
+     * items persist, so reading them on open is the reliable half of the pair.
+     * Routes are left out deliberately — they carry a tile-zip Asset, are much
+     * bigger, and their own delivery path already works.
+     */
+    suspend fun pullAll(ctx: Context): Boolean = withContext(Dispatchers.IO) {
+        val buffer = Wearable.getDataClient(ctx).dataItems.await()
+        try {
+            var applied = false
+            for (item in buffer) {
+                val data = DataMapItem.fromDataItem(item).dataMap
+                when (item.uri.path) {
+                    PATH_KEY -> { applyKey(ctx, data); applied = true }
+                    PATH_STYLE -> { applyStyle(ctx, data); applied = true }
+                    PATH_RECORD -> { applyRecordWish(ctx, data); applied = true }
+                }
+            }
+            applied
+        } finally {
+            // A DataItemBuffer holds native memory until released.
+            buffer.release()
+        }
     }
 
     /** Watch side: unpack a received route item — the JSON and the tile zip. */

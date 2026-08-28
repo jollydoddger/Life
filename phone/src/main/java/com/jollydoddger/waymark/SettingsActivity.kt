@@ -10,12 +10,15 @@ import android.widget.ScrollView
 import android.widget.TextView
 import android.graphics.Color
 import android.graphics.drawable.GradientDrawable
+import android.view.Gravity
 import android.view.View
 import com.jollydoddger.waymark.shared.Bng
 import com.jollydoddger.waymark.shared.Colours
+import com.jollydoddger.waymark.shared.Prefs
 import com.jollydoddger.waymark.shared.Prefs.arrowColour
 import com.jollydoddger.waymark.shared.Prefs.osApiKey
 import com.jollydoddger.waymark.shared.Prefs.routeColour
+import com.jollydoddger.waymark.shared.Prefs.screenTimeoutSec
 import com.jollydoddger.waymark.shared.Prefs.trailColour
 import com.jollydoddger.waymark.shared.Sync
 import com.jollydoddger.waymark.shared.TileGrid
@@ -119,7 +122,7 @@ class SettingsActivity : Activity() {
                     setOnClickListener {
                         choose(colour)
                         repaint()
-                        pushStyle()
+                        pushStyle(result)
                     }
                 }
                 cells.add(cell to colour)
@@ -127,6 +130,42 @@ class SettingsActivity : Activity() {
             }
             repaint()
             return row
+        }
+
+        // Labelled chips, for the settings that aren't colours.
+        fun choices(options: List<Pair<String, Int>>, current: () -> Int, choose: (Int) -> Unit): LinearLayout {
+            val strip = LinearLayout(this)
+            val cells = mutableListOf<Pair<TextView, Int>>()
+            fun repaint() {
+                cells.forEach { (view, value) ->
+                    val on = value == current()
+                    view.background = GradientDrawable().apply {
+                        cornerRadius = dp(18).toFloat()
+                        setColor(if (on) Color.rgb(29, 91, 79) else Color.rgb(232, 232, 232))
+                        setStroke(dp(1), Color.DKGRAY)
+                    }
+                    view.setTextColor(if (on) Color.WHITE else Color.DKGRAY)
+                }
+            }
+            options.forEach { (label, value) ->
+                val cell = TextView(this).apply {
+                    text = label
+                    textSize = 13f
+                    gravity = Gravity.CENTER
+                    setPadding(dp(10), dp(8), dp(10), dp(8))
+                    setOnClickListener {
+                        choose(value)
+                        repaint()
+                        pushStyle(result)
+                    }
+                }
+                cells.add(cell to value)
+                strip.addView(cell, LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT,
+                ).apply { rightMargin = dp(6) })
+            }
+            repaint()
+            return strip
         }
 
         val col = LinearLayout(this).apply {
@@ -147,22 +186,34 @@ class SettingsActivity : Activity() {
             addView(swatches({ arrowColour }) { arrowColour = it })
             addView(heading("Recorded trail"))
             addView(swatches({ trailColour }) { trailColour = it })
+
+            addView(heading("Watch screen stays on for"))
+            addView(choices(Prefs.SCREEN_TIMEOUTS, { screenTimeoutSec }) { screenTimeoutSec = it })
             addView(TextView(this@SettingsActivity).apply {
                 textSize = 13f
-                setPadding(0, dp(10), 0, 0)
-                text = "Colours apply to the watch as well."
+                setPadding(0, dp(8), 0, 0)
+                text = "Everything on this screen applies to the watch too — it has no " +
+                    "settings of its own. The watch screen sleeping does not stop a " +
+                    "recording; the trail keeps going either way."
             })
         }
         setContentView(ScrollView(this).apply { addView(col) })
     }
 
-    /** One app on two devices, so the wrist gets the same colours. */
-    private fun pushStyle() {
+    /**
+     * One app on two devices, so the wrist gets the same settings — and says
+     * whether it worked. Swallowing the failure silently under a line reading
+     * "applies to the watch as well" is how a broken sync stays invisible.
+     */
+    private fun pushStyle(result: TextView) {
+        result.text = "Sending to the watch…"
         scope.launch {
             try {
-                Sync.sendStyle(this@SettingsActivity, routeColour, arrowColour, trailColour)
+                Sync.sendStyle(this@SettingsActivity)
+                result.text = "Sent to the watch."
             } catch (e: Exception) {
-                // Watch out of range; it picks the colours up when it reconnects.
+                result.text = "Saved on the phone — the watch will pick it up next time " +
+                    "you open Waymark on it. (${e.javaClass.simpleName})"
             }
         }
     }
