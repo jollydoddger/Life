@@ -146,13 +146,24 @@ class MainActivity : Activity() {
             setOnClickListener { toggleRecording() }
         }
         val downloadBtn = iconButton(Glyph.DOWNLOAD) { downloadArea() }
+        val sunBtn = iconButton(Glyph.SUN) {
+            val here = lastFix
+            if (here == null) {
+                say("No GPS fix yet — the sun's track needs to know where you are.")
+            } else {
+                startActivity(
+                    Intent(this, SunActivity::class.java)
+                        .putExtra("e", here.e).putExtra("n", here.n),
+                )
+            }
+        }
         val settingsBtn = iconButton(Glyph.SETTINGS) {
             startActivity(Intent(this, SettingsActivity::class.java))
         }
 
         val buttons = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            listOf(importBtn, reverseBtn, recentreBtn, recordBtn, downloadBtn, settingsBtn).forEach {
+            listOf(importBtn, reverseBtn, recentreBtn, recordBtn, downloadBtn, sunBtn, settingsBtn).forEach {
                 addView(it, LinearLayout.LayoutParams(dp(52), dp(52)).apply { topMargin = dp(9) })
             }
         }

@@ -9,6 +9,12 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <!-- Hold-to-talk needs the recording under this app's control. -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <!-- The sun view draws its arc over the camera. Optional in both
+         senses: not required to install, and refusing it just swaps the
+         camera for a plain sky. -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
+    <uses-feature android:name="android.hardware.camera.autofocus" android:required="false" />
 
     <!-- Load-bearing (a loose-ends lesson): without declaring interest, the
          speech recogniser is invisible from Android 11 and the mic reports
@@ -49,6 +55,11 @@
         <activity
             android:name=".SettingsActivity"
             android:exported="false" />
+
+        <activity
+            android:name=".SunActivity"
+            android:exported="false"
+            android:screenOrientation="portrait" />
 
         <!-- Hands one exported GPX at a time to the share sheet. Not
              exported: targets reach it only through the temporary grant the

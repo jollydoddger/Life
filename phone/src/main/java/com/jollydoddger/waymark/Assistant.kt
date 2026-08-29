@@ -136,7 +136,10 @@ class Assistant(private val ctx: Context, private val tools: GeoTools) {
             }
             "plan_route" -> {
                 val places = (input["via"] as? List<*>)?.filterIsInstance<String>().orEmpty()
-                val result = tools.planRoute(places, num("circular_km"))
+                // Roads are avoided unless he says otherwise: the safer
+                // default for a walker, and the one he asked for.
+                val avoid = (input["avoid_roads"] as? Boolean) ?: true
+                val result = tools.planRoute(places, num("circular_km"), avoid, str("start_place"))
                 if (result.startsWith("Route set")) {
                     actions += Action(result.substringBefore('.') + " — previous route banked")
                 }
@@ -223,9 +226,19 @@ class Assistant(private val ctx: Context, private val tools: GeoTools) {
 
             plan_route replaces the current route on the map (the old one is
             banked and restore_previous_route brings it back — mention that
-            when you replace a route). Planned routes follow paths mapped in
-            OpenStreetMap: usually right, not gospel; advise a glance against
-            the OS map. Keep replies short — they are read on a phone,
+            when you replace a route). It routes on the app's own network, so
+            you CAN hold a length and CAN refuse A and B roads; say what it
+            actually achieved rather than what was asked for, and if a plan
+            comes back too long, too short, or blocked, try again with
+            different parameters before settling. Planned routes follow paths
+            mapped in OpenStreetMap: usually right, not gospel; advise a
+            glance against the OS map.
+
+            You are expected to plan properly rather than one-shot it: chain
+            the tools. A good answer to "plan me a walk for this afternoon"
+            is plan_route, then walk_brief on the result, then say in one
+            short paragraph what he is getting and whether the weather and
+            the light suit it. Keep replies short — they are read on a phone,
             mid-walk, possibly in rain. Use km and metres.
 
             For "should I set off now?", "will it rain on me?", or "back
@@ -288,14 +301,18 @@ class Assistant(private val ctx: Context, private val tools: GeoTools) {
             ),
             tool(
                 "plan_route",
-                "Plan a walking route from his position and set it as the app's route (the old " +
-                    "one is banked). Give via places for point-to-point, or circular_km for a " +
-                    "round walk. For a circular walk it tries several loops in different " +
-                    "directions, hangs their waypoints off real mapped footpaths, and keeps the " +
-                    "one that runs most on paths and tracks — so it genuinely favours " +
-                    "countryside, and reports the measured percentage. Takes about half a " +
-                    "minute. Distances are in KILOMETRES: convert miles yourself (1 mile = " +
-                    "1.61 km) before calling.",
+                "Plan a walking route and set it as the app's route (the old one is banked). " +
+                    "Routes on Waymark's OWN network built from OpenStreetMap, not a public " +
+                    "router, which means two things you can genuinely promise: it holds the " +
+                    "length you ask for (it re-runs on a tighter loop until the distance " +
+                    "lands) and it can keep off A and B roads entirely (they are left out of " +
+                    "the network, so it cannot stray onto one). It reports the length it " +
+                    "actually achieved and the percentage on paths, tracks and bridleways, " +
+                    "counted off the route rather than estimated — quote those figures back " +
+                    "to him. Takes up to a minute. If it cannot close a loop under the rules " +
+                    "it says so; retrying with avoid_roads false, or a different distance, is " +
+                    "a sensible next move. Distances are KILOMETRES: convert miles yourself " +
+                    "(1 mile = 1.61 km).",
                 schema(
                     mapOf(
                         "via" to JsonValue.from(
@@ -307,8 +324,19 @@ class Assistant(private val ctx: Context, private val tools: GeoTools) {
                         ),
                         "circular_km" to property(
                             "number",
-                            "Rough length in KILOMETRES for a circular walk back to his position " +
+                            "Rough length in KILOMETRES for a circular walk back to the start " +
                                 "(convert from miles first). 0 or absent for point-to-point.",
+                        ),
+                        "avoid_roads" to property(
+                            "boolean",
+                            "Default true: keep off A, B and C roads entirely, walking only " +
+                                "paths, tracks, bridleways and quiet lanes. Set false only if " +
+                                "he asks, or if a plan failed for want of a link road.",
+                        ),
+                        "start_place" to property(
+                            "string",
+                            "Start somewhere other than his current position — a place name, " +
+                                "for planning a walk before setting out. Absent = start here.",
                         ),
                     ),
                     emptyList(),

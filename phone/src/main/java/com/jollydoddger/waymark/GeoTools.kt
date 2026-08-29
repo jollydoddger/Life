@@ -7,14 +7,13 @@ import com.jollydoddger.waymark.shared.Poi
 import com.jollydoddger.waymark.shared.PoiStore
 import com.jollydoddger.waymark.shared.Route
 import com.jollydoddger.waymark.shared.RouteStore
+import com.jollydoddger.waymark.shared.Sun
 import org.json.JSONArray
 import org.json.JSONObject
 import kotlin.math.PI
 import kotlin.math.atan2
-import kotlin.math.cos
 import kotlin.math.hypot
 import kotlin.math.roundToInt
-import kotlin.math.sin
 
 /**
  * The facts behind the assistant, every one deterministic: grid arithmetic
@@ -35,14 +34,6 @@ class GeoTools(
     /** Progress for the slow ones — planning is several calls, not one. */
     private val progress: (String) -> Unit = {},
 ) {
-
-    private companion object {
-        /** Loops tried per plan. Each is one routing call on a free server. */
-        const val CANDIDATES = 3
-
-        /** Within this of a mapped path counts as walking on it. */
-        const val NEAR_PATH_M = 25.0
-    }
 
     private fun route(): Route? = RouteStore.load(ctx)
 
@@ -265,85 +256,134 @@ class GeoTools(
 
     // --- routing -------------------------------------------------------------
 
-    /** One routed candidate, with how green it turned out. */
-    private data class Candidate(val points: List<En>, val metres: Double, val pathFraction: Double)
-
     /**
-     * Plan a walk. Point-to-point when given places; otherwise a circular loop
-     * that actually tries to be a country walk.
+     * Plan a walk, on Waymark's own network rather than a public router.
      *
-     * "Countryside" cannot be asserted by the model and is not something the
-     * router reports — OSRM returns geometry and distance, not OSM highway
-     * tags. So it is measured here instead: one Overpass query fetches the
-     * real footpaths, tracks and bridleways around the start, those paths are
-     * used to *place* each candidate loop's waypoints, and each routed result
-     * is then scored geometrically against the same path data. The percentage
-     * in the reply is that measurement, not an impression.
+     * Two things he asked for that a general foot router cannot do: hold a
+     * length, and stay off the A-roads. Both are answered in [Router] — the
+     * roads are left out of the graph, and the loop is re-run on a tighter
+     * circle until the distance lands. What comes back is measured off the
+     * edges actually walked, so the percentages here are counted, not
+     * estimated.
      */
-    fun planRoute(placeNames: List<String>, circularKm: Double): String {
-        val here = fix() ?: return "No GPS fix yet — can't plan from where you are."
+    fun planRoute(
+        placeNames: List<String>,
+        circularKm: Double,
+        avoidRoads: Boolean = true,
+        startPlace: String = "",
+    ): String {
+        // Planning from the sofa for tomorrow is as real a use as planning
+        // on the doorstep, so the start can be a named place instead of here.
+        val here = if (startPlace.isNotBlank()) {
+            val g = geocode(startPlace)
+                ?: return "Failed: couldn't find \"$startPlace\" to start from (Nominatim)."
+            Bng.fromWgs84(g.first, g.second)
+        } else {
+            fix() ?: return "No GPS fix yet — either wait for one, or give me a place to start from."
+        }
 
         if (placeNames.isNotEmpty()) {
-            val waypoints = ArrayList<Pair<Double, Double>>()
-            waypoints.add(Bng.toWgs84(here))
+            val targets = ArrayList<En>()
             for (name in placeNames) {
                 val g = geocode(name) ?: return "Failed: couldn't find \"$name\" on the map (Nominatim)."
-                waypoints.add(g)
+                targets.add(Bng.fromWgs84(g.first, g.second))
             }
-            if (circularKm > 0) waypoints.add(Bng.toWgs84(here))
-            val routed = routeVia(waypoints)
-                ?: return "The router found no walkable route between those points."
-            return adopt(routed, "Planned walk", null)
+            val span = targets.maxOf { hypot(it.e - here.e, it.n - here.n) }
+            if (span > 15_000) {
+                // Too far to hold a local network in memory; the public
+                // router still answers, and the reply says which was used.
+                progress("That's a long way — using the public router…")
+                val waypoints = ArrayList<Pair<Double, Double>>()
+                waypoints.add(Bng.toWgs84(here))
+                targets.forEach { waypoints.add(Bng.toWgs84(it)) }
+                if (circularKm > 0) waypoints.add(Bng.toWgs84(here))
+                val routed = routeVia(waypoints)
+                    ?: return "The router found no walkable route between those points."
+                return adopt(
+                    routed, "Planned walk",
+                    "Over 15 km across, so this used the public foot router — which " +
+                        "means no road-avoidance guarantee. Check the road casings on the map.",
+                )
+            }
+            progress("Reading the paths and lanes round here…")
+            val graph = Router.build(here, span + 2_000, avoidRoads)
+            if (graph.nodes.size < 20) return noNetwork(avoidRoads)
+            val points = ArrayList<En>()
+            var metres = 0.0
+            val byGroup = HashMap<String, Double>()
+            var cursor = here
+            for ((i, t) in targets.withIndex()) {
+                progress("Leg ${i + 1} of ${targets.size}…")
+                val leg = Router.between(graph, cursor, t)
+                    ?: return "No walkable way to \"${placeNames[i]}\" that keeps to the rules — " +
+                        "try again with avoid_roads false, or a nearer place."
+                if (points.isEmpty()) points.addAll(leg.points) else points.addAll(leg.points.drop(1))
+                metres += leg.metres
+                leg.byGroup.forEach { (k, v) -> byGroup[k] = (byGroup[k] ?: 0.0) + v }
+                cursor = t
+            }
+            if (circularKm > 0) {
+                Router.between(graph, cursor, here)?.let { back ->
+                    points.addAll(back.points.drop(1))
+                    metres += back.metres
+                    back.byGroup.forEach { (k, v) -> byGroup[k] = (byGroup[k] ?: 0.0) + v }
+                }
+            }
+            val planned = Router.Planned(points, metres, byGroup)
+            return adopt(planned.points to planned.metres, "Planned walk", describe(planned, null, avoidRoads))
         }
 
         if (circularKm <= 0) return "Failed: give either place names or a circular distance."
 
         val target = circularKm * 1000
-        val radius = target / (2 * PI)
-        progress("Looking up the footpaths round here…")
-        val paths = pathSegments(here, radius * 1.6 + 500)
+        progress("Reading the paths and lanes round here…")
+        val graph = Router.build(here, target / (2 * PI) * 1.9 + 900, avoidRoads)
+        if (graph.nodes.size < 20) return noNetwork(avoidRoads)
 
-        // Candidates: loops in evenly spread directions, each hung off real
-        // path nodes where there are any within reach of the ideal circle.
-        val spin = Math.random() * 2 * PI
-        val candidates = ArrayList<Candidate>()
-        for (c in 0 until CANDIDATES) {
-            val bearing0 = spin + c * 2 * PI / CANDIDATES
-            val waypoints = ArrayList<Pair<Double, Double>>()
-            waypoints.add(Bng.toWgs84(here))
-            for (k in 0..2) {
-                val b = bearing0 + k * 2 * PI / 3
-                val ideal = En(here.e + radius * sin(b), here.n + radius * cos(b))
-                waypoints.add(Bng.toWgs84(snapToPath(ideal, paths, radius * 0.45)))
-            }
-            waypoints.add(Bng.toWgs84(here))
-            progress("Trying route ${c + 1} of $CANDIDATES…")
-            val routed = routeVia(waypoints) ?: continue
-            candidates.add(
-                Candidate(routed.first, routed.second, pathFraction(routed.first, paths)),
-            )
-        }
-        if (candidates.isEmpty()) {
-            return "The foot router couldn't find a loop from here. It is a free shared " +
-                "server, so this may also just be a busy moment — worth one retry."
-        }
-
-        // Greenest wins, with length error as the tie-breaker: a beautifully
-        // green loop of the wrong length is not what was asked for.
-        val best = candidates.maxByOrNull {
-            it.pathFraction - 0.6 * kotlin.math.abs(it.metres - target) / target
-        }!!
-        val note = if (paths.isEmpty()) {
-            "No footpaths or tracks are mapped near here, so this follows whatever is walkable."
-        } else {
-            "${(best.pathFraction * 100).roundToInt()}% of it runs on or beside mapped " +
-                "footpaths, tracks or bridleways" +
-                (if (candidates.size > 1) " — the greenest of ${candidates.size} loops tried." else ".")
-        }
-        return adopt(best.points to best.metres, "Planned ${km(best.metres)} circular", note)
+        progress("Building a loop…")
+        val loop = Router.loop(graph, here, target) { note -> progress(note) }
+            ?: return "Couldn't close a loop from here on " +
+                (if (avoidRoads) "paths and quiet lanes alone. Ask again with avoid_roads " +
+                    "false and I'll allow the bigger roads." else "the walkable network round here.") +
+                " A different distance may also work."
+        return adopt(loop.points to loop.metres, "Planned ${km(loop.metres)} circular",
+            describe(loop, target, avoidRoads))
     }
 
-    /** Save a routed line as the app's route and say so honestly. */
+    private fun noNetwork(avoidRoads: Boolean): String =
+        "OpenStreetMap has almost no walkable ways mapped round here" +
+            (if (avoidRoads) " once the A and B roads are excluded" else "") +
+            ", so there is nothing to plan on. That is a gap in the map, not in the ground."
+
+    /** What was actually built, in numbers counted off the route. */
+    private fun describe(p: Router.Planned, target: Double?, avoidRoads: Boolean): String {
+        val sb = StringBuilder()
+        if (target != null) {
+            val err = (p.metres - target) / target
+            sb.append(
+                when {
+                    kotlin.math.abs(err) < 0.08 -> "That is on target. "
+                    p.metres > target -> "That is ${"%.0f".format(err * 100)}% longer than asked — " +
+                        "the network round here would not close a shorter loop. "
+                    else -> "That is ${"%.0f".format(-err * 100)}% shorter than asked. "
+                },
+            )
+        }
+        val pathPct = (p.pathFraction() * 100).roundToInt()
+        val lane = (p.byGroup["lane"] ?: 0.0)
+        val road = p.roadMetres()
+        sb.append("$pathPct% on paths, tracks and bridleways")
+        if (lane > 50) sb.append("; ${km(lane)} on quiet lanes")
+        sb.append(
+            when {
+                road < 50 && avoidRoads -> "; no A or B road walking at all."
+                road < 50 -> "; no main-road walking."
+                else -> "; ${km(road)} on bigger roads — look at the casings on the map before you commit."
+            },
+        )
+        return sb.toString()
+    }
+
     private fun adopt(routed: Pair<List<En>, Double>, name: String, note: String?): String {
         RouteStore.save(ctx, Route(name, routed.first)) // save() banks the old route first
         return "Route set: ${km(routed.second)}. " + (note?.plus(" ") ?: "") +
@@ -372,82 +412,6 @@ class GeoTools(
         }
         if (pts.size < 2) return null
         return pts to best.getDouble("distance")
-    }
-
-    /**
-     * Every mapped footpath, track, bridleway and the like near a point, as
-     * straight segments in grid metres. One Overpass query, reused for both
-     * placing the waypoints and scoring the results.
-     */
-    private fun pathSegments(centre: En, searchM: Double): List<Pair<En, En>> {
-        val (lat, lon) = Bng.toWgs84(centre)
-        // One literal with templates: a .format() spanning concatenated
-        // literals binds only to the last one, which is a silent misbuild.
-        val at = "%.5f,%.5f".format(lat, lon)
-        val kinds = "footway|path|track|bridleway|cycleway|steps|pedestrian"
-        val end = "${'$'}" // a bare $ before a quote is not worth risking
-        val query = "[out:json][timeout:25];" +
-            "way[\"highway\"~\"^($kinds)$end\"](around:${searchM.roundToInt()},$at);" +
-            "out geom;"
-        val json = runCatching {
-            Net.post(
-                "https://overpass-api.de/api/interpreter",
-                "data=" + Net.encode(query),
-                "application/x-www-form-urlencoded",
-            )
-        }.getOrNull() ?: return emptyList()
-
-        val segs = ArrayList<Pair<En, En>>()
-        val elements = runCatching { JSONObject(json).getJSONArray("elements") }.getOrNull()
-            ?: return emptyList()
-        for (i in 0 until elements.length()) {
-            val geom = elements.getJSONObject(i).optJSONArray("geometry") ?: continue
-            var prev: En? = null
-            for (j in 0 until geom.length()) {
-                val nd = geom.getJSONObject(j)
-                val en = Bng.fromWgs84(nd.getDouble("lat"), nd.getDouble("lon"))
-                prev?.let { segs.add(it to en) }
-                prev = en
-            }
-        }
-        return segs
-    }
-
-    /** The nearest point on a mapped path, if one is within reach. */
-    private fun snapToPath(ideal: En, paths: List<Pair<En, En>>, withinM: Double): En {
-        var best = ideal
-        var bestD = withinM
-        for ((a, b) in paths) {
-            val p = Geom.nearestOnSegment(ideal, a, b)
-            val d = hypot(p.e - ideal.e, p.n - ideal.n)
-            if (d < bestD) {
-                bestD = d
-                best = p
-            }
-        }
-        return best
-    }
-
-    /**
-     * How much of a routed line runs on or beside a mapped path — sampled
-     * every 100 m and counted against the real path geometry, so the figure
-     * is measured rather than guessed.
-     */
-    private fun pathFraction(line: List<En>, paths: List<Pair<En, En>>): Double {
-        if (paths.isEmpty() || line.size < 2) return 0.0
-        val samples = sampleAlong(line, 100.0)
-        if (samples.isEmpty()) return 0.0
-        var on = 0
-        for (s in samples) {
-            for ((a, b) in paths) {
-                val p = Geom.nearestOnSegment(s, a, b)
-                if (hypot(p.e - s.e, p.n - s.n) <= NEAR_PATH_M) {
-                    on++
-                    break
-                }
-            }
-        }
-        return on.toDouble() / samples.size
     }
 
     /**
@@ -571,42 +535,38 @@ class GeoTools(
                 )
                 sb.append("%.0f–%.0f°C, wind up to %.0f mph.\n".format(tMin, tMax, maxWind))
             }
-            val daily = json.getJSONObject("daily")
-            val sunsetIso = daily.getJSONArray("sunset").getString(0)
-            val sunriseIso = daily.getJSONArray("sunrise").getString(0)
-            val sunset = iso.parse(sunsetIso)?.time ?: 0L
-            sb.append("Sunset ${sunsetIso.substringAfter('T')}")
-            sb.append(" (sunrise was ${sunriseIso.substringAfter('T')}), ")
-            sb.append("going down roughly ${sunsetDirection(lat)} of you. ")
-            if (sunset > 0) {
-                val margin = (sunset - finishAt) / 60_000
-                sb.append(
-                    when {
-                        margin >= 60 -> "You'd be back with ${margin / 60} h ${margin % 60} min of daylight to spare."
-                        margin >= 0 -> "You'd be back only $margin min before sunset — tight; take a light."
-                        else -> "That finishes ${-margin} min AFTER sunset. Take a torch, or go earlier."
-                    },
-                )
-            }
         }.onFailure {
-            sb.append("No connection for the forecast or sunset — the timing figures above still stand.")
+            sb.append("No connection for the forecast. ")
         }
+        // Daylight is computed here, not fetched: "when does it get dark" is
+        // exactly the question asked where there is no signal to look it up.
+        sb.append(daylight(finishAt, lat, lon))
         return sb.toString()
     }
 
-    /**
-     * Where on the horizon the sun sets today: the azimuth from day-of-year
-     * declination and latitude, turned into a compass point. Astronomy, not
-     * an API — accurate to a degree or two, which is what a pointed arm is.
-     */
-    private fun sunsetDirection(latDeg: Double): String {
-        val n = java.util.Calendar.getInstance().get(java.util.Calendar.DAY_OF_YEAR)
-        val decl = Math.toRadians(-23.44 * cos(Math.toRadians(360.0 / 365 * (n + 10))))
-        val lat = Math.toRadians(latDeg)
-        val cosAz = sin(decl) / cos(lat)
-        val az = 360 - Math.toDegrees(kotlin.math.acos(cosAz.coerceIn(-1.0, 1.0)))
-        val dirs = listOf("N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE", "S", "SSW", "SW", "WSW", "W", "WNW", "NW", "NNW", "N")
-        return dirs[((az + 11.25) / 22.5).toInt().coerceIn(0, 16)]
+    /** Sunset, its direction, and the margin against finishing. */
+    private fun daylight(finishAt: Long, lat: Double, lon: Double): String {
+        val now = System.currentTimeMillis()
+        val hhmm = java.text.SimpleDateFormat("HH:mm", java.util.Locale.UK)
+        val set = Sun.sunset(now, lat, lon)
+            ?: return "The sun does not set here today."
+        val az = Sun.positionAt(set, lat, lon).azimuth
+        val sb = StringBuilder(
+            "Sunset ${hhmm.format(java.util.Date(set))}, going down " +
+                "${Sun.compass(az)} (${az.roundToInt()}°). ",
+        )
+        Sun.civilDusk(now, lat, lon)?.let {
+            sb.append("Useful light until about ${hhmm.format(java.util.Date(it))}. ")
+        }
+        val margin = (set - finishAt) / 60_000
+        sb.append(
+            when {
+                margin >= 60 -> "You'd be back with ${margin / 60} h ${margin % 60} min of daylight to spare."
+                margin >= 0 -> "You'd be back only $margin min before sunset — tight; take a light."
+                else -> "That finishes ${-margin} min AFTER sunset. Take a torch, or go earlier."
+            },
+        )
+        return sb.toString()
     }
 
     fun restorePreviousRoute(): String {
@@ -681,13 +641,11 @@ class GeoTools(
             val name = JSONObject(json).optString("display_name")
             if (name.isNotBlank()) sb.append(" Near: ${name.split(",").take(3).joinToString(",")}.")
         }
-        runCatching {
-            val json = Net.get(
-                "https://api.open-meteo.com/v1/forecast?latitude=%.4f&longitude=%.4f".format(lat, lon) +
-                    "&daily=sunset&forecast_days=1&timezone=auto",
-            )
-            val sunset = JSONObject(json).getJSONObject("daily").getJSONArray("sunset").getString(0)
-            sb.append(" Sunset today: ${sunset.substringAfter('T')}.")
+        Sun.sunset(System.currentTimeMillis(), lat, lon)?.let { set ->
+            val az = Sun.positionAt(set, lat, lon).azimuth
+            val at = java.text.SimpleDateFormat("HH:mm", java.util.Locale.UK)
+                .format(java.util.Date(set))
+            sb.append(" Sunset today: $at, ${Sun.compass(az)}.")
         }
         return sb.toString()
     }

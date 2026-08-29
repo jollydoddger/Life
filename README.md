@@ -70,6 +70,7 @@ an app that steals it for zoom is an app you cannot reliably get out of.
 | ⇄ | flip the direction of the arrows along the route |
 | ◉ | centre on you, and zoom right in |
 | ● | start recording a trail (■ stops it) |
+| ☀ | where the sun is, and where it sets, over the camera |
 | ⚙ | API key, colours, and the watch's screen timeout |
 
 **Watch** — one button. **◉ at the middle of the left edge** centres on you and
@@ -186,6 +187,21 @@ The overlays stack in a deliberate order, bottom to top: the GPX route
 (able to be covered), then the information layers — red dots, rights of
 way, paths — then the trail you have actually walked on top of everything.
 
+## Where the sun will be
+
+The ☀ button holds today's solar arc over the camera: point the phone at the
+hills and see where the sun is now, where it goes down, and roughly when it
+stops being useful light. Sunset, golden hour and dusk are marked on the arc
+where they will actually happen against the skyline in front of you.
+
+The astronomy is computed on the phone (the NOAA solar position algorithm,
+checked in CI against the sky's own facts — equinox sunrise due east, solar
+noon due south, published times for Anglesey), so it works with no signal,
+which is exactly where "how long have I got?" gets asked. The soft part is
+the phone's compass, so the view tells you what it thinks it is pointing at
+rather than implying survey accuracy. Refuse the camera permission and the
+same arc is drawn on a plain sky — the information is the point.
+
 ## Ask it things (optional, off by default)
 
 Waymark's job is a map, an arrow and a line, and out of the box that is all it
@@ -202,15 +218,21 @@ head; anything it changes shows as a ✓ receipt.
   Toilet Map for toilets), dropped on the map as markers on both devices.
   Finding nothing is a fact about the database, not the ground — bin coverage
   especially is patchy, because no national bin registry exists.
-- **"Plan me a 3 mile countryside walk from here"** — and *countryside* is a
-  measurement, not a hope. It fetches the footpaths, tracks and bridleways
-  actually mapped around you, hangs three candidate loops off them in
-  different directions, routes each with the FOSSGIS foot router, and keeps
-  whichever runs most on paths — telling you the figure ("82% on mapped
-  paths"). Takes about half a minute and says what it's doing meanwhile. The
-  loop replaces the current route (offline tiles fetched, watch updated);
-  *"put my old route back"* undoes it. OSM paths are usually right, not
-  gospel — glance at the OS map before trusting a stile.
+- **"Plan me a 3 mile countryside walk from here"** — planned on Waymark's
+  **own** walking network, not a public router, which is what lets it keep
+  two promises a general router cannot. It **holds the distance** (if the
+  first loop comes back long it re-runs on a tighter circle until it lands)
+  and it **stays off the A and B roads** (they are left out of the network
+  entirely, so it cannot stray onto one — say "avoid_roads false" or just
+  ask for roads to be allowed if a plan won't close without them). The
+  network is built from OpenStreetMap paths, tracks, bridleways and quiet
+  lanes, each weighted by how pleasant it is to walk, and the percentages
+  reported back are counted off the route actually built rather than
+  estimated. Takes up to a minute and says what it's doing meanwhile. You
+  can also plan from somewhere else — "a 5 km loop from Newborough" — for
+  working out tomorrow from the sofa. *"Put my old route back"* undoes it.
+  OSM paths are usually right, not gospel — glance at the OS map before
+  trusting a stile.
 - **"Will it rain?" / "how much climbing?"** — Open-Meteo forecast and terrain.
 - **"Any walks near me?"** — the same search as the GPX button's Walks near
   me, as a list; loading one stays a deliberate act in that menu, where the

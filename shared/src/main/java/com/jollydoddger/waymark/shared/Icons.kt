@@ -10,7 +10,7 @@ import android.graphics.RectF
 import android.graphics.drawable.Drawable
 
 /** The buttons this app has. */
-enum class Glyph { LOCATE, RECORD, REVERSE, ROUTE, DOWNLOAD, SETTINGS, MIC, SEND }
+enum class Glyph { LOCATE, RECORD, REVERSE, ROUTE, DOWNLOAD, SUN, SETTINGS, MIC, SEND }
 
 /**
  * The map controls, drawn rather than typed.
@@ -135,6 +135,21 @@ class IconDrawable(
                 path.lineTo(cx + g * 0.9f, cy + g * 0.95f)
                 path.lineTo(cx + g * 0.9f, cy + g * 0.45f)
                 canvas.drawPath(path, line)
+            }
+
+            Glyph.SUN -> {
+                // A disc with rays: where the sun is and where it is going.
+                canvas.drawCircle(cx, cy, g * 0.45f, fill)
+                line.strokeWidth = 1.8f * density
+                for (k in 0 until 8) {
+                    val a = Math.toRadians(k * 45.0)
+                    val sx = (cx + kotlin.math.sin(a) * g * 0.72f).toFloat()
+                    val sy = (cy - kotlin.math.cos(a) * g * 0.72f).toFloat()
+                    val ex = (cx + kotlin.math.sin(a) * g * 1.08f).toFloat()
+                    val ey = (cy - kotlin.math.cos(a) * g * 1.08f).toFloat()
+                    canvas.drawLine(sx, sy, ex, ey, line)
+                }
+                line.strokeWidth = 2f * density
             }
 
             Glyph.SETTINGS -> {
