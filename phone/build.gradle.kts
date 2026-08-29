@@ -76,4 +76,9 @@ dependencies {
     // this app's is modelled on — its API quirks are already paid for.
     implementation("com.anthropic:anthropic-java:2.10.0")
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.3")
+
+    // The router's loop-finding is pure arithmetic over a graph, so it can be
+    // held to a test on the JVM without a device — and "circular means a
+    // circuit" is exactly the kind of promise that needs one.
+    testImplementation("junit:junit:4.13.2")
 }

@@ -35,7 +35,7 @@ jobs:
       # turn a failed build into a green tick.
       - name: Build and test
         shell: bash
-        run: ./gradlew :shared:testDebugUnitTest :phone:assembleDebug :wear:assembleDebug 2>&1 | tee /tmp/build.log
+        run: ./gradlew :shared:testDebugUnitTest :phone:testDebugUnitTest :phone:assembleDebug :wear:assembleDebug 2>&1 | tee /tmp/build.log
 
       # A failed build that nobody can read costs a round trip of guessing at
       # the cause. Published to a branch over git rather than to an issue or

@@ -178,8 +178,7 @@ class GeoTools(
             "nwr[$tag](around:$radius,%.5f,%.5f);".format(lat, lon)
         }
         val query = "[out:json][timeout:20];($around);out center 60;"
-        val json = Net.post("https://overpass-api.de/api/interpreter", "data=" + Net.encode(query),
-            "application/x-www-form-urlencoded")
+        val json = Net.overpass(query)
 
         val found = LinkedHashMap<String, Poi>()
         val elements = JSONObject(json).getJSONArray("elements")
@@ -303,6 +302,7 @@ class GeoTools(
                     routed, "Planned walk",
                     "Over 15 km across, so this used the public foot router — which " +
                         "means no road-avoidance guarantee. Check the road casings on the map.",
+                    source = "routed by the public FOSSGIS foot router",
                 )
             }
             progress("Reading the paths and lanes round here…")
@@ -368,6 +368,19 @@ class GeoTools(
                     else -> "That is ${"%.0f".format(-err * 100)}% shorter than asked. "
                 },
             )
+            // Whether it is a circuit is a fact about the route, not a
+            // flourish — a walk that retraces a fifth of itself is not what
+            // "circular" means, and he should hear that from the app rather
+            // than find it out on the ground.
+            val retraced = (p.repeatFraction * 100).roundToInt()
+            sb.append(
+                when {
+                    retraced < 3 -> "A clean circuit — no ground walked twice. "
+                    retraced < 15 -> "Very nearly a clean circuit: $retraced% of it doubles back. "
+                    else -> "It is not a tidy circle — $retraced% of it retraces itself, which " +
+                        "is what the paths round here allow. "
+                },
+            )
         }
         val pathPct = (p.pathFraction() * 100).roundToInt()
         val lane = (p.byGroup["lane"] ?: 0.0)
@@ -384,12 +397,21 @@ class GeoTools(
         return sb.toString()
     }
 
-    private fun adopt(routed: Pair<List<En>, Double>, name: String, note: String?): String {
+    /**
+     * Bank the old route and set this one. [source] names who planned it,
+     * because the two are not equally answerable: Waymark's own router held
+     * the rules it was given, the public one was handed the job whole.
+     */
+    private fun adopt(
+        routed: Pair<List<En>, Double>,
+        name: String,
+        note: String?,
+        source: String = "planned here on OpenStreetMap paths",
+    ): String {
         RouteStore.save(ctx, Route(name, routed.first)) // save() banks the old route first
         return "Route set: ${km(routed.second)}. " + (note?.plus(" ") ?: "") +
-            "It follows paths mapped in OpenStreetMap (FOSSGIS routing) — usually right, " +
-            "not gospel, so worth a glance against the OS map. The previous route is banked; " +
-            "restore_previous_route brings it back."
+            "It was $source — usually right, not gospel, so worth a glance against the " +
+            "OS map. The previous route is banked; restore_previous_route brings it back."
     }
 
     /** One routing call: waypoints in, (line in grid metres, distance) out. */

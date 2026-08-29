@@ -86,4 +86,56 @@ object Net {
             conn.disconnect()
         }
     }
+
+    /**
+     * Overpass, with somewhere else to go when the main server says no.
+     *
+     * The public instance at overpass-api.de rate-limits hard and drops
+     * connections outright under load, and this app can have the router, the
+     * rights-of-way overlay and the all-paths overlay all asking at once. A
+     * dropped connection then reads to the user as "there are no paths here",
+     * which is a lie about the ground. So: a small queue so we never open more
+     * than two at a time, one retry each, and two mirrors behind the main
+     * server before giving up.
+     */
+    private val OVERPASS = listOf(
+        "https://overpass-api.de/api/interpreter",
+        "https://overpass.kumi.systems/api/interpreter",
+        "https://overpass.private.coffee/api/interpreter",
+    )
+
+    /** At most two Overpass requests in flight from this app, ever. */
+    private val overpassGate = java.util.concurrent.Semaphore(2, true)
+
+    fun overpass(query: String, timeoutMs: Int = 70_000): String {
+        var lastMsg: String? = null
+        overpassGate.acquire()
+        try {
+            for (host in OVERPASS) {
+                for (attempt in 0 until 2) {
+                    try {
+                        return post(
+                            host,
+                            "data=" + encode(query),
+                            "application/x-www-form-urlencoded",
+                            timeoutMs,
+                        )
+                    } catch (e: Exception) {
+                        lastMsg = e.message
+                        // 429 means too fast, 504 means too big; both are
+                        // worth one wait before moving on.
+                        try {
+                            Thread.sleep(1_500L * (attempt + 1))
+                        } catch (_: InterruptedException) {
+                        }
+                    }
+                }
+            }
+        } finally {
+            overpassGate.release()
+        }
+        throw RuntimeException(
+            "OpenStreetMap's query servers all refused (${OVERPASS.size} tried): $lastMsg",
+        )
+    }
 }

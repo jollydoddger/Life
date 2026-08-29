@@ -177,12 +177,7 @@ object Prow {
             "(way[\"designation\"~\"^($kinds)$end\"]($bbox);" +
             "way[\"prow_ref\"]($bbox););" +
             "out geom;"
-        val json = Net.post(
-            "https://overpass-api.de/api/interpreter",
-            "data=" + Net.encode(query),
-            "application/x-www-form-urlencoded",
-            timeoutMs = 70_000,
-        )
+        val json = Net.overpass(query, timeoutMs = 70_000)
 
         val out = ArrayList<ProwLine>()
         val elements = JSONObject(json).getJSONArray("elements")
@@ -222,12 +217,7 @@ object Prow {
         val query = "[out:json][timeout:60];" +
             "way[\"highway\"~\"^($kinds)$end\"][\"designation\"!~\".\"]($bbox);" +
             "out geom;"
-        val json = Net.post(
-            "https://overpass-api.de/api/interpreter",
-            "data=" + Net.encode(query),
-            "application/x-www-form-urlencoded",
-            timeoutMs = 70_000,
-        )
+        val json = Net.overpass(query, timeoutMs = 70_000)
         val out = ArrayList<ProwLine>()
         val elements = JSONObject(json).getJSONArray("elements")
         for (i in 0 until elements.length()) {

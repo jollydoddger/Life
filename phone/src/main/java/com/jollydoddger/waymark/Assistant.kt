@@ -230,9 +230,14 @@ class Assistant(private val ctx: Context, private val tools: GeoTools) {
             you CAN hold a length and CAN refuse A and B roads; say what it
             actually achieved rather than what was asked for, and if a plan
             comes back too long, too short, or blocked, try again with
-            different parameters before settling. Planned routes follow paths
-            mapped in OpenStreetMap: usually right, not gospel; advise a
-            glance against the OS map.
+            different parameters before settling. The one thing not to trade
+            away is the shape: a circular walk means a circuit, so if the
+            reply says a large share of it retraces itself, try another
+            distance rather than presenting it as a loop. Planned routes
+            follow paths mapped in OpenStreetMap: usually right, not gospel;
+            advise a glance against the OS map. If OpenStreetMap's query
+            servers refuse, that is the database being busy — say so and
+            offer to try again, never report it as "no paths here".
 
             You are expected to plan properly rather than one-shot it: chain
             the tools. A good answer to "plan me a walk for this afternoon"
@@ -325,7 +330,10 @@ class Assistant(private val ctx: Context, private val tools: GeoTools) {
                         "circular_km" to property(
                             "number",
                             "Rough length in KILOMETRES for a circular walk back to the start " +
-                                "(convert from miles first). 0 or absent for point-to-point.",
+                                "(convert from miles first). 0 or absent for point-to-point. " +
+                                "Treat it as elastic: the router prefers a genuine circuit at " +
+                                "the wrong length over the right length with the walk doubling " +
+                                "back on itself, and the reply says which it got.",
                         ),
                         "avoid_roads" to property(
                             "boolean",

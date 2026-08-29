@@ -62,6 +62,28 @@ object Router {
             }
             return if (best >= 0) best else null
         }
+
+        /**
+         * The nearest place a loop can actually turn a corner.
+         *
+         * A dead end has one way in and the same way out, so hanging a
+         * waypoint on one guarantees an out-and-back spur — which is exactly
+         * what a "circular walk" is not. Three ways out means the route can
+         * arrive and leave differently. Falls back to [nearest] if there is
+         * no junction within reach: better a corner in roughly the right
+         * place than no corner at all, and the spur it causes gets pruned
+         * out of the finished walk anyway.
+         */
+        fun nearestJunction(p: En, withinM: Double): Int? {
+            var best = -1
+            var bestD = Double.MAX_VALUE
+            for (i in nodes.indices) {
+                if (edges[i].size < 3) continue
+                val d = hypot(nodes[i].e - p.e, nodes[i].n - p.n)
+                if (d < bestD) { bestD = d; best = i }
+            }
+            return if (best >= 0 && bestD <= withinM) best else nearest(p)
+        }
     }
 
     data class Planned(
@@ -69,6 +91,13 @@ object Router {
         val metres: Double,
         /** Metres walked on each of "path" / "lane" / "road". */
         val byGroup: Map<String, Double>,
+        /**
+         * How much of the walk is ground covered twice. A circular walk
+         * should be near zero; the number is kept rather than hidden because
+         * on a thin network some doubling back is genuinely the only way
+         * home, and saying so is better than presenting it as a clean loop.
+         */
+        val repeatFraction: Double = 0.0,
     ) {
         fun pathFraction(): Double =
             if (metres <= 0) 0.0 else (byGroup["path"] ?: 0.0) / metres
@@ -92,12 +121,7 @@ object Router {
             "[\"access\"!~\"^(no|private)$end\"]" +
             "(around:${radiusM.toInt()},$at);" +
             "out geom;"
-        val json = Net.post(
-            "https://overpass-api.de/api/interpreter",
-            "data=" + Net.encode(query),
-            "application/x-www-form-urlencoded",
-            timeoutMs = 70_000,
-        )
+        val json = Net.overpass(query, timeoutMs = 70_000)
 
         val nodes = ArrayList<En>()
         val edges = ArrayList<ArrayList<Graph.Edge>>()
@@ -172,7 +196,7 @@ object Router {
             for (e in g.edges[u]) {
                 if (done[e.to]) continue
                 val key = edgeKey(u, e.to)
-                val step = if (key in penalise) e.cost * 4 else e.cost
+                val step = if (key in penalise) e.cost * REUSE_PENALTY else e.cost
                 val alt = best[u] + step
                 if (alt < best[e.to]) {
                     best[e.to] = alt
@@ -191,26 +215,68 @@ object Router {
     private fun edgeKey(a: Int, b: Int): Long =
         (minOf(a, b).toLong() shl 32) or maxOf(a, b).toLong()
 
-    /** Turn a node walk into points and per-kind distances. */
+    /** Turn a node walk into points, per-kind distances and repeated ground. */
     private fun measure(g: Graph, walk: List<Int>): Planned {
         val pts = walk.map { g.nodes[it] }
         var total = 0.0
+        var repeated = 0.0
         val byGroup = HashMap<String, Double>()
+        val seen = HashMap<Long, Double>()
         for (i in 1 until walk.size) {
             val e = g.edges[walk[i - 1]].firstOrNull { it.to == walk[i] } ?: continue
             total += e.metres
             byGroup[group(e.kind)] = (byGroup[group(e.kind)] ?: 0.0) + e.metres
+            val key = edgeKey(walk[i - 1], walk[i])
+            if (seen.put(key, e.metres) != null) repeated += e.metres
         }
-        return Planned(pts, total, byGroup)
+        return Planned(pts, total, byGroup, if (total > 0) repeated / total else 0.0)
     }
+
+    /**
+     * Strip out-and-back spurs from a node walk.
+     *
+     * A route that goes a-b-c-b-a walked no new ground for its trouble, and
+     * on the map it reads as a branch sticking out of a circle rather than a
+     * circuit. Removing every immediate reversal, repeatedly, removes a spur
+     * of any depth and leaves a genuine loop untouched — a loop comes back to
+     * a node by a *different* edge, so it never reverses on itself.
+     */
+    private fun prune(walk: List<Int>): List<Int> {
+        val out = ArrayList<Int>(walk.size)
+        for (n in walk) {
+            if (out.size >= 2 && n == out[out.size - 2]) out.removeAt(out.size - 1) else out.add(n)
+        }
+        return out
+    }
+
+    /** Walking an edge a second time costs this much more than the first. */
+    private const val REUSE_PENALTY = 10.0
+
+    /** Close enough on length, and clean enough in shape, to stop looking. */
+    private const val GOOD_ERROR = 0.15
+    private const val GOOD_REPEAT = 0.10
 
     /**
      * A circular walk of about [targetM], starting and finishing at [start].
      *
-     * Three waypoints are hung on a circle and joined by A*; if the result
-     * comes back long or short the circle is rescaled and it goes again.
-     * That loop is the "make it shorter" lever a general router could not
-     * give — the length is converged on, not accepted.
+     * "Circular" is the word he used, and it has to mean a circuit — not a
+     * line with branches hanging off it. Three things make it one. Corners
+     * are hung on **junctions**, because a waypoint at a dead end can only be
+     * reached and left the same way. Re-walking an edge costs ten times what
+     * walking it fresh does, so coming home round the other side beats
+     * turning round. And whatever still doubles back is [prune]d out
+     * afterwards — the only one of the three that is a guarantee rather than
+     * an incentive.
+     *
+     * Candidates are scored on shape as well as length: a loop 15% long but
+     * clean beats one that measures exactly right and retraces a quarter of
+     * itself. He said the distance can give; the shape cannot.
+     *
+     * The search itself is deliberately broad — three circle sizes, two
+     * starting bearings, three and four corners, clockwise and anticlockwise
+     * — because on a thin network most of those come back with nothing. It
+     * stops at the first candidate that is good on both counts, so the breadth
+     * costs nothing on the ordinary day when the first shape fits.
      */
     fun loop(
         g: Graph,
@@ -219,47 +285,79 @@ object Router {
         onProgress: (String) -> Unit = {},
     ): Planned? {
         val startNode = g.nearest(start) ?: return null
-        var radius = targetM / (2 * Math.PI)
+        var base = targetM / (2 * Math.PI)
         var best: Planned? = null
+        var bestScore = Double.MAX_VALUE
 
         repeat(3) { attempt ->
             val spin = Math.random() * 2 * Math.PI
             var round: Planned? = null
-            for (seed in 0 until 3) {
-                val bearing0 = spin + seed * 2 * Math.PI / 3
-                val walk = ArrayList<Int>()
-                val used = HashSet<Long>()
-                var cursor = startNode
-                var ok = true
-                for (k in 0..2) {
-                    val b = bearing0 + k * 2 * Math.PI / 3
-                    val ideal = En(start.e + radius * sin(b), start.n + radius * cos(b))
-                    val wp = g.nearest(ideal) ?: continue
-                    if (wp == cursor) continue
-                    val leg = path(g, cursor, wp, used)
-                    if (leg == null) { ok = false; break }
-                    for (i in 1 until leg.size) used.add(edgeKey(leg[i - 1], leg[i]))
-                    if (walk.isEmpty()) walk.addAll(leg) else walk.addAll(leg.drop(1))
-                    cursor = wp
-                }
-                if (!ok) continue
-                val home = path(g, cursor, startNode, used) ?: continue
-                walk.addAll(home.drop(1))
-                if (walk.size < 4) continue
-                val planned = measure(g, walk)
-                if (planned.metres < targetM * 0.3) continue
-                if (round == null || abs(planned.metres - targetM) < abs(round!!.metres - targetM)) {
-                    round = planned
+            var roundScore = Double.MAX_VALUE
+            var enough = false
+
+            for (mult in doubleArrayOf(1.0, 0.72, 1.35)) {
+                if (enough) break
+                val radius = base * mult
+                for (seed in 0 until 2) {
+                    if (enough) break
+                    for (corners in intArrayOf(4, 3)) {
+                        if (enough) break
+                        for (direction in intArrayOf(1, -1)) {
+                            val bearing0 = spin + seed * (Math.PI / corners)
+                            val walk = ArrayList<Int>()
+                            val used = HashSet<Long>()
+                            var cursor = startNode
+                            for (k in 0 until corners) {
+                                val b = bearing0 + direction * k * 2 * Math.PI / corners
+                                val ideal = En(start.e + radius * sin(b), start.n + radius * cos(b))
+                                val wp = g.nearestJunction(ideal, radius * 0.6) ?: continue
+                                if (wp == cursor) continue
+                                // A corner in another piece of the network is
+                                // a corner missed, not a loop lost: three
+                                // sides of a square still comes home.
+                                val leg = path(g, cursor, wp, used) ?: continue
+                                for (i in 1 until leg.size) used.add(edgeKey(leg[i - 1], leg[i]))
+                                if (walk.isEmpty()) walk.addAll(leg) else walk.addAll(leg.drop(1))
+                                cursor = wp
+                            }
+                            if (walk.isEmpty()) continue
+                            val home = path(g, cursor, startNode, used) ?: continue
+                            walk.addAll(home.drop(1))
+
+                            // Pruning cannot open a closed walk — the first
+                            // and last nodes are the two it never removes —
+                            // so what survives is either a circuit or
+                            // nothing. Nothing means the shape was a pure
+                            // out-and-back, which is not a circular walk
+                            // whatever its length, so it is dropped rather
+                            // than offered.
+                            val circuit = prune(walk)
+                            if (circuit.size < 4) continue
+                            val planned = measure(g, circuit)
+                            if (planned.metres < targetM * 0.25) continue
+                            val err = abs(planned.metres - targetM) / targetM
+                            val score = err + planned.repeatFraction * 1.5
+                            if (score < roundScore) { roundScore = score; round = planned }
+                            if (err < GOOD_ERROR && planned.repeatFraction < GOOD_REPEAT) {
+                                enough = true
+                                break
+                            }
+                        }
+                    }
                 }
             }
+
             val r = round ?: return@repeat
-            if (best == null || abs(r.metres - targetM) < abs(best!!.metres - targetM)) best = r
+            if (roundScore < bestScore) { bestScore = roundScore; best = r }
             val err = abs(r.metres - targetM) / targetM
-            onProgress("Loop ${attempt + 1}: ${"%.1f".format(r.metres / 1000)} km…")
-            if (err < 0.12) return best
-            // Too long or too short: pull the circle in or push it out and
-            // go again. This is the lever the old planner did not have.
-            radius *= (targetM / r.metres).coerceIn(0.55, 1.8)
+            onProgress(
+                "Loop ${attempt + 1}: ${"%.1f".format(r.metres / 1000)} km" +
+                    (if (r.repeatFraction > 0.12) ", still doubling back…" else "…"),
+            )
+            if (err < GOOD_ERROR && r.repeatFraction < GOOD_REPEAT) return best
+            // Too long or too short: pull the circle in or push it out and go
+            // again. This is the lever the old planner did not have.
+            base *= (targetM / r.metres).coerceIn(0.55, 1.8)
         }
         return best
     }

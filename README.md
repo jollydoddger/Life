@@ -220,11 +220,17 @@ head; anything it changes shows as a ✓ receipt.
   especially is patchy, because no national bin registry exists.
 - **"Plan me a 3 mile countryside walk from here"** — planned on Waymark's
   **own** walking network, not a public router, which is what lets it keep
-  two promises a general router cannot. It **holds the distance** (if the
-  first loop comes back long it re-runs on a tighter circle until it lands)
-  and it **stays off the A and B roads** (they are left out of the network
+  three promises a general router cannot. It **holds the distance** (if the
+  first loop comes back long it re-runs on a tighter circle until it lands),
+  it **stays off the A and B roads** (they are left out of the network
   entirely, so it cannot stray onto one — say "avoid_roads false" or just
-  ask for roads to be allowed if a plan won't close without them). The
+  ask for roads to be allowed if a plan won't close without them), and a
+  circular walk **is a circuit**: corners are hung on junctions rather than
+  dead ends, walking the same stretch twice is priced ten times higher than
+  walking it once, and any out-and-back spur left over is cut out of the
+  finished route. Where the paths force some doubling back, the reply says
+  how much rather than calling it a clean loop. Distance gives before shape
+  does — a 5 km ask can come back 5.6 km if that is what closes properly. The
   network is built from OpenStreetMap paths, tracks, bridleways and quiet
   lanes, each weighted by how pleasant it is to walk, and the percentages
   reported back are counted off the route actually built rather than

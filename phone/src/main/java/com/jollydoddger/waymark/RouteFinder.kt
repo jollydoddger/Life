@@ -85,11 +85,7 @@ object RouteFinder {
             "relation[\"route\"~\"^(hiking|foot|walking)$end\"]" +
             "(around:${radiusM.toInt()},$at);" +
             "out geom($clip) 40;"
-        val json = Net.post(
-            "https://overpass-api.de/api/interpreter",
-            "data=" + Net.encode(query),
-            "application/x-www-form-urlencoded",
-        )
+        val json = Net.overpass(query)
 
         val out = ArrayList<FoundWalk>()
         val elements = JSONObject(json).getJSONArray("elements")
