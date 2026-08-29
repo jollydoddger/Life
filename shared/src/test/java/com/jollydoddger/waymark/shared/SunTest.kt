@@ -4,6 +4,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
+import org.junit.Test
 import java.util.Calendar
 import java.util.TimeZone
 
@@ -69,8 +70,8 @@ class SunTest {
         val day = utc(2026, 8, 29)
         val rise = Sun.sunrise(day, angleseyLat, angleseyLon)!!
         val set = Sun.sunset(day, angleseyLat, angleseyLon)!!
-        assertEquals(5 * 60 + 22, minutesUtc(rise), 4)
-        assertEquals(19 * 60 + 14, minutesUtc(set), 4)
+        assertEquals((5 * 60 + 22).toDouble(), minutesUtc(rise).toDouble(), 4.0)
+        assertEquals((19 * 60 + 14).toDouble(), minutesUtc(set).toDouble(), 4.0)
         // Late August: the sun still sets north of due west.
         val az = Sun.positionAt(set, angleseyLat, angleseyLon).azimuth
         assertTrue("sunset azimuth $az should be WNW-ish", az in 280.0..295.0)
