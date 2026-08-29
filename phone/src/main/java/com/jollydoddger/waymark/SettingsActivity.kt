@@ -8,6 +8,7 @@ import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.HorizontalScrollView
 import android.widget.ScrollView
+import android.widget.Switch
 import android.widget.TextView
 import android.graphics.Color
 import android.graphics.drawable.GradientDrawable
@@ -21,6 +22,7 @@ import com.anthropic.models.messages.MessageCreateParams
 import com.anthropic.models.messages.Model
 import com.jollydoddger.waymark.shared.Prefs.anthropicKey
 import com.jollydoddger.waymark.shared.Prefs.arrowColour
+import com.jollydoddger.waymark.shared.Prefs.assistantEnabled
 import com.jollydoddger.waymark.shared.Prefs.osApiKey
 import com.jollydoddger.waymark.shared.Prefs.routeColour
 import com.jollydoddger.waymark.shared.Prefs.screenTimeoutSec
@@ -173,6 +175,18 @@ class SettingsActivity : Activity() {
             return strip
         }
 
+        val claudeSwitch = Switch(this).apply {
+            text = "  Ask bar (Claude)"
+            textSize = 16f
+            isChecked = assistantEnabled
+        }
+        val claudeNote = TextView(this).apply {
+            textSize = 13f
+            text = "Off by default. Waymark is a map, an arrow and a line; this adds a " +
+                "question box at the bottom that can measure the route, find toilets and " +
+                "cafés, and plan walks. It needs your own Anthropic API key and costs a " +
+                "few pence a question. Still rough — switch it on when you fancy it."
+        }
         val claudeBox = EditText(this).apply {
             hint = "Anthropic API key (sk-ant-…)"
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
@@ -197,6 +211,24 @@ class SettingsActivity : Activity() {
             addView(claudeSave, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
             addView(claudeTest, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
         }
+        // The key only matters when the thing that uses it is switched on.
+        val claudeKeyBlock = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            visibility = if (assistantEnabled) View.VISIBLE else View.GONE
+            addView(claudeBox, LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT,
+            ).apply { topMargin = dp(6) })
+            addView(claudeRow)
+        }
+        claudeSwitch.setOnCheckedChangeListener { _, on ->
+            assistantEnabled = on
+            claudeKeyBlock.visibility = if (on) View.VISIBLE else View.GONE
+            result.text = if (on) {
+                "Ask bar on — it appears at the bottom of the map."
+            } else {
+                "Ask bar off. The map has the screen to itself again."
+            }
+        }
 
         val col = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -210,17 +242,12 @@ class SettingsActivity : Activity() {
                 LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT,
             ).apply { topMargin = dp(12) })
 
-            addView(heading("Assistant (Claude)"))
-            addView(TextView(this@SettingsActivity).apply {
-                textSize = 13f
-                text = "The ask bar on the map runs on your Anthropic API key " +
-                    "(console.anthropic.com). Each question costs a few pence. " +
-                    "The key stays on this phone only."
-            })
-            addView(claudeBox, LinearLayout.LayoutParams(
+            addView(heading("Assistant"))
+            addView(claudeSwitch)
+            addView(claudeNote)
+            addView(claudeKeyBlock, LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT,
-            ).apply { topMargin = dp(6) })
-            addView(claudeRow)
+            ))
 
             addView(heading("Route line"))
             addView(swatches({ routeColour }) { routeColour = it })

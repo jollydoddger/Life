@@ -86,11 +86,16 @@ normally", which is also the kindest to the battery, since the watch then really
 sleeps instead of being held awake. For darker sooner, lower the watch's own
 Settings → Display → Screen timeout.
 
-## Ask it things
+## Ask it things (optional, off by default)
 
-The bar at the bottom of the phone's map talks to Claude (hold 🎤 to speak —
-release to send — or type). It answers from the app's own arithmetic and real
-databases, never from its own head; anything it changes shows as a ✓ receipt.
+Waymark's job is a map, an arrow and a line, and out of the box that is all it
+is. **Switch on "Ask bar" in ⚙** and a question box appears at the bottom of
+the phone's map, talking to Claude (hold 🎤 to speak — release to send — or
+type). Switch it off and the box is gone, not merely idle: the map has the
+whole screen again. It is the newest and roughest part of the app.
+
+It answers from the app's own arithmetic and real databases, never from its own
+head; anything it changes shows as a ✓ receipt.
 
 - **"How far is left?"** — measured along the route from your GPS position.
 - **"Toilets on the route?" / "cafés near me?"** — OpenStreetMap (plus the
@@ -110,8 +115,8 @@ databases, never from its own head; anything it changes shows as a ✓ receipt.
 - **"Where am I?"** — an OS grid reference (the form mountain rescue wants),
   the nearest named place, and today's sunset.
 
-It needs your own Anthropic API key (console.anthropic.com) in ⚙, phone-only.
-A question costs a few pence. Place data © OpenStreetMap contributors; routing
+It needs your own Anthropic API key (console.anthropic.com) in ⚙, phone-only —
+the key field appears once the switch is on. A question costs a few pence. Place data © OpenStreetMap contributors; routing
 by FOSSGIS; weather by Open-Meteo; toilets also from the Toilet Map.
 
 Both maps are always north-up, like the paper they're printed from; the arrow

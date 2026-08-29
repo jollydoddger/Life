@@ -32,6 +32,7 @@ import com.jollydoddger.waymark.shared.Route
 import com.jollydoddger.waymark.shared.Gpx
 import com.jollydoddger.waymark.shared.Locator
 import com.jollydoddger.waymark.shared.Prefs.arrowColour
+import com.jollydoddger.waymark.shared.Prefs.assistantEnabled
 import com.jollydoddger.waymark.shared.Prefs.osApiKey
 import com.jollydoddger.waymark.shared.Prefs.recording
 import com.jollydoddger.waymark.shared.Prefs.routeColour
@@ -72,6 +73,7 @@ class MainActivity : Activity() {
     private lateinit var askBox: EditText
     private lateinit var replyText: TextView
     private lateinit var replyPanel: ScrollView
+    private lateinit var bottomStack: LinearLayout
     private var askBusy = false
     private val assistant by lazy {
         Assistant(
@@ -198,7 +200,7 @@ class MainActivity : Activity() {
         // Reply above the ask bar, both in one stack pinned to the bottom, so
         // padding the stack lifts the whole thing clear of the system bars —
         // and of the keyboard.
-        val bottomStack = LinearLayout(this).apply {
+        bottomStack = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             addView(replyPanel, LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, dp(210),
@@ -286,6 +288,9 @@ class MainActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
+        // Switched off in Settings, the ask bar is absent rather than idle —
+        // the map gets the whole screen back, which is the point of it.
+        bottomStack.visibility = if (assistantEnabled) View.VISIBLE else View.GONE
         centredThisOpen = false
         map.setRoute(RouteStore.load(this))
         map.setTrail(TrailStore.points(this))

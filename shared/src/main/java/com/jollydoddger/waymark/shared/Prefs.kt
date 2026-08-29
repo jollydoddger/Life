@@ -40,6 +40,16 @@ object Prefs {
         ctx.getSharedPreferences(FILE, Context.MODE_PRIVATE)
 
     /**
+     * Whether the ask bar exists at all. **Off by default**: this app's job is
+     * a map, an arrow and a line, and it should be exactly that out of the box.
+     * The assistant is a big, slow, paid extra sitting on top — worth having
+     * when it is wanted, worth being absent when it is not.
+     */
+    var Context.assistantEnabled: Boolean
+        get() = p(this).getBoolean("assistantEnabled", false)
+        set(v) = p(this).edit().putBoolean("assistantEnabled", v).apply()
+
+    /**
      * The Anthropic key for the assistant. Phone-only and never synced: the
      * watch has no use for it, and fewer stored copies of a paid key is
      * strictly better. Never committed anywhere, as ever.
