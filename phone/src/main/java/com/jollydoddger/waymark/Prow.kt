@@ -124,8 +124,13 @@ object Prow {
         val bbox = "%.4f,%.4f,%.4f,%.4f".format(south, west, south + CELL_DEG, west + CELL_DEG)
         val kinds = "public_footpath|public_bridleway|restricted_byway|byway_open_to_all_traffic"
         val end = "${'$'}"
+        // Two ways of recording the same fact: the designation tag, and a
+        // council path reference (AN/023/1 and the like) left by a mapper who
+        // never added the designation. Taking both finds paths the first
+        // query alone walks straight past.
         val query = "[out:json][timeout:60];" +
-            "way[\"designation\"~\"^($kinds)$end\"]($bbox);" +
+            "(way[\"designation\"~\"^($kinds)$end\"]($bbox);" +
+            "way[\"prow_ref\"]($bbox););" +
             "out geom;"
         val json = Net.post(
             "https://overpass-api.de/api/interpreter",
@@ -156,6 +161,186 @@ object Prow {
             if (n >= 4) out.add(ProwLine(kind, if (n == pts.size) pts else pts.copyOf(n)))
         }
         return out
+    }
+
+    // --- official council data ------------------------------------------------
+
+    /**
+     * Rowmaps publishes what each council released from its own definitive
+     * map, one GeoJSON per authority. That is the real answer where OSM's
+     * volunteers simply have not tagged an area yet — which, on the ground,
+     * is most of the point of this layer.
+     *
+     * Both the council list and the file name are read from the site at run
+     * time rather than baked in here: this was written without being able to
+     * reach rowmaps.com, and a hard-coded guess at a URL fails silently
+     * forever, where a discovered one fails loudly once and says what it
+     * could not find.
+     */
+    private const val ROWMAPS = "https://www.rowmaps.com/jsons/"
+
+    data class Council(val code: String, val name: String)
+
+    /** Every council rowmaps holds data for, newest listing each time. */
+    fun councils(): List<Council> {
+        val html = Net.get(ROWMAPS, timeoutMs = 30_000)
+        val out = LinkedHashMap<String, String>()
+        // <a href="XX/">Name</a> — take the code from the href and whatever
+        // text sits in the link as the name.
+        val link = Regex("""<a[^>]+href="([A-Za-z0-9_-]{1,6})/?"[^>]*>(.*?)</a>""", RegexOption.IGNORE_CASE)
+        for (m in link.findAll(html)) {
+            val code = m.groupValues[1]
+            val name = m.groupValues[2].replace(Regex("<[^>]*>"), "").trim()
+            if (name.isNotEmpty() && !name.startsWith("..")) out[code] = name
+        }
+        return out.map { Council(it.key, it.value) }
+    }
+
+    /**
+     * Fetch one council's rights of way and file them into the same cells the
+     * map already draws from, so everything downstream — drawing, caching,
+     * working with no signal — is unchanged. Returns words about what
+     * happened, including exactly what could not be found.
+     */
+    fun downloadCouncil(ctx: Context, code: String, onProgress: (String) -> Unit): String {
+        onProgress("Looking up what $code publishes…")
+        val page = Net.get("$ROWMAPS$code/", timeoutMs = 30_000)
+        val files = Regex("""href="([^"]+\.json)"""", RegexOption.IGNORE_CASE)
+            .findAll(page).map { it.groupValues[1] }.distinct().toList()
+        if (files.isEmpty()) {
+            return "Found the page for $code but no .json file linked on it — " +
+                "rowmaps may have changed its layout. Nothing downloaded."
+        }
+        // Names carry dates; the last in sort order is the most recent release.
+        val file = files.sorted().last()
+        val url = if (file.startsWith("http")) file else "$ROWMAPS$code/$file"
+
+        onProgress("Downloading $code rights of way…")
+        val cells = HashMap<String, ArrayList<ProwLine>>()
+        var features = 0
+        Net.stream(url, timeoutMs = 120_000) { input ->
+            android.util.JsonReader(input.reader().buffered()).use { r ->
+                r.isLenient = true
+                r.beginObject()
+                while (r.hasNext()) {
+                    if (r.nextName() == "features") {
+                        r.beginArray()
+                        while (r.hasNext()) {
+                            readFeature(r) { line, lat, lon ->
+                                features++
+                                val k = key(
+                                    Math.floor(lat / CELL_DEG).toInt(),
+                                    Math.floor(lon / CELL_DEG).toInt(),
+                                )
+                                cells.getOrPut(k) { ArrayList() }.add(line)
+                                if (features % 500 == 0) onProgress("Reading… $features paths")
+                            }
+                        }
+                        r.endArray()
+                    } else {
+                        r.skipValue()
+                    }
+                }
+                r.endObject()
+            }
+        }
+        if (cells.isEmpty()) {
+            return "Downloaded $code but found no path geometry in it. Nothing changed."
+        }
+        // Council data replaces whatever OSM had for these squares: it is the
+        // better answer, and a cell present is a cell never re-queried.
+        for ((k, lines) in cells) save(File(dir(ctx), k), lines)
+        return "$features official rights of way saved for $code. They draw " +
+            "wherever you look now, with or without signal."
+    }
+
+    /** One GeoJSON feature → zero or more lines, with its first point's WGS84. */
+    private fun readFeature(
+        r: android.util.JsonReader,
+        emit: (ProwLine, Double, Double) -> Unit,
+    ) {
+        var kind = FOOTPATH
+        val lines = ArrayList<Pair<FloatArray, Pair<Double, Double>>>()
+        r.beginObject()
+        while (r.hasNext()) {
+            when (r.nextName()) {
+                "properties" -> {
+                    // No fixed schema across councils, so read every string
+                    // value and let the words say which right it carries.
+                    r.beginObject()
+                    while (r.hasNext()) {
+                        r.nextName()
+                        val v = runCatching { r.nextString() }.getOrElse { r.skipValue(); "" }
+                        val t = v.lowercase()
+                        when {
+                            "bridleway" in t -> kind = BRIDLEWAY
+                            "restricted" in t -> kind = RESTRICTED_BYWAY
+                            "byway" in t -> if (kind == FOOTPATH) kind = BYWAY
+                        }
+                    }
+                    r.endObject()
+                }
+                "geometry" -> readGeometry(r) { pts, lat, lon -> lines.add(pts to (lat to lon)) }
+                else -> r.skipValue()
+            }
+        }
+        r.endObject()
+        for ((pts, at) in lines) emit(ProwLine(kind, pts), at.first, at.second)
+    }
+
+    /** LineString or MultiLineString → grid-metre point arrays. */
+    private fun readGeometry(
+        r: android.util.JsonReader,
+        emit: (FloatArray, Double, Double) -> Unit,
+    ) {
+        var type = ""
+        r.beginObject()
+        while (r.hasNext()) {
+            when (r.nextName()) {
+                "type" -> type = r.nextString()
+                "coordinates" -> {
+                    if (type == "MultiLineString" || type == "MultiPolygon") {
+                        r.beginArray()
+                        while (r.hasNext()) readLine(r, emit)
+                        r.endArray()
+                    } else {
+                        readLine(r, emit)
+                    }
+                }
+                else -> r.skipValue()
+            }
+        }
+        r.endObject()
+    }
+
+    private fun readLine(
+        r: android.util.JsonReader,
+        emit: (FloatArray, Double, Double) -> Unit,
+    ) {
+        val es = ArrayList<Float>()
+        val ns = ArrayList<Float>()
+        var firstLat = 0.0
+        var firstLon = 0.0
+        r.beginArray()
+        while (r.hasNext()) {
+            r.beginArray()
+            val lon = r.nextDouble()
+            val lat = r.nextDouble()
+            while (r.hasNext()) r.skipValue() // elevation, if the file carries it
+            r.endArray()
+            if (es.isEmpty()) { firstLat = lat; firstLon = lon }
+            val en = Bng.fromWgs84(lat, lon)
+            es.add(en.e.toFloat())
+            ns.add(en.n.toFloat())
+        }
+        r.endArray()
+        if (es.size < 2) return
+        val pts = FloatArray(es.size * 2)
+        for (i in es.indices) {
+            pts[i * 2] = es[i]
+            pts[i * 2 + 1] = ns[i]
+        }
+        emit(pts, firstLat, firstLon)
     }
 
     private fun save(f: File, lines: List<ProwLine>) {

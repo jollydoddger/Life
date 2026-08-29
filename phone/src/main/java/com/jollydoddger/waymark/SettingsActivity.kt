@@ -1,6 +1,7 @@
 package com.jollydoddger.waymark
 
 import android.app.Activity
+import android.app.AlertDialog
 import android.os.Bundle
 import android.text.InputType
 import android.widget.Button
@@ -278,7 +279,51 @@ class SettingsActivity : Activity() {
                 "and Wales, rather than a different feed per authority. It is a copy " +
                 "of the legal record, not the record itself, and the OS map " +
                 "underneath draws the same paths in green dashes: where the two " +
-                "disagree, believe the printed map."
+                "disagree, believe the printed map.\n\n" +
+                "Where OpenStreetMap's volunteers haven't tagged your area, it draws " +
+                "nothing — and that is what the button below fixes. It pulls what a " +
+                "council actually released from its own definitive map (via rowmaps), " +
+                "once, for the whole authority: better data than OSM where it exists, " +
+                "and it then works with no signal anywhere in that county."
+        }
+
+        val prowOfficial = Button(this).apply {
+            text = "Official council data…"
+            setOnClickListener {
+                result.text = "Asking rowmaps which councils have released data…"
+                scope.launch {
+                    val councils = withContext(Dispatchers.IO) {
+                        runCatching { Prow.councils() }
+                    }
+                    val list = councils.getOrNull()
+                    if (list.isNullOrEmpty()) {
+                        result.text = "Couldn't read the council list: " +
+                            (councils.exceptionOrNull()?.message ?: "nothing on the page") +
+                            ". The OpenStreetMap version of the layer still works."
+                        return@launch
+                    }
+                    AlertDialog.Builder(this@SettingsActivity)
+                        .setTitle("Whose definitive map?")
+                        .setItems(list.map { "${it.name} (${it.code})" }.toTypedArray()) { _, i ->
+                            val chosen = list[i]
+                            result.text = "Downloading ${chosen.name}…"
+                            scope.launch {
+                                val outcome = withContext(Dispatchers.IO) {
+                                    runCatching {
+                                        Prow.downloadCouncil(this@SettingsActivity, chosen.code) { note ->
+                                            runOnUiThread { result.text = note }
+                                        }
+                                    }.getOrElse {
+                                        "Download failed: ${it.message ?: it.javaClass.simpleName}"
+                                    }
+                                }
+                                result.text = outcome
+                            }
+                        }
+                        .setNegativeButton("Cancel", null)
+                        .show()
+                }
+            }
         }
 
         val col = LinearLayout(this).apply {
@@ -303,6 +348,7 @@ class SettingsActivity : Activity() {
             addView(heading("Map overlays"))
             addView(prowSwitch)
             addView(prowNote)
+            addView(prowOfficial)
             addView(tracesSwitch, LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT,
             ).apply { topMargin = dp(16) })
