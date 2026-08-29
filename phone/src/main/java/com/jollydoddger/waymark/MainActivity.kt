@@ -32,6 +32,7 @@ import com.jollydoddger.waymark.shared.PoiStore
 import com.jollydoddger.waymark.shared.Route
 import com.jollydoddger.waymark.shared.Gpx
 import com.jollydoddger.waymark.shared.Locator
+import com.jollydoddger.waymark.shared.Prefs.allPathsEnabled
 import com.jollydoddger.waymark.shared.Prefs.arrowColour
 import com.jollydoddger.waymark.shared.Prefs.assistantEnabled
 import com.jollydoddger.waymark.shared.Prefs.libraryFolder
@@ -39,7 +40,9 @@ import com.jollydoddger.waymark.shared.Prefs.osApiKey
 import com.jollydoddger.waymark.shared.Prefs.prowEnabled
 import com.jollydoddger.waymark.shared.Prefs.tracesEnabled
 import com.jollydoddger.waymark.shared.Prefs.recording
+import com.jollydoddger.waymark.shared.Prefs.recordingStartedAt
 import com.jollydoddger.waymark.shared.Prefs.routeColour
+import com.jollydoddger.waymark.shared.Prefs.routeHidden
 import com.jollydoddger.waymark.shared.Prefs.routeReversed
 import com.jollydoddger.waymark.shared.Prefs.trailColour
 import com.jollydoddger.waymark.shared.Prefs.wantRecording
@@ -299,8 +302,11 @@ class MainActivity : Activity() {
         // Switched off in Settings, the ask bar is absent rather than idle —
         // the map gets the whole screen back, which is the point of it.
         bottomStack.visibility = if (assistantEnabled) View.VISIBLE else View.GONE
-        centredThisOpen = false
-        map.setRoute(RouteStore.load(this))
+        // centredThisOpen is deliberately NOT reset here: onResume also runs
+        // on the way back from Settings, and re-centring there yanked the map
+        // away from wherever he was planning. One centre per opening of the
+        // app; after that the map stays put until he presses the button.
+        map.setRoute(if (routeHidden) null else RouteStore.load(this))
         map.setTrail(TrailStore.points(this))
         map.setPois(PoiStore.load(this))
         map.setColours(routeColour, arrowColour, trailColour)
@@ -357,11 +363,13 @@ class MainActivity : Activity() {
             }
             TrailStore.clear(this)
             map.setTrail(emptyList())
+            recordingStartedAt = System.currentTimeMillis()
             TrackingService.start(this)
             say("Recording — leaving a trail behind you")
         } else {
             TrackingService.stop(this)
             say("Stopped. The trail stays on the map until you start again.")
+            offerToSaveWalk()
         }
         recording = turningOn
         wantRecording = turningOn
@@ -416,7 +424,9 @@ class MainActivity : Activity() {
         val fetch = {
             val bounds = map.viewportBounds()
             if (wantProw) {
-                Prow.refresh(this, bounds, { note -> sayBriefly(note) }) { lines -> map.setProw(lines) }
+                Prow.refresh(this, bounds, allPathsEnabled, { note -> sayBriefly(note) }) { lines ->
+                    map.setProw(lines)
+                }
             }
             if (wantTraces) {
                 Traces.refresh(this, bounds, { note -> sayBriefly(note) }) { cells -> map.setTraces(cells) }
@@ -495,14 +505,164 @@ class MainActivity : Activity() {
      * switched off — none of it is the assistant's.
      */
     private fun routeMenu() {
-        val items = arrayOf("Import a GPX file", "Walks near me", "GPX library folder…")
+        val hideLabel = if (routeHidden) "Show the route" else "Hide the route"
+        val items = arrayOf(
+            "Import a GPX file", "Walks near me", "Saved walks",
+            hideLabel, "GPX library folder…",
+        )
         AlertDialog.Builder(this)
             .setItems(items) { _, i ->
                 when (i) {
                     0 -> pickGpx()
                     1 -> walksNearMe()
-                    2 -> libraryDialog()
+                    2 -> savedWalksDialog()
+                    3 -> {
+                        routeHidden = !routeHidden
+                        map.setRoute(if (routeHidden) null else RouteStore.load(this))
+                        say(
+                            if (routeHidden) "Route hidden — the map underneath is all yours. " +
+                                "It is still stored, and still on the watch."
+                            else "Route back on the map.",
+                        )
+                    }
+                    4 -> libraryDialog()
                 }
+            }
+            .show()
+    }
+
+    // --- saved walks ----------------------------------------------------------
+
+    /** After ■: the walk just recorded is worth keeping, so offer, once. */
+    private fun offerToSaveWalk() {
+        val points = TrailStore.points(this)
+        if (points.size < 2) return
+        val startedAt = recordingStartedAt.takeIf { it > 0 } ?: System.currentTimeMillis()
+        val endedAt = System.currentTimeMillis()
+        val d = resources.displayMetrics.density
+        fun dp(v: Int) = (v * d).toInt()
+        val nameBox = EditText(this).apply {
+            hint = "Name"
+            setText(
+                java.text.SimpleDateFormat("'Walk,' d MMM", java.util.Locale.UK)
+                    .format(java.util.Date(startedAt)),
+            )
+        }
+        val notesBox = EditText(this).apply {
+            hint = "Notes — where, how it was…"
+            minLines = 2
+        }
+        val col = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), dp(8), dp(20), 0)
+            addView(nameBox)
+            addView(notesBox)
+        }
+        val km = Geom.length(points) / 1000
+        AlertDialog.Builder(this)
+            .setTitle("Save this walk? (%.1f km)".format(km))
+            .setView(col)
+            .setPositiveButton("Save") { _, _ ->
+                saveWalk(nameBox.text.toString().trim(), notesBox.text.toString().trim(),
+                    points, startedAt, endedAt)
+            }
+            .setNegativeButton("Not this one", null)
+            .show()
+    }
+
+    private fun saveWalk(name: String, notes: String, points: List<En>, startedAt: Long, endedAt: Long) {
+        scope.launch {
+            val walk = withContext(Dispatchers.IO) {
+                // Where it was: the grid reference always; a place name only
+                // if Nominatim answers promptly. Saving never waits on signal.
+                val grid = com.jollydoddger.waymark.shared.Bng.gridRef(points.first(), 3).orEmpty()
+                val named = runCatching {
+                    val (lat, lon) = com.jollydoddger.waymark.shared.Bng.toWgs84(points.first())
+                    val json = Net.get(
+                        "https://nominatim.openstreetmap.org/reverse?format=json&zoom=14" +
+                            "&lat=%.5f&lon=%.5f".format(lat, lon),
+                        timeoutMs = 6_000,
+                    )
+                    org.json.JSONObject(json).optString("display_name")
+                        .split(",").take(2).joinToString(",").trim()
+                }.getOrNull().orEmpty()
+                val walk = Walks.SavedWalk(
+                    id = java.util.UUID.randomUUID().toString(),
+                    name = name.ifBlank { "Walk" },
+                    notes = notes,
+                    place = listOf(named, grid).filter { it.isNotBlank() }.joinToString(" · "),
+                    startedAt = startedAt, endedAt = endedAt,
+                    distanceM = Geom.length(points),
+                    points = points,
+                )
+                Walks.save(this@MainActivity, walk)
+                walk
+            }
+            say("Saved “${walk.name}” — ${fmtDist(walk.distanceM)} in ${Walks.duration(walk)}. " +
+                "It lives under GPX → Saved walks.")
+        }
+    }
+
+    private fun savedWalksDialog() {
+        val walks = Walks.list(this)
+        if (walks.isEmpty()) {
+            say("No saved walks yet. Record one with ● and save it when you stop.")
+            return
+        }
+        val rows = walks.map {
+            "${it.name} — ${Walks.dateLine(it)} · ${fmtDist(it.distanceM)} · ${Walks.duration(it)}"
+        }
+        AlertDialog.Builder(this)
+            .setTitle("Saved walks")
+            .setItems(rows.toTypedArray()) { _, i -> savedWalkActions(walks[i]) }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun savedWalkActions(walk: Walks.SavedWalk) {
+        val detail = buildString {
+            append(Walks.dateLine(walk)).append(" · ").append(fmtDist(walk.distanceM))
+                .append(" · ").append(Walks.duration(walk))
+            if (walk.place.isNotBlank()) append("
+").append(walk.place)
+            if (walk.notes.isNotBlank()) append("
+
+").append(walk.notes)
+        }
+        AlertDialog.Builder(this)
+            .setTitle(walk.name)
+            .setMessage(detail)
+            .setPositiveButton("Load as route") { _, _ ->
+                importJob?.cancel()
+                importJob = scope.launch {
+                    val route = withContext(Dispatchers.IO) {
+                        Route(walk.name, walk.points).also { RouteStore.save(this@MainActivity, it) }
+                    }
+                    say("“${walk.name}” set as the route — fetching offline tiles…")
+                    publishRoute(route)
+                }
+            }
+            .setNeutralButton("Share as GPX") { _, _ ->
+                scope.launch {
+                    val uri = withContext(Dispatchers.IO) { Walks.asGpxUri(this@MainActivity, walk) }
+                    val send = Intent(Intent.ACTION_SEND).apply {
+                        type = "application/gpx+xml"
+                        putExtra(Intent.EXTRA_STREAM, uri)
+                        putExtra(Intent.EXTRA_SUBJECT, walk.name)
+                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    }
+                    startActivity(Intent.createChooser(send, "Share “${walk.name}”"))
+                }
+            }
+            .setNegativeButton("Delete") { _, _ ->
+                AlertDialog.Builder(this)
+                    .setMessage("Delete “${walk.name}” for good?")
+                    .setPositiveButton("Delete") { _, _ ->
+                        Walks.delete(this, walk.id)
+                        say("“${walk.name}” deleted.")
+                    }
+                    .setNegativeButton("Keep", null)
+                    .show()
             }
             .show()
     }
@@ -678,6 +838,7 @@ class MainActivity : Activity() {
      * fetch its offline corridor, and put route + tiles on the watch.
      */
     private suspend fun publishRoute(route: Route) {
+        routeHidden = false // a route you just chose is a route you can see
         map.setRoute(route)
         var lastShown = 0
         val failed = Corridor.prefetch(map.tiles, route) { done, total ->
@@ -735,7 +896,7 @@ class MainActivity : Activity() {
             if (routeNow != null && (routeNow.name to routeNow.points.size) != routeBefore) {
                 publishRoute(routeNow)
             } else {
-                map.setRoute(routeNow)
+                map.setRoute(if (routeHidden) null else routeNow)
             }
             askBusy = false
         }

@@ -121,6 +121,24 @@ class BngMapView @JvmOverloads constructor(
         invalidate()
     }
 
+    /**
+     * One rainfall-radar tile: a Web-Mercator bitmap and the lat/lon box it
+     * covers. Radar is served in the web's projection and this map lives in
+     * the National Grid, so each tile is drawn through a warped mesh rather
+     * than pretending the two agree.
+     */
+    class RadarTile(
+        val bitmap: android.graphics.Bitmap,
+        val south: Double, val west: Double, val north: Double, val east: Double,
+    )
+
+    private var radarTiles: List<RadarTile> = emptyList()
+
+    fun setRadar(tiles: List<RadarTile>) {
+        radarTiles = tiles
+        invalidate()
+    }
+
     /** West, south, east, north of the visible map, in grid metres. */
     fun viewportBounds(): DoubleArray {
         val m = mpp(zl)
@@ -285,10 +303,14 @@ class BngMapView @JvmOverloads constructor(
         if (width == 0 || height == 0) return
         canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), bgPaint)
         drawTiles(canvas)
+        drawRadar(canvas)
+        // His stacking order, bottom to top: the GPX route first (able to be
+        // covered), then the information layers — dots and rights of way —
+        // then the trail he has actually walked on top of everything.
+        drawRoute(canvas)
         drawTraces(canvas)
         drawProw(canvas)
         drawTrail(canvas)
-        drawRoute(canvas)
         drawPreview(canvas)
         drawPois(canvas)
         drawHere(canvas)
@@ -373,6 +395,42 @@ class BngMapView @JvmOverloads constructor(
         postDelayed(tracePulse, 50)
     }
 
+    private val radarPaint = Paint(Paint.FILTER_BITMAP_FLAG).apply { alpha = 140 }
+
+    /** Mesh resolution per tile: 6x6 quads is plenty at county scale. */
+    private val radarMeshN = 6
+    private val radarMesh = FloatArray((radarMeshN + 1) * (radarMeshN + 1) * 2)
+
+    private fun drawRadar(canvas: Canvas) {
+        if (radarTiles.isEmpty()) return
+        val m = mpp(zl)
+        for (t in radarTiles) {
+            // Mercator latitude runs non-linearly; interpolate in Mercator Y
+            // so each mesh row lands where that slice of the bitmap belongs.
+            val yN = mercY(t.north)
+            val yS = mercY(t.south)
+            var i = 0
+            for (r in 0..radarMeshN) {
+                val lat = invMercY(yN + (yS - yN) * r / radarMeshN)
+                for (c in 0..radarMeshN) {
+                    val lon = t.west + (t.east - t.west) * c / radarMeshN
+                    val en = Bng.fromWgs84(lat, lon)
+                    radarMesh[i++] = sx(en.e, m)
+                    radarMesh[i++] = sy(en.n, m)
+                }
+            }
+            canvas.drawBitmapMesh(t.bitmap, radarMeshN, radarMeshN, radarMesh, 0, null, 0, radarPaint)
+        }
+    }
+
+    private fun mercY(latDeg: Double): Double {
+        val lat = Math.toRadians(latDeg)
+        return ln(kotlin.math.tan(PI / 4 + lat / 2))
+    }
+
+    private fun invMercY(y: Double): Double =
+        Math.toDegrees(2 * kotlin.math.atan(kotlin.math.exp(y)) - PI / 2)
+
     // A right of way per kind, because the permissions differ: green for a
     // footpath, amber for a bridleway, purple for a restricted byway, brown
     // for one open to all traffic. Kept translucent so the OS map's own
@@ -391,6 +449,7 @@ class BngMapView @JvmOverloads constructor(
         Color.argb(205, 224, 138, 16), // public bridleway
         Color.argb(205, 138, 62, 180), // restricted byway
         Color.argb(205, 150, 74, 40), // byway open to all traffic
+        Color.argb(170, 90, 100, 110), // any mapped path: the physical network
     )
 
     private fun drawProw(canvas: Canvas) {
@@ -410,11 +469,14 @@ class BngMapView @JvmOverloads constructor(
                     path.lineTo(sx(pts[i].toDouble(), m), sy(pts[i + 1].toDouble(), m))
                     i += 2
                 }
+                val kind = line.kind.coerceIn(0, prowColours.size - 1)
                 if (pass == 0) {
-                    canvas.drawPath(path, prowCasing)
+                    // Plain mapped paths carry no legal claim, so no halo —
+                    // the loud treatment is reserved for actual rights.
+                    if (kind < 4) canvas.drawPath(path, prowCasing)
                 } else {
-                    prowPaint.color = prowColours[line.kind.coerceIn(0, prowColours.size - 1)]
-                    prowPaint.strokeWidth = 5f * density
+                    prowPaint.color = prowColours[kind]
+                    prowPaint.strokeWidth = (if (kind < 4) 5f else 2.5f) * density
                     canvas.drawPath(path, prowPaint)
                 }
             }

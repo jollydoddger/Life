@@ -79,6 +79,34 @@ object Prefs {
         get() = p(this).getBoolean("prowEnabled", false)
         set(v) = p(this).edit().putBoolean("prowEnabled", v).apply()
 
+    /**
+     * Every mapped path and track, not just designated rights of way — the
+     * physical network OSM knows about, with no promise you may walk it.
+     */
+    var Context.allPathsEnabled: Boolean
+        get() = p(this).getBoolean("allPathsEnabled", false)
+        set(v) = p(this).edit().putBoolean("allPathsEnabled", v).apply()
+
+    /** The RainViewer rainfall radar overlay (phone only, off by default). */
+    var Context.radarEnabled: Boolean
+        get() = p(this).getBoolean("radarEnabled", false)
+        set(v) = p(this).edit().putBoolean("radarEnabled", v).apply()
+
+    /**
+     * Hide the route line on the phone's map without touching the stored
+     * route or the watch — for reading the map underneath it. Phone-only
+     * and never synced; cleared whenever a new route is adopted, because
+     * importing a thing you cannot see is a support call.
+     */
+    var Context.routeHidden: Boolean
+        get() = p(this).getBoolean("routeHidden", false)
+        set(v) = p(this).edit().putBoolean("routeHidden", v).apply()
+
+    /** When ● was pressed, so a saved walk knows its duration. */
+    var Context.recordingStartedAt: Long
+        get() = p(this).getLong("recordingStartedAt", 0L)
+        set(v) = p(this).edit().putLong("recordingStartedAt", v).apply()
+
     var Context.osApiKey: String
         get() = p(this).getString("osApiKey", "") ?: ""
         set(v) = p(this).edit().putString("osApiKey", v.trim()).apply()

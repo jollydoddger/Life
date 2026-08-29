@@ -47,6 +47,9 @@ object Prow {
     const val RESTRICTED_BYWAY = 2
     const val BYWAY = 3
 
+    /** Any mapped path or track — the ground, not the law. */
+    const val ALL_PATH = 4
+
     // Three at a time, not one: a viewport is several cells and a single
     // thread made a new area take minutes of blank map. Three concurrent
     // queries is polite to a shared Overpass instance and roughly triples
@@ -60,6 +63,10 @@ object Prow {
     private fun dir(ctx: Context) = File(ctx.filesDir, "prow").apply { mkdirs() }
     private fun key(latIdx: Int, lonIdx: Int) = "p_${latIdx}_$lonIdx"
 
+    /** The all-mapped-paths layer caches in its own cell files, so switching
+     *  it on later never invalidates what the rights-of-way layer holds. */
+    private fun keyAll(latIdx: Int, lonIdx: Int) = "a_${latIdx}_$lonIdx"
+
     /**
      * The rights of way for a viewport, in grid metres: cached cells at once
      * through [onLines], then again as each missing cell arrives.
@@ -67,6 +74,7 @@ object Prow {
     fun refresh(
         ctx: Context,
         boundsEn: DoubleArray,
+        allPaths: Boolean = false,
         onNote: (String) -> Unit = {},
         onLines: (List<ProwLine>) -> Unit,
     ) {
@@ -83,21 +91,25 @@ object Prow {
         val lon1 = Math.floor(east / CELL_DEG).toInt()
 
         val cached = ArrayList<ProwLine>()
-        val missing = ArrayList<Pair<Int, Int>>()
+        val missing = ArrayList<Triple<Int, Int, Boolean>>() // la, lo, isAllPaths
         for (la in lat0..lat1) for (lo in lon0..lon1) {
             val f = File(dir(ctx), key(la, lo))
-            if (f.exists()) load(f)?.let { cached.addAll(it) } else missing.add(la to lo)
+            if (f.exists()) load(f)?.let { cached.addAll(it) } else missing.add(Triple(la, lo, false))
+            if (allPaths) {
+                val fa = File(dir(ctx), keyAll(la, lo))
+                if (fa.exists()) load(fa)?.let { cached.addAll(it) } else missing.add(Triple(la, lo, true))
+            }
         }
         onLines(cached)
         if (missing.isNotEmpty()) onNote("Rights of way: looking…")
 
-        for ((la, lo) in missing.take(MAX_FETCH_PER_PASS)) {
-            val k = key(la, lo)
+        for ((la, lo, all) in missing.take(MAX_FETCH_PER_PASS)) {
+            val k = if (all) keyAll(la, lo) else key(la, lo)
             val claimed = synchronized(inFlight) { inFlight.add(k) }
             if (!claimed) continue
             executor.execute {
                 try {
-                    save(File(dir(ctx), k), fetchCell(la, lo))
+                    save(File(dir(ctx), k), if (all) fetchAllPathsCell(la, lo) else fetchCell(la, lo))
                 } catch (e: Exception) {
                     // Nothing written: the cell stays missing and a later
                     // settle retries. A dropped query must not be cached as
@@ -106,7 +118,7 @@ object Prow {
                 } finally {
                     synchronized(inFlight) { inFlight.remove(k) }
                 }
-                main.post { refreshCached(ctx, boundsEn, onNote, onLines) }
+                main.post { refreshCached(ctx, boundsEn, allPaths, onNote, onLines) }
             }
         }
     }
@@ -115,6 +127,7 @@ object Prow {
     private fun refreshCached(
         ctx: Context,
         boundsEn: DoubleArray,
+        allPaths: Boolean,
         onNote: (String) -> Unit,
         onLines: (List<ProwLine>) -> Unit,
     ) {
@@ -127,6 +140,10 @@ object Prow {
             for (lo in Math.floor(west / CELL_DEG).toInt()..Math.floor(east / CELL_DEG).toInt()) {
                 val f = File(dir(ctx), key(la, lo))
                 if (f.exists()) load(f)?.let { lines.addAll(it) } else stillMissing++
+                if (allPaths) {
+                    val fa = File(dir(ctx), keyAll(la, lo))
+                    if (fa.exists()) load(fa)?.let { lines.addAll(it) } else stillMissing++
+                }
             }
         }
         onLines(lines)
@@ -187,6 +204,43 @@ object Prow {
                 pts[n++] = en.n.toFloat()
             }
             if (n >= 4) out.add(ProwLine(kind, if (n == pts.size) pts else pts.copyOf(n)))
+        }
+        return out
+    }
+
+    /**
+     * Every mapped path and track in a cell, whatever its legal status — the
+     * physical network. Ways already carrying a designation are excluded so
+     * the same path is not drawn twice in two colours.
+     */
+    private fun fetchAllPathsCell(latIdx: Int, lonIdx: Int): List<ProwLine> {
+        val south = latIdx * CELL_DEG
+        val west = lonIdx * CELL_DEG
+        val bbox = "%.4f,%.4f,%.4f,%.4f".format(south, west, south + CELL_DEG, west + CELL_DEG)
+        val kinds = "path|footway|track|bridleway|steps"
+        val end = "${'$'}"
+        val query = "[out:json][timeout:60];" +
+            "way[\"highway\"~\"^($kinds)$end\"][\"designation\"!~\".\"]($bbox);" +
+            "out geom;"
+        val json = Net.post(
+            "https://overpass-api.de/api/interpreter",
+            "data=" + Net.encode(query),
+            "application/x-www-form-urlencoded",
+            timeoutMs = 70_000,
+        )
+        val out = ArrayList<ProwLine>()
+        val elements = JSONObject(json).getJSONArray("elements")
+        for (i in 0 until elements.length()) {
+            val geom = elements.getJSONObject(i).optJSONArray("geometry") ?: continue
+            val pts = FloatArray(geom.length() * 2)
+            var n = 0
+            for (g in 0 until geom.length()) {
+                val nd = geom.optJSONObject(g) ?: continue
+                val en = Bng.fromWgs84(nd.getDouble("lat"), nd.getDouble("lon"))
+                pts[n++] = en.e.toFloat()
+                pts[n++] = en.n.toFloat()
+            }
+            if (n >= 4) out.add(ProwLine(ALL_PATH, if (n == pts.size) pts else pts.copyOf(n)))
         }
         return out
     }

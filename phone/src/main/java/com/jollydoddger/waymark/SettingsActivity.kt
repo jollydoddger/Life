@@ -21,6 +21,7 @@ import com.jollydoddger.waymark.shared.Prefs
 import com.anthropic.client.okhttp.AnthropicOkHttpClient
 import com.anthropic.models.messages.MessageCreateParams
 import com.anthropic.models.messages.Model
+import com.jollydoddger.waymark.shared.Prefs.allPathsEnabled
 import com.jollydoddger.waymark.shared.Prefs.anthropicKey
 import com.jollydoddger.waymark.shared.Prefs.arrowColour
 import com.jollydoddger.waymark.shared.Prefs.assistantEnabled
@@ -287,6 +288,23 @@ class SettingsActivity : Activity() {
                 "and it then works with no signal anywhere in that county."
         }
 
+        val allPathsSwitch = Switch(this).apply {
+            text = "  Every mapped path and track"
+            textSize = 15f
+            isChecked = allPathsEnabled
+            setOnCheckedChangeListener { _, on ->
+                allPathsEnabled = on
+                result.text = if (on) "All mapped paths on — thin grey lines, drawn under the coloured rights."
+                else "All mapped paths off."
+            }
+        }
+        val allPathsNote = TextView(this).apply {
+            textSize = 13f
+            text = "The physical network OpenStreetMap knows about — paths, tracks and " +
+                "steps with no recorded legal status — in thin grey under the coloured " +
+                "rights of way. It answers \"is there a path\", not \"may I walk it\"."
+        }
+
         val prowOfficial = Button(this).apply {
             text = "Official council data…"
             setOnClickListener {
@@ -348,6 +366,10 @@ class SettingsActivity : Activity() {
             addView(heading("Map overlays"))
             addView(prowSwitch)
             addView(prowNote)
+            addView(allPathsSwitch, LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT,
+            ).apply { topMargin = dp(10) })
+            addView(allPathsNote)
             addView(prowOfficial)
             addView(tracesSwitch, LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT,

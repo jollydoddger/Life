@@ -50,6 +50,15 @@
             android:name=".SettingsActivity"
             android:exported="false" />
 
+        <!-- Hands one exported GPX at a time to the share sheet. Not
+             exported: targets reach it only through the temporary grant the
+             share Intent carries. -->
+        <provider
+            android:name=".ShareProvider"
+            android:authorities="com.jollydoddger.waymark.share"
+            android:exported="false"
+            android:grantUriPermissions="true" />
+
         <!-- Keeps the trail growing with the screen off. Only ever started
              from the visible app, which is what keeps this clear of
              ACCESS_BACKGROUND_LOCATION. -->
