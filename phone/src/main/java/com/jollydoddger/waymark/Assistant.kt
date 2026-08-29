@@ -148,6 +148,7 @@ class Assistant(private val ctx: Context, private val tools: GeoTools) {
                 result
             }
             "find_walks" -> tools.findWalks(num("radius_km"))
+            "walk_brief" -> tools.walkBrief(num("depart_in_minutes"))
             "measure_to" -> tools.measureTo(str("place"))
             "weather" -> tools.weather()
             "where_am_i" -> tools.whereAmI()
@@ -226,6 +227,10 @@ class Assistant(private val ctx: Context, private val tools: GeoTools) {
             OpenStreetMap: usually right, not gospel; advise a glance against
             the OS map. Keep replies short — they are read on a phone,
             mid-walk, possibly in rain. Use km and metres.
+
+            For "should I set off now?", "will it rain on me?", or "back
+            before dark?" call walk_brief — it does the route, weather and
+            daylight arithmetic in one go, including where the sun sets.
 
             Web search is for things the tools cannot know (opening hours, a
             bus time); name the source when you use it.
@@ -313,6 +318,25 @@ class Assistant(private val ctx: Context, private val tools: GeoTools) {
                 "restore_previous_route",
                 "Put back the route that the last plan_route or GPX import replaced.",
                 schema(emptyMap(), emptyList()),
+            ),
+            tool(
+                "walk_brief",
+                "The before-a-walk briefing for the loaded route: length, climb, a " +
+                    "Naismith time estimate, rain across the walk's own time window, " +
+                    "temperature and wind, and whether he finishes before sunset — with " +
+                    "the sunset time and which way the sun goes down. Use it whenever he " +
+                    "asks anything shaped like \"should I set off now\", \"will I get " +
+                    "rained on\", or \"will I be back before dark\".",
+                schema(
+                    mapOf(
+                        "depart_in_minutes" to property(
+                            "number",
+                            "Minutes from now until setting off. 0 or absent = leaving now; " +
+                                "\"at 3pm\" = minutes between now and 3pm (work it out).",
+                        ),
+                    ),
+                    emptyList(),
+                ),
             ),
             tool(
                 "find_walks",

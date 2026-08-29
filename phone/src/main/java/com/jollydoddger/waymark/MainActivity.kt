@@ -38,6 +38,7 @@ import com.jollydoddger.waymark.shared.Prefs.assistantEnabled
 import com.jollydoddger.waymark.shared.Prefs.libraryFolder
 import com.jollydoddger.waymark.shared.Prefs.osApiKey
 import com.jollydoddger.waymark.shared.Prefs.prowEnabled
+import com.jollydoddger.waymark.shared.Prefs.radarEnabled
 import com.jollydoddger.waymark.shared.Prefs.tracesEnabled
 import com.jollydoddger.waymark.shared.Prefs.recording
 import com.jollydoddger.waymark.shared.Prefs.recordingStartedAt
@@ -415,9 +416,11 @@ class MainActivity : Activity() {
     private fun bindOverlays() {
         val wantTraces = tracesEnabled
         val wantProw = prowEnabled
+        val wantRadar = radarEnabled
         if (!wantTraces) map.setTraces(emptyList())
         if (!wantProw) map.setProw(emptyList())
-        if (!wantTraces && !wantProw) {
+        if (!wantRadar) map.setRadar(emptyList())
+        if (!wantTraces && !wantProw && !wantRadar) {
             map.onViewportSettled = null
             return
         }
@@ -430,6 +433,9 @@ class MainActivity : Activity() {
             }
             if (wantTraces) {
                 Traces.refresh(this, bounds, { note -> sayBriefly(note) }) { cells -> map.setTraces(cells) }
+            }
+            if (wantRadar) {
+                Radar.refresh(bounds, { note -> sayBriefly(note) }) { tiles -> map.setRadar(tiles) }
             }
         }
         map.onViewportSettled = fetch

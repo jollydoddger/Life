@@ -474,6 +474,141 @@ class GeoTools(
             "button's \"Walks near me\", where a preview is drawn first."
     }
 
+    /**
+     * The before-a-walk briefing, every number computed or fetched: length
+     * and climb, a Naismith time estimate, the rain across the walk's own
+     * window, and whether he is back before dark — with where the sun goes
+     * down, since a sunset walked towards is worth planning for.
+     */
+    fun walkBrief(departInMinutes: Double): String {
+        val r = route() ?: return "No route is loaded — import one or plan one, then ask again."
+        val at = fix() ?: r.points.first()
+        val (lat, lon) = Bng.toWgs84(at)
+        val totalM = Geom.length(r.points)
+
+        // Ascent from the terrain model; a network failure downgrades the
+        // estimate honestly instead of inventing a flat route.
+        val ascent = runCatching {
+            var t = 0.0
+            for (i in 1 until r.points.size) {
+                t += hypot(r.points[i].e - r.points[i - 1].e, r.points[i].n - r.points[i - 1].n)
+            }
+            val step = maxOf(200.0, t / 90)
+            val samples = sampleAlong(r.points, step)
+            val lats = StringBuilder(); val lons = StringBuilder()
+            samples.forEachIndexed { i, en ->
+                val (la, lo) = Bng.toWgs84(en)
+                if (i > 0) { lats.append(','); lons.append(',') }
+                lats.append("%.5f".format(la)); lons.append("%.5f".format(lo))
+            }
+            val elev = JSONObject(
+                Net.get("https://api.open-meteo.com/v1/elevation?latitude=$lats&longitude=$lons"),
+            ).getJSONArray("elevation")
+            var up = 0.0
+            var prev = elev.getDouble(0)
+            for (i in 0 until elev.length()) {
+                val e = elev.getDouble(i)
+                if (e > prev) up += e - prev
+                prev = e
+            }
+            up
+        }.getOrNull()
+
+        // Naismith's rule: 12 min per km plus a minute per 10 m of climb.
+        val walkMins = (totalM / 1000 * 12 + (ascent ?: 0.0) / 10).roundToInt()
+        val departAt = System.currentTimeMillis() + (departInMinutes * 60_000).toLong()
+        val finishAt = departAt + walkMins * 60_000L
+        val hhmm = java.text.SimpleDateFormat("HH:mm", java.util.Locale.UK)
+
+        val sb = StringBuilder()
+        sb.append("Route \"${r.name}\": ${km(totalM)}")
+        sb.append(
+            if (ascent != null) ", about ${ascent.roundToInt()} m of climb. "
+            else " (no signal for the climb figure, so the estimate is flat-ground). ",
+        )
+        sb.append("Naismith's rule says roughly ${walkMins / 60} h ${walkMins % 60} min of walking — ")
+        sb.append("an estimate for a steady walker, no stops. ")
+        sb.append("Setting off at ${hhmm.format(java.util.Date(departAt))}, ")
+        sb.append("that finishes around ${hhmm.format(java.util.Date(finishAt))}.\n")
+
+        // Weather across the walk's own window, plus the day's light.
+        runCatching {
+            val json = JSONObject(
+                Net.get(
+                    "https://api.open-meteo.com/v1/forecast?latitude=%.4f&longitude=%.4f".format(lat, lon) +
+                        "&hourly=temperature_2m,precipitation_probability,precipitation,wind_speed_10m" +
+                        "&daily=sunrise,sunset&forecast_days=2&wind_speed_unit=mph&timezone=auto",
+                ),
+            )
+            val hourly = json.getJSONObject("hourly")
+            val times = hourly.getJSONArray("time")
+            val prob = hourly.getJSONArray("precipitation_probability")
+            val rain = hourly.getJSONArray("precipitation")
+            val temp = hourly.getJSONArray("temperature_2m")
+            val wind = hourly.getJSONArray("wind_speed_10m")
+            val iso = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm", java.util.Locale.UK)
+            var worstProb = 0; var totalRain = 0.0
+            var tMin = Double.MAX_VALUE; var tMax = -Double.MAX_VALUE; var maxWind = 0.0
+            var covered = 0
+            for (i in 0 until times.length()) {
+                val h = iso.parse(times.getString(i))?.time ?: continue
+                if (h + 3_600_000 < departAt || h > finishAt) continue
+                covered++
+                worstProb = maxOf(worstProb, prob.optInt(i))
+                totalRain += rain.optDouble(i, 0.0)
+                tMin = minOf(tMin, temp.getDouble(i)); tMax = maxOf(tMax, temp.getDouble(i))
+                maxWind = maxOf(maxWind, wind.getDouble(i))
+            }
+            if (covered > 0) {
+                sb.append(
+                    if (totalRain >= 0.2 || worstProb >= 50) {
+                        "Rain: up to $worstProb%% chance in the window, ~%.1f mm in total — expect to get wet. ".format(totalRain)
+                    } else if (worstProb >= 20) {
+                        "Rain: an outside chance ($worstProb% at worst), little or none expected. "
+                    } else {
+                        "Rain: none expected in the window. "
+                    },
+                )
+                sb.append("%.0f–%.0f°C, wind up to %.0f mph.\n".format(tMin, tMax, maxWind))
+            }
+            val daily = json.getJSONObject("daily")
+            val sunsetIso = daily.getJSONArray("sunset").getString(0)
+            val sunriseIso = daily.getJSONArray("sunrise").getString(0)
+            val sunset = iso.parse(sunsetIso)?.time ?: 0L
+            sb.append("Sunset ${sunsetIso.substringAfter('T')}")
+            sb.append(" (sunrise was ${sunriseIso.substringAfter('T')}), ")
+            sb.append("going down roughly ${sunsetDirection(lat)} of you. ")
+            if (sunset > 0) {
+                val margin = (sunset - finishAt) / 60_000
+                sb.append(
+                    when {
+                        margin >= 60 -> "You'd be back with ${margin / 60} h ${margin % 60} min of daylight to spare."
+                        margin >= 0 -> "You'd be back only $margin min before sunset — tight; take a light."
+                        else -> "That finishes ${-margin} min AFTER sunset. Take a torch, or go earlier."
+                    },
+                )
+            }
+        }.onFailure {
+            sb.append("No connection for the forecast or sunset — the timing figures above still stand.")
+        }
+        return sb.toString()
+    }
+
+    /**
+     * Where on the horizon the sun sets today: the azimuth from day-of-year
+     * declination and latitude, turned into a compass point. Astronomy, not
+     * an API — accurate to a degree or two, which is what a pointed arm is.
+     */
+    private fun sunsetDirection(latDeg: Double): String {
+        val n = java.util.Calendar.getInstance().get(java.util.Calendar.DAY_OF_YEAR)
+        val decl = Math.toRadians(-23.44 * cos(Math.toRadians(360.0 / 365 * (n + 10))))
+        val lat = Math.toRadians(latDeg)
+        val cosAz = sin(decl) / cos(lat)
+        val az = 360 - Math.toDegrees(kotlin.math.acos(cosAz.coerceIn(-1.0, 1.0)))
+        val dirs = listOf("N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE", "S", "SSW", "SW", "WSW", "W", "WNW", "NW", "NNW", "N")
+        return dirs[((az + 11.25) / 22.5).toInt().coerceIn(0, 16)]
+    }
+
     fun restorePreviousRoute(): String {
         val r = RouteStore.restorePrevious(ctx) ?: return "There is no previous route banked."
         return "Restored \"${r.name}\". (The route it replaced is banked now, so this toggles.)"

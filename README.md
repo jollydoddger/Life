@@ -125,6 +125,17 @@ Two sources, searched together:
   route website — their terms forbid it, and it would put your accounts at
   risk. Rescan from the same menu after adding files.
 
+## Saved walks
+
+Stopping a recording (■) offers to save the walk: a name, your own note,
+and — captured automatically — the date, how long it took, how far it was,
+and where it started. They live under the GPX button → **Saved walks**:
+load one back as the route to walk it again, share it as a GPX file (to
+komoot, a friend, or OpenStreetMap's public-traces upload — which is
+exactly what makes the red dots grow), or delete it. The GPX menu can also
+**hide the route** on the phone to read the map under it; the stored route
+and the watch are untouched, and adopting any new route un-hides it.
+
 ## Rights of way (optional, off by default)
 
 A switch in ⚙ draws the paths you are **legally entitled to walk**, bold and
@@ -141,6 +152,11 @@ Explorer draws the same paths in green dashes underneath, so where the two
 disagree, believe the printed map. For a formal question — a blocked path, a
 diversion order — the council's own definitive map is the only authority.
 
+A second checkbox, **Every mapped path and track**, adds the physical
+network OSM knows about — paths with no recorded legal status — in thin
+grey under the coloured rights. It answers "is there a path", not "may I
+walk it".
+
 ## Where people have walked (optional, off by default)
 
 A switch in ⚙ draws flashing red dots on the phone's map wherever anyone has
@@ -156,6 +172,19 @@ year. Nothing purchasable fixes that: Strava's heatmap has no API, its tiles
 sit behind a login, and Strava's API agreement forbids third-party surfacing
 of aggregate activity data — at any price. This overlay is the legal
 substitute, and its one weakness is recency.
+
+## Rainfall radar (optional, off by default)
+
+A switch in ⚙ paints live rainfall over the map — blue where real weather
+radars see rain falling now, warped properly from the web's projection
+onto the OS grid, refreshed about every five minutes as you browse.
+Deliberately never cached: radar is *now* by definition, so with no signal
+there is no radar rather than a stale lie about the sky. Weather data by
+[RainViewer](https://rainviewer.com). Phone only.
+
+The overlays stack in a deliberate order, bottom to top: the GPX route
+(able to be covered), then the information layers — red dots, rights of
+way, paths — then the trail you have actually walked on top of everything.
 
 ## Ask it things (optional, off by default)
 
@@ -188,6 +217,11 @@ head; anything it changes shows as a ✓ receipt.
   preview is.
 - **"Where am I?"** — an OS grid reference (the form mountain rescue wants),
   the nearest named place, and today's sunset.
+- **"Should I set off now?" / "will I be back before dark?"** — the walk
+  brief: length and climb, a Naismith time estimate, the rain forecast
+  across the walk's own time window, and the finish measured against
+  sunset — including which way the sun goes down. Works for a later start
+  too: "brief me for setting off at 3".
 
 It needs your own Anthropic API key (console.anthropic.com) in ⚙, phone-only —
 the key field appears once the switch is on. A question costs a few pence. Place data © OpenStreetMap contributors; routing

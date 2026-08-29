@@ -54,6 +54,21 @@ object Net {
         }
     }
 
+    /** A small binary fetch — radar tiles, nothing else so far. */
+    fun getBytes(url: String, timeoutMs: Int = 20_000): ByteArray {
+        val conn = URL(url).openConnection() as HttpURLConnection
+        conn.connectTimeout = timeoutMs
+        conn.readTimeout = timeoutMs
+        conn.setRequestProperty("User-Agent", UA)
+        try {
+            val code = conn.responseCode
+            if (code != 200) throw RuntimeException("HTTP $code from ${URL(url).host}")
+            return conn.inputStream.use { it.readBytes() }
+        } finally {
+            conn.disconnect()
+        }
+    }
+
     fun post(url: String, body: String, contentType: String, timeoutMs: Int = 25_000): String {
         val conn = URL(url).openConnection() as HttpURLConnection
         conn.connectTimeout = timeoutMs

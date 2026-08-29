@@ -27,6 +27,7 @@ import com.jollydoddger.waymark.shared.Prefs.arrowColour
 import com.jollydoddger.waymark.shared.Prefs.assistantEnabled
 import com.jollydoddger.waymark.shared.Prefs.osApiKey
 import com.jollydoddger.waymark.shared.Prefs.prowEnabled
+import com.jollydoddger.waymark.shared.Prefs.radarEnabled
 import com.jollydoddger.waymark.shared.Prefs.routeColour
 import com.jollydoddger.waymark.shared.Prefs.screenTimeoutSec
 import com.jollydoddger.waymark.shared.Prefs.tracesEnabled
@@ -234,6 +235,25 @@ class SettingsActivity : Activity() {
             }
         }
 
+        val radarSwitch = Switch(this).apply {
+            text = "  Rainfall radar"
+            textSize = 16f
+            isChecked = radarEnabled
+            setOnCheckedChangeListener { _, on ->
+                radarEnabled = on
+                result.text = if (on) "Rain radar on — blue where rain is falling now."
+                else "Rain radar off."
+            }
+        }
+        val radarNote = TextView(this).apply {
+            textSize = 13f
+            text = "Live rainfall painted over the map — blue where real weather radars " +
+                "see rain falling, updated about every five minutes as you browse. " +
+                "Never cached: radar is now by definition, so with no signal there is " +
+                "no radar rather than a stale lie about the sky. Phone only.\n\n" +
+                "Weather data by RainViewer (rainviewer.com)."
+        }
+
         val tracesSwitch = Switch(this).apply {
             text = "  Where people have walked"
             textSize = 16f
@@ -375,6 +395,10 @@ class SettingsActivity : Activity() {
                 LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT,
             ).apply { topMargin = dp(16) })
             addView(tracesNote)
+            addView(radarSwitch, LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT,
+            ).apply { topMargin = dp(16) })
+            addView(radarNote)
 
             addView(heading("Route line"))
             addView(swatches({ routeColour }) { routeColour = it })
