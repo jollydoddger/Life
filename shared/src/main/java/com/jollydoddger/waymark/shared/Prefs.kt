@@ -93,6 +93,27 @@ object Prefs {
         set(v) = p(this).edit().putBoolean("radarEnabled", v).apply()
 
     /**
+     * How strongly the weather layers are painted, 0-100. Weather sits on top
+     * of a map he is navigating by, and how much of the paper he wants to see
+     * through it changes with the light, the zoom and what he is doing — so
+     * it is a control on the map rather than a constant somebody chose.
+     */
+    var Context.weatherOpacity: Int
+        get() = p(this).getInt("weatherOpacity", 85).coerceIn(10, 100)
+        set(v) = p(this).edit().putInt("weatherOpacity", v.coerceIn(10, 100)).apply()
+
+    /**
+     * Which RainViewer colour scale the radar is painted in. Their numbering:
+     * 1 Original, 2 Universal Blue, 3 TITAN, 4 The Weather Channel,
+     * 5 Meteored, 6 NEXRAD, 7 Rainbow, 8 Dark Sky. Original by default —
+     * Universal Blue fades to near-white at the light end, which over pale
+     * Explorer paper is no colour at all.
+     */
+    var Context.radarScheme: Int
+        get() = p(this).getInt("radarScheme", 1)
+        set(v) = p(this).edit().putInt("radarScheme", v).apply()
+
+    /**
      * Wind speed and direction as arrows across the map. Of the weather
      * layers this is the one that changes a plan: a headwind on an exposed
      * ridge is the difference between a good afternoon and a fight.

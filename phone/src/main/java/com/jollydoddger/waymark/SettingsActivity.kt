@@ -29,6 +29,7 @@ import com.jollydoddger.waymark.shared.Prefs.osApiKey
 import com.jollydoddger.waymark.shared.Prefs.prowEnabled
 import com.jollydoddger.waymark.shared.Prefs.cloudEnabled
 import com.jollydoddger.waymark.shared.Prefs.radarEnabled
+import com.jollydoddger.waymark.shared.Prefs.radarScheme
 import com.jollydoddger.waymark.shared.Prefs.tempEnabled
 import com.jollydoddger.waymark.shared.Prefs.windEnabled
 import com.jollydoddger.waymark.shared.Prefs.routeColour
@@ -148,7 +149,12 @@ class SettingsActivity : Activity() {
         }
 
         // Labelled chips, for the settings that aren't colours.
-        fun choices(options: List<Pair<String, Int>>, current: () -> Int, choose: (Int) -> Unit): LinearLayout {
+        fun choices(
+            options: List<Pair<String, Int>>,
+            current: () -> Int,
+            sync: Boolean = true,
+            choose: (Int) -> Unit,
+        ): LinearLayout {
             val strip = LinearLayout(this)
             val cells = mutableListOf<Pair<TextView, Int>>()
             fun repaint() {
@@ -171,7 +177,9 @@ class SettingsActivity : Activity() {
                     setOnClickListener {
                         choose(value)
                         repaint()
-                        pushStyle(result)
+                        // Only the settings the watch shares are worth a sync;
+                        // a phone-only overlay colour is not.
+                        if (sync) pushStyle(result)
                     }
                 }
                 cells.add(cell to value)
@@ -248,6 +256,21 @@ class SettingsActivity : Activity() {
                 else "Rain radar off."
             }
         }
+        val radarScales = listOf(
+            "Original" to 1, "Universal Blue" to 2, "TITAN" to 3,
+            "Weather Channel" to 4, "Meteored" to 5, "NEXRAD" to 6,
+            "Rainbow" to 7, "Dark Sky" to 8,
+        )
+        val radarScaleNote = TextView(this).apply {
+            textSize = 13f
+            text = "Rain is coloured by how hard it is falling, on whichever of RainViewer's " +
+                "scales you prefer. Original by default: Universal Blue fades to near-white " +
+                "at its light end, and over pale Explorer paper that is no colour at all. " +
+                "The key appears under the timeline on the map, and how heavily the whole " +
+                "lot is painted is a slider there too — beside the map you are judging it " +
+                "against, rather than in here."
+        }
+
         val radarNote = TextView(this).apply {
             textSize = 13f
             text = "Rainfall painted boldly over the map, from real weather radars, with " +
@@ -455,6 +478,11 @@ class SettingsActivity : Activity() {
                 LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT,
             ).apply { topMargin = dp(16) })
             addView(radarNote)
+            addView(radarScaleNote)
+            addView(HorizontalScrollView(this@SettingsActivity).apply {
+                isHorizontalScrollBarEnabled = false
+                addView(choices(radarScales, { radarScheme }, sync = false) { radarScheme = it })
+            })
             addView(windSwitch, LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT,
             ).apply { topMargin = dp(16) })

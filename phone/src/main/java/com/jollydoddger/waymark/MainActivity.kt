@@ -43,7 +43,9 @@ import com.jollydoddger.waymark.shared.Prefs.osApiKey
 import com.jollydoddger.waymark.shared.Prefs.prowEnabled
 import com.jollydoddger.waymark.shared.Prefs.radarEnabled
 import com.jollydoddger.waymark.shared.Prefs.tempEnabled
+import com.jollydoddger.waymark.shared.Prefs.radarScheme
 import com.jollydoddger.waymark.shared.Prefs.tracesEnabled
+import com.jollydoddger.waymark.shared.Prefs.weatherOpacity
 import com.jollydoddger.waymark.shared.Prefs.windEnabled
 import com.jollydoddger.waymark.shared.Prefs.recording
 import com.jollydoddger.waymark.shared.Prefs.recordingStartedAt
@@ -97,6 +99,9 @@ class MainActivity : Activity() {
     private lateinit var wxBar: LinearLayout
     private lateinit var wxLabel: TextView
     private lateinit var wxSeek: SeekBar
+    private lateinit var wxFade: SeekBar
+    private lateinit var wxLegend: LinearLayout
+    private var legendKey = ""
     private var wxFrames: List<WxFrame> = emptyList()
     private var wxIndex = 0
     private var radarFrames: List<WxFrame> = emptyList()
@@ -252,14 +257,45 @@ class MainActivity : Activity() {
                 override fun onStopTrackingTouch(bar: SeekBar?) { }
             })
         }
+        // How heavily the weather is painted, right where he can see what it
+        // is doing to the map — judging it from a settings screen with no map
+        // on it is guesswork.
+        wxFade = SeekBar(this).apply {
+            max = 100
+            progress = weatherOpacity
+            setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+                override fun onProgressChanged(bar: SeekBar?, value: Int, fromUser: Boolean) {
+                    if (!fromUser) return
+                    weatherOpacity = value
+                    map.setWeatherOpacity(value)
+                }
+                override fun onStartTrackingTouch(bar: SeekBar?) { }
+                override fun onStopTrackingTouch(bar: SeekBar?) { }
+            })
+        }
+        val wxTopRow = LinearLayout(this).apply {
+            gravity = Gravity.CENTER_VERTICAL
+            addView(wxLabel, LinearLayout.LayoutParams(
+                0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f,
+            ))
+            addView(wxFade, LinearLayout.LayoutParams(dp(104), LinearLayout.LayoutParams.WRAP_CONTENT))
+        }
+        wxLegend = LinearLayout(this).apply {
+            gravity = Gravity.CENTER_VERTICAL
+            visibility = View.GONE
+            setPadding(dp(14), 0, dp(14), dp(6))
+        }
         wxBar = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setBackgroundColor(Color.argb(215, 22, 26, 24))
             visibility = View.GONE
-            addView(wxLabel, LinearLayout.LayoutParams(
+            addView(wxTopRow, LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT,
             ))
             addView(wxSeek, LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT,
+            ))
+            addView(wxLegend, LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT,
             ))
         }
@@ -499,6 +535,8 @@ class MainActivity : Activity() {
             map.onViewportSettled = null
             return
         }
+        map.setWeatherOpacity(weatherOpacity)
+        Radar.scheme = radarScheme
         // The frame catalogue is a property of the sky, not of the viewport,
         // so it is asked for once here rather than on every pan.
         if (wantRadar) {
@@ -540,6 +578,19 @@ class MainActivity : Activity() {
     }
 
     // --- the weather timeline ------------------------------------------------
+
+    /** Rain rates worth naming, in mm per hour, with the words for them. */
+    private val RAIN_KEY = listOf(
+        0.15 to "drizzle", 0.6 to "light", 3.0 to "steady", 10.0 to "heavy", 28.0 to "torrential",
+    )
+
+    /** RainViewer's own scale names, for the key and for Settings. */
+    private val RADAR_SCALES = mapOf(
+        1 to "Radar · Original scale", 2 to "Radar · Universal Blue",
+        3 to "Radar · TITAN", 4 to "Radar · Weather Channel",
+        5 to "Radar · Meteored", 6 to "Radar · NEXRAD",
+        7 to "Radar · Rainbow", 8 to "Radar · Dark Sky",
+    )
 
     /**
      * Rebuild the timeline from whatever has arrived. The radar catalogue and
@@ -602,6 +653,77 @@ class MainActivity : Activity() {
         drawWeatherField(field, hour, frame)
         drawWind(field, hour)
         wxLabel.text = frameLabel(frame) + readings(field, hour)
+        showLegend(frame, field != null && hour >= 0)
+    }
+
+    /**
+     * What the colours mean. Colour-coded rain says nothing until the code is
+     * written down somewhere, and the somewhere has to be on the map — a key
+     * in a settings screen is a key nobody reads in the rain.
+     *
+     * Only the washes this app paints itself get swatches, because only those
+     * colours are ours to state. The radar's are RainViewer's scale, so that
+     * one is named rather than mimicked: a hand-drawn key that drifted from
+     * the real palette would be worse than none.
+     */
+    private fun showLegend(frame: WxFrame, haveField: Boolean) {
+        val key = when {
+            radarEnabled && frame.radarPath != null -> "radar${Radar.scheme}"
+            !haveField -> ""
+            radarEnabled && frame.radarPath == null -> "rain"
+            tempEnabled -> "temp"
+            cloudEnabled -> "cloud"
+            else -> ""
+        }
+        if (key == legendKey) return
+        legendKey = key
+        wxLegend.removeAllViews()
+        wxLegend.visibility = if (key.isEmpty()) View.GONE else View.VISIBLE
+        when {
+            key.startsWith("radar") -> wxLegend.addView(legendNote(RADAR_SCALES[Radar.scheme] ?: "RainViewer"))
+            key == "rain" -> {
+                wxLegend.addView(legendNote("Forecast rain"))
+                for ((mm, name) in RAIN_KEY) wxLegend.addView(legendChip(name, Ramp.rain(mm)))
+            }
+            key == "temp" -> for (c in intArrayOf(0, 8, 15, 22, 28)) {
+                wxLegend.addView(legendChip("$c°", Ramp.temperature(c.toDouble())))
+            }
+            key == "cloud" -> {
+                wxLegend.addView(legendChip("clear", Ramp.cloud(0.0)))
+                wxLegend.addView(legendChip("half", Ramp.cloud(55.0)))
+                wxLegend.addView(legendChip("dull", Ramp.cloud(100.0)))
+            }
+        }
+    }
+
+    private fun legendNote(text: String): TextView = TextView(this).apply {
+        this.text = text
+        textSize = 10f
+        setTextColor(Color.argb(200, 235, 235, 235))
+        setPadding(0, 0, (6 * resources.displayMetrics.density).toInt(), 0)
+    }
+
+    /** A swatch with its meaning written on it, legible on any of the ramps. */
+    private fun legendChip(label: String, colour: Int): TextView {
+        val d = resources.displayMetrics.density
+        // The cloud ramp is deliberately see-through, so a swatch of it over
+        // a dark bar would read as almost nothing: lay it on white first, the
+        // way it will actually sit on the map.
+        val over = blendOnWhite(colour)
+        val lum = 0.299 * Color.red(over) + 0.587 * Color.green(over) + 0.114 * Color.blue(over)
+        return TextView(this).apply {
+            text = label
+            textSize = 10f
+            setTextColor(if (lum > 140) Color.BLACK else Color.WHITE)
+            setBackgroundColor(over)
+            setPadding((7 * d).toInt(), (2 * d).toInt(), (7 * d).toInt(), (2 * d).toInt())
+        }
+    }
+
+    private fun blendOnWhite(c: Int): Int {
+        val a = Color.alpha(c) / 255f
+        fun ch(v: Int) = (v * a + 255 * (1 - a)).toInt().coerceIn(0, 255)
+        return Color.rgb(ch(Color.red(c)), ch(Color.green(c)), ch(Color.blue(c)))
     }
 
     /**

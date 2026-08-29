@@ -41,18 +41,25 @@ object Radar {
     private const val TILE_Z = 7
 
     /**
-     * Colour scheme 1 ("Original") rather than 2 ("Universal Blue").
+     * Which of RainViewer's colour scales the rain is painted in — his
+     * choice, set in Settings and handed here.
      *
-     * Universal Blue fades to near-white at the light end, which over a pale
-     * OS Explorer sheet is invisible — light rain is exactly the rain you want
-     * warning of, and it was the one thing the layer could not show. Scheme 1
-     * keeps a solid colour all the way down. If RainViewer ever stops serving
-     * it the first failed tile drops back to 2 rather than leaving a blank
-     * layer that looks like clear skies.
+     * The default is 1 ("Original") rather than 2 ("Universal Blue"), because
+     * Universal Blue fades to near-white at its light end, and over a pale OS
+     * Explorer sheet that is no colour at all — light rain is exactly the
+     * rain worth warning about. A scale this server will not serve is
+     * remembered and dropped for scheme 2, rather than leaving a blank layer
+     * that reads as clear skies.
      */
-    private const val SCHEME_BOLD = 1
+    @Volatile
+    var scheme = 1
+
     private const val SCHEME_FALLBACK = 2
-    private var scheme = SCHEME_BOLD
+    private val refused = HashSet<Int>()
+
+    private fun schemeNow(): Int = synchronized(refused) {
+        if (scheme in refused) SCHEME_FALLBACK else scheme
+    }
 
     /** Bitmaps are ~256 KB each; enough for a scrub over a small viewport. */
     private const val CACHE_TILES = 48
@@ -180,14 +187,15 @@ object Radar {
 
     private fun decode(path: String, x: Int, y: Int, key: String) {
         val h = synchronized(this) { host }
-        val scheme0 = synchronized(this) { scheme }
+        val chosen = schemeNow()
         val bytes = try {
-            Net.getBytes("$h$path/256/$TILE_Z/$x/$y/$scheme0/1_1.png")
+            Net.getBytes("$h$path/256/$TILE_Z/$x/$y/$chosen/1_1.png")
         } catch (e: Exception) {
-            // A colour scheme this server will not serve must not leave the
+            // A colour scale this server will not serve must not leave the
             // layer permanently blank — that reads as "no rain anywhere".
-            if (scheme0 == SCHEME_FALLBACK) throw e
-            synchronized(this) { scheme = SCHEME_FALLBACK }
+            // Remembered per scale, so choosing a different one still works.
+            if (chosen == SCHEME_FALLBACK) throw e
+            synchronized(refused) { refused.add(chosen) }
             Net.getBytes("$h$path/256/$TILE_Z/$x/$y/$SCHEME_FALLBACK/1_1.png")
         }
         val bmp = BitmapFactory.decodeByteArray(bytes, 0, bytes.size) ?: return
@@ -204,9 +212,12 @@ object Radar {
         val (south, west) = Bng.toWgs84(En(boundsEn[0], boundsEn[1]))
         val (north, east) = Bng.toWgs84(En(boundsEn[2], boundsEn[3]))
         val out = ArrayList<Pair<String, IntArray>>()
+        // The scale is part of the key: switching colours must re-fetch, and
+        // switching back must come straight out of the cache.
+        val chosen = schemeNow()
         for (x in lonToX(west)..lonToX(east)) {
             for (y in latToY(north)..latToY(south)) {
-                out.add("$path/$x/$y" to intArrayOf(x, y))
+                out.add("$chosen/$path/$x/$y" to intArrayOf(x, y))
             }
         }
         return out

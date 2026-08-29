@@ -184,8 +184,21 @@ warped properly from the web's projection onto the OS grid. Drawn heavy on
 purpose: the radar image carries its own transparency, so light rain used to
 vanish against pale Explorer paper — each tile is now composited over itself,
 which lifts the faint returns without changing what heavy rain looks like.
-Never cached: radar is *now* by definition, so with no signal there is no
-radar rather than a stale lie about the sky.
+Rain is **colour-coded by intensity**, on whichever of RainViewer's eight
+scales you pick in Settings (Original by default). Never cached: radar is
+*now* by definition, so with no signal there is no radar rather than a stale
+lie about the sky.
+
+**Opacity** is a slider on the map itself, next to the timeline — beside the
+thing you are judging it against, since the same rain that reads perfectly in
+a dark kitchen buries the contours in bright sun. It applies to every weather
+layer and is remembered.
+
+**The key** sits under the timeline and changes with what is drawn: swatches
+with the words for them (drizzle, light, steady, heavy, torrential) for the
+washes this app paints itself, and the scale's name for the radar — those
+colours are RainViewer's, so they are named rather than mimicked. A key that
+drifted from the real palette would be worse than none.
 
 **Wind.** Arrows across the map, coloured and sized by speed — grey a breath,
 green a breeze, amber when it starts pushing you about, red when an exposed

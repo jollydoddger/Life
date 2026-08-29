@@ -414,6 +414,27 @@ class BngMapView @JvmOverloads constructor(
     private val radarPaint = Paint(Paint.FILTER_BITMAP_FLAG).apply { alpha = 235 }
     private val RADAR_PASSES = 2
 
+    /**
+     * How strongly the weather is painted, as a fraction of each layer's own
+     * weight. It is his dial, not a constant: the same rain that reads
+     * perfectly in a dark kitchen buries the contours in bright sun, and the
+     * map underneath is what he is actually navigating by.
+     */
+    private var weatherOpacity = 0.85f
+    private var radarBaseAlpha = 235
+    private var fieldBaseAlpha = 150
+
+    fun setWeatherOpacity(percent: Int) {
+        weatherOpacity = (percent.coerceIn(0, 100)) / 100f
+        applyWeatherAlpha()
+        invalidate()
+    }
+
+    private fun applyWeatherAlpha() {
+        radarPaint.alpha = (radarBaseAlpha * weatherOpacity).toInt().coerceIn(0, 255)
+        fieldPaint.alpha = (fieldBaseAlpha * weatherOpacity).toInt().coerceIn(0, 255)
+    }
+
     /** Mesh resolution per tile: 6x6 quads is plenty at county scale. */
     private val radarMeshN = 6
     private val radarMesh = FloatArray((radarMeshN + 1) * (radarMeshN + 1) * 2)
@@ -455,7 +476,8 @@ class BngMapView @JvmOverloads constructor(
 
     fun setField(tile: MeshTile?, alpha: Int) {
         fieldTile = tile
-        fieldPaint.alpha = alpha
+        fieldBaseAlpha = alpha
+        applyWeatherAlpha()
         invalidate()
     }
 
