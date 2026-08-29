@@ -247,13 +247,21 @@ class SettingsActivity : Activity() {
         }
         val radarNote = TextView(this).apply {
             textSize = 13f
-            text = "Rainfall painted boldly over the map, from real weather radars, with " +
-                "a timeline along the bottom: drag it back through the last couple of " +
-                "hours to see which way a shower is travelling, or forward through the " +
-                "nowcast. Each frame says whether it is measured radar or a forecast.\n\n" +
-                "Never cached: radar is now by definition, so with no signal there is " +
-                "no radar rather than a stale lie about the sky. Phone only.\n\n" +
-                "Weather data by RainViewer (rainviewer.com)."
+            text = "Rainfall painted boldly over the map, with a timeline along the " +
+                "bottom to drag through it — five hours back to five ahead, made of " +
+                "two honest halves. The last couple of hours and the next half hour " +
+                "are real weather radar: drag back to see which way a shower is " +
+                "travelling. Beyond the radar's reach the hourly forecast takes " +
+                "over — model rain as a blue wash at the model's own coarse " +
+                "resolution, wind arrows with it, and the label says how much where " +
+                "you're looking. Every frame says which it is: radar is a " +
+                "measurement, a forecast is an opinion, and they never wear the " +
+                "same colours.\n\n" +
+                "The radar is never cached: it is now by definition, so with no " +
+                "signal there is no radar rather than a stale lie about the sky. " +
+                "The forecast refreshes about half-hourly. Phone only.\n\n" +
+                "Weather data by RainViewer (rainviewer.com) and Open-Meteo " +
+                "(open-meteo.com)."
         }
 
         val tracesSwitch = Switch(this).apply {

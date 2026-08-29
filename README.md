@@ -176,12 +176,23 @@ substitute, and its one weakness is recency.
 
 ## Rainfall radar (optional, off by default)
 
-A switch in ⚙ paints live rainfall over the map — blue where real weather
-radars see rain falling now, warped properly from the web's projection
-onto the OS grid, refreshed about every five minutes as you browse.
-Deliberately never cached: radar is *now* by definition, so with no signal
-there is no radar rather than a stale lie about the sky. Weather data by
-[RainViewer](https://rainviewer.com). Phone only.
+A switch in ⚙ paints rainfall over the map, with a timeline along the
+bottom to drag through it — five hours back to five ahead, made of two
+honest halves. The last couple of hours and the next half hour are **real
+weather radar**, warped properly from the web's projection onto the OS
+grid: drag the bar and watch the shower move, which is the one thing a
+radar can tell you that a forecast cannot — not whether it will rain, but
+whether it is coming for *you*. Beyond the radar's reach the **hourly
+forecast** takes over: model rain drawn as a blue wash at the model's own
+coarse resolution, wind arrows with it, and the label under the bar says
+how much is expected where you're looking. Every frame says which it is —
+radar is a measurement, a forecast is an opinion, and they never wear the
+same colours.
+
+The radar is deliberately never cached: radar is *now* by definition, so
+with no signal there is no radar rather than a stale lie about the sky.
+Weather data by [RainViewer](https://rainviewer.com) and
+[Open-Meteo](https://open-meteo.com). Phone only.
 
 The overlays stack in a deliberate order, bottom to top: the GPX route
 (able to be covered), then the information layers — red dots, rights of

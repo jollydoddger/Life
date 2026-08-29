@@ -24,6 +24,7 @@ import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.SeekBar
 import android.widget.TextView
+import com.jollydoddger.waymark.shared.Bng
 import com.jollydoddger.waymark.shared.BngMapView
 import com.jollydoddger.waymark.shared.Corridor
 import com.jollydoddger.waymark.shared.En
@@ -89,10 +90,14 @@ class MainActivity : Activity() {
     private lateinit var askBar: LinearLayout
 
     // The weather scrubber: five hours back, five forward, one moment shown.
+    // Two sources feed it — radar frames where radar reaches, the hourly
+    // forecast field beyond — and either arriving rebuilds the merge.
     private lateinit var wxBar: LinearLayout
     private lateinit var wxLabel: TextView
     private lateinit var wxSeek: SeekBar
     private var wxFrames: List<WxFrame> = emptyList()
+    private var wxRadar: List<WxFrame> = emptyList()
+    private var wxField: Forecast.Field? = null
     private var wxIndex = 0
     private var askBusy = false
     private val assistant by lazy {
@@ -474,9 +479,13 @@ class MainActivity : Activity() {
         val wantRadar = radarEnabled
         if (!wantTraces) map.setTraces(emptyList())
         if (!wantProw) map.setProw(emptyList())
-        if (!wantRadar) map.setRadar(emptyList())
         if (!wantRadar) {
+            map.setRadar(emptyList())
+            map.setField(null, 0)
+            map.setWind(emptyList())
             wxFrames = emptyList()
+            wxRadar = emptyList()
+            wxField = null
             wxBar.visibility = View.GONE
         }
         if (!wantTraces && !wantProw && !wantRadar) {
@@ -487,7 +496,11 @@ class MainActivity : Activity() {
         // so it is asked for once here rather than on every pan.
         if (wantRadar) {
             Radar.catalogue({ note -> sayBriefly(note) }) { frames ->
-                setWxFrames(Timeline.merge(frames, emptyList(), System.currentTimeMillis()))
+                // Read live, not from wantRadar: an answer can land after the
+                // layer was switched off, and must not repopulate the bar.
+                if (!radarEnabled) return@catalogue
+                wxRadar = frames
+                rebuildTimeline()
             }
         }
         val fetch = {
@@ -499,6 +512,16 @@ class MainActivity : Activity() {
             }
             if (wantTraces) {
                 Traces.refresh(this, bounds, { note -> sayBriefly(note) }) { cells -> map.setTraces(cells) }
+            }
+            // The forecast field, unlike the catalogue, IS a property of the
+            // viewport: the lattice is sampled over what is on screen, so it
+            // rides the settle hook with the other viewport-shaped fetches.
+            if (wantRadar) {
+                Forecast.refresh(bounds, { note -> sayBriefly(note) }) { field ->
+                    if (!radarEnabled) return@refresh
+                    wxField = field
+                    rebuildTimeline()
+                }
             }
             // A pan or a zoom needs the moment already on the scrubber, not
             // the newest one: dragging back an hour and then moving the map
@@ -516,24 +539,40 @@ class MainActivity : Activity() {
 
     // --- the weather timeline ------------------------------------------------
 
-    /** Hand the scrubber a new set of moments and open it on now. */
-    private fun setWxFrames(frames: List<WxFrame>) {
+    /**
+     * Merge whatever both sources have delivered into the scrubber. Data
+     * landing must not yank a scrubbed timeline back to now — a catalogue
+     * refresh mid-drag would jump the clock out from under his thumb — so
+     * the moment already shown is held onto and only a first fill opens on
+     * now.
+     */
+    private fun rebuildTimeline() {
+        val hours = wxField?.timesMs?.toList() ?: emptyList()
+        val keep = wxFrames.getOrNull(wxIndex)?.timeMs
+        val frames = Timeline.merge(wxRadar, hours, System.currentTimeMillis())
         wxFrames = frames
         if (frames.isEmpty()) {
             wxBar.visibility = View.GONE
+            map.setRadar(emptyList())
+            map.setField(null, 0)
+            map.setWind(emptyList())
             return
         }
         wxBar.visibility = View.VISIBLE
         wxSeek.max = frames.size - 1
-        val i = Timeline.indexOfNow(frames, System.currentTimeMillis())
+        val i = Timeline.indexOfNow(frames, keep ?: System.currentTimeMillis())
         wxSeek.progress = i
         showWxFrame(i)
     }
 
     /**
-     * Draw one moment. Tiles already decoded arrive immediately, so a drag
-     * across the bar animates instead of blinking, and the frames just ahead
-     * are warmed in the background for the same reason.
+     * Draw one moment. A radar frame is a measurement and is shown alone —
+     * no model wash underneath it, because a worse answer must not sit on a
+     * better one. A forecast frame is all model: the rain field as a blue
+     * wash and the wind as arrows, both from the same hour of the same run.
+     * Tiles already decoded arrive immediately, so a drag across the bar
+     * animates instead of blinking, and the frames just ahead are warmed in
+     * the background for the same reason.
      */
     private fun showWxFrame(i: Int) {
         if (wxFrames.isEmpty()) return
@@ -542,7 +581,19 @@ class MainActivity : Activity() {
         wxLabel.text = frameLabel(frame)
         val bounds = map.viewportBounds()
         if (radarEnabled) {
-            Radar.tiles(bounds, frame) { tiles -> map.setRadar(tiles) }
+            if (frame.radarPath != null) {
+                map.setField(null, 0)
+                map.setWind(emptyList())
+                Radar.tiles(bounds, frame) { tiles -> map.setRadar(tiles) }
+            } else {
+                map.setRadar(emptyList())
+                val field = wxField
+                map.setField(field?.let { Forecast.tile(it, frame.timeMs) }, Forecast.FIELD_ALPHA)
+                map.setWind(field?.let { Forecast.arrows(it, frame.timeMs) } ?: emptyList())
+            }
+            // Warmed either way: the neighbours of a forecast frame can be
+            // radar, and scrubbing back into the radar's window should not
+            // blink. Prefetch itself skips frames with no radar to fetch.
             val ahead = ArrayList<WxFrame>()
             for (d in intArrayOf(1, 2, -1, 3)) {
                 val j = wxIndex + d
@@ -552,7 +603,13 @@ class MainActivity : Activity() {
         }
     }
 
-    /** "14:20 · in 40 min · forecast" — the clock, the offset, and the source. */
+    /**
+     * "14:20 · in 40 min · forecast · rain 0.6 mm (70%)" — the clock, the
+     * offset, the source, and for a forecast frame what the model actually
+     * says for the middle of the view. A radar frame gets no numbers: the
+     * picture on the map is the measurement, and inventing a summary of it
+     * here would be a second, worse instrument.
+     */
     private fun frameLabel(frame: WxFrame): String {
         fun span(m: Int): String = if (m >= 90) "${m / 60} h ${m % 60} min" else "$m min"
         val clock = java.text.SimpleDateFormat("HH:mm", java.util.Locale.UK)
@@ -563,7 +620,13 @@ class MainActivity : Activity() {
             mins < 0 -> span(-mins) + " ago"
             else -> "in " + span(mins)
         }
-        return "$clock · $rel · ${frame.kind}"
+        val base = "$clock · $rel · ${frame.kind}"
+        if (frame.radarPath != null) return base
+        val field = wxField ?: return base
+        val b = map.viewportBounds()
+        val (lat, lon) = Bng.toWgs84(En((b[0] + b[2]) / 2, (b[1] + b[3]) / 2))
+        val wx = Forecast.describe(field, frame.timeMs, lat, lon) ?: return base
+        return "$base · $wx"
     }
 
     // --- offline area download -----------------------------------------------
