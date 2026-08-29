@@ -381,8 +381,20 @@ class MainActivity : Activity() {
     }
 
     private fun say(msg: String) {
+        status.removeCallbacks(hideStatus)
         status.text = msg
         status.visibility = View.VISIBLE
+    }
+
+    private val hideStatus = Runnable { status.visibility = View.GONE }
+
+    /**
+     * For the overlays' running commentary: useful while it is happening,
+     * clutter across the map a minute later.
+     */
+    private fun sayBriefly(msg: String) {
+        say(msg)
+        status.postDelayed(hideStatus, 5_000)
     }
 
     // --- map overlays ---------------------------------------------------------
@@ -401,11 +413,22 @@ class MainActivity : Activity() {
             map.onViewportSettled = null
             return
         }
-        map.onViewportSettled = {
+        val fetch = {
             val bounds = map.viewportBounds()
-            if (wantTraces) Traces.refresh(this, bounds) { cells -> map.setTraces(cells) }
-            if (wantProw) Prow.refresh(this, bounds) { lines -> map.setProw(lines) }
+            if (wantProw) {
+                Prow.refresh(this, bounds, { note -> sayBriefly(note) }) { lines -> map.setProw(lines) }
+            }
+            if (wantTraces) {
+                Traces.refresh(this, bounds, { note -> sayBriefly(note) }) { cells -> map.setTraces(cells) }
+            }
         }
+        map.onViewportSettled = fetch
+        // Switching a layer on in Settings and coming back left the map
+        // sitting perfectly still, and the settle hook only fires on a pan,
+        // a zoom or a moving fix — so nothing was ever requested and the
+        // overlay looked broken. Ask once, here, as soon as there is a
+        // viewport to ask about.
+        if (map.width > 0) fetch() else map.post { if (map.width > 0) fetch() }
     }
 
     // --- offline area download -----------------------------------------------

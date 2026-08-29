@@ -47,7 +47,11 @@ object Prow {
     const val RESTRICTED_BYWAY = 2
     const val BYWAY = 3
 
-    private val executor = Executors.newSingleThreadExecutor { r ->
+    // Three at a time, not one: a viewport is several cells and a single
+    // thread made a new area take minutes of blank map. Three concurrent
+    // queries is polite to a shared Overpass instance and roughly triples
+    // how fast the screen fills.
+    private val executor = Executors.newFixedThreadPool(3) { r ->
         Thread(r, "prow").apply { isDaemon = true }
     }
     private val main = Handler(Looper.getMainLooper())
@@ -60,7 +64,12 @@ object Prow {
      * The rights of way for a viewport, in grid metres: cached cells at once
      * through [onLines], then again as each missing cell arrives.
      */
-    fun refresh(ctx: Context, boundsEn: DoubleArray, onLines: (List<ProwLine>) -> Unit) {
+    fun refresh(
+        ctx: Context,
+        boundsEn: DoubleArray,
+        onNote: (String) -> Unit = {},
+        onLines: (List<ProwLine>) -> Unit,
+    ) {
         val (south, west) = Bng.toWgs84(En(boundsEn[0], boundsEn[1]))
         val (north, east) = Bng.toWgs84(En(boundsEn[2], boundsEn[3]))
         if (east - west > MAX_VIEW_DEG || north - south > MAX_VIEW_DEG) {
@@ -80,6 +89,7 @@ object Prow {
             if (f.exists()) load(f)?.let { cached.addAll(it) } else missing.add(la to lo)
         }
         onLines(cached)
+        if (missing.isNotEmpty()) onNote("Rights of way: looking…")
 
         for ((la, lo) in missing.take(MAX_FETCH_PER_PASS)) {
             val k = key(la, lo)
@@ -96,24 +106,42 @@ object Prow {
                 } finally {
                     synchronized(inFlight) { inFlight.remove(k) }
                 }
-                main.post { refreshCached(ctx, boundsEn, onLines) }
+                main.post { refreshCached(ctx, boundsEn, onNote, onLines) }
             }
         }
     }
 
     /** Re-deliver whatever is cached for these bounds — no fetching. */
-    private fun refreshCached(ctx: Context, boundsEn: DoubleArray, onLines: (List<ProwLine>) -> Unit) {
+    private fun refreshCached(
+        ctx: Context,
+        boundsEn: DoubleArray,
+        onNote: (String) -> Unit,
+        onLines: (List<ProwLine>) -> Unit,
+    ) {
         val (south, west) = Bng.toWgs84(En(boundsEn[0], boundsEn[1]))
         val (north, east) = Bng.toWgs84(En(boundsEn[2], boundsEn[3]))
         if (east - west > MAX_VIEW_DEG || north - south > MAX_VIEW_DEG) return
         val lines = ArrayList<ProwLine>()
+        var stillMissing = 0
         for (la in Math.floor(south / CELL_DEG).toInt()..Math.floor(north / CELL_DEG).toInt()) {
             for (lo in Math.floor(west / CELL_DEG).toInt()..Math.floor(east / CELL_DEG).toInt()) {
                 val f = File(dir(ctx), key(la, lo))
-                if (f.exists()) load(f)?.let { lines.addAll(it) }
+                if (f.exists()) load(f)?.let { lines.addAll(it) } else stillMissing++
             }
         }
         onLines(lines)
+        // A blank map cannot tell "still fetching" from "nothing here" from
+        // "broken", which is exactly the confusion this cost a round of.
+        if (stillMissing == 0) {
+            if (lines.isEmpty()) {
+                onNote(
+                    "No rights of way recorded here in OpenStreetMap. " +
+                        "Pull your council's own map: \u2699 \u2192 Official council data.",
+                )
+            } else {
+                onNote("Rights of way: ${lines.size} drawn.")
+            }
+        }
     }
 
     /** One cell's rights of way from Overpass, as lines in grid metres. */
@@ -184,16 +212,39 @@ object Prow {
     /** Every council rowmaps holds data for, newest listing each time. */
     fun councils(): List<Council> {
         val html = Net.get(ROWMAPS, timeoutMs = 30_000)
-        val out = LinkedHashMap<String, String>()
-        // <a href="XX/">Name</a> — take the code from the href and whatever
-        // text sits in the link as the name.
-        val link = Regex("""<a[^>]+href="([A-Za-z0-9_-]{1,6})/?"[^>]*>(.*?)</a>""", RegexOption.IGNORE_CASE)
+        val out = HashMap<String, String>()
+        // <a href="XX/">Name</a>, where the name may sit on its own line —
+        // DOT_MATCHES_ALL is load-bearing: without it every anchor whose text
+        // wrapped was skipped, which is why this first returned a dozen
+        // councils in page order instead of all of them.
+        val link = Regex(
+            """<a[^>]+href="([^"]*?/)?([A-Za-z]{2,3})/?(?:index\.html?)?"[^>]*>(.*?)</a>""",
+            setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL),
+        )
         for (m in link.findAll(html)) {
-            val code = m.groupValues[1]
-            val name = m.groupValues[2].replace(Regex("<[^>]*>"), "").trim()
-            if (name.isNotEmpty() && !name.startsWith("..")) out[code] = name
+            val code = m.groupValues[2].uppercase()
+            val name = unescape(m.groupValues[3].replace(Regex("<[^>]*>"), "")).trim()
+            if (name.length < 3 || name.startsWith("..")) continue
+            out[code] = name
         }
-        return out.map { Council(it.key, it.value) }
+        // Alphabetical: ninety councils in a scrolling dialog is only usable
+        // if the one you want is where you would look for it.
+        return out.map { Council(it.key, it.value) }.sortedBy { it.name.lowercase() }
+    }
+
+    /** The handful of HTML entities a council name actually contains. */
+    private fun unescape(s: String): String {
+        var t = s.replace("&nbsp;", " ")
+            .replace("&amp;", "&")
+            .replace("&apos;", "'")
+            .replace("&quot;", "\"")
+            .replace("&lt;", "<")
+            .replace("&gt;", ">")
+        // Numeric entities, for the apostrophes and dashes in place names.
+        t = Regex("&#(\\d{1,5});").replace(t) { m ->
+            m.groupValues[1].toIntOrNull()?.toChar()?.toString() ?: m.value
+        }
+        return t.replace(Regex("\\s+"), " ")
     }
 
     /**

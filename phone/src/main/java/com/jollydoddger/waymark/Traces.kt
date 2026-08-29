@@ -37,7 +37,7 @@ object Traces {
      * screen and stopped on a hard cell edge — read, correctly, as data
      * being held back.
      */
-    private const val MAX_FETCH_PER_PASS = 48
+    private const val MAX_FETCH_PER_PASS = 24
 
     /**
      * Pages read per cell (5 000 points each). The API serves newest traces
@@ -55,7 +55,9 @@ object Traces {
     /** Zoomed out past this, dots are soup: draw nothing, fetch nothing. */
     private const val MAX_VIEW_DEG = 0.1
 
-    private val executor = Executors.newSingleThreadExecutor { r ->
+    // Three at a time. Deep paging plus a whole viewport on one thread is
+    // how a first look at an area became a long wait for nothing visible.
+    private val executor = Executors.newFixedThreadPool(3) { r ->
         Thread(r, "traces").apply { isDaemon = true }
     }
     private val main = Handler(Looper.getMainLooper())
@@ -79,7 +81,12 @@ object Traces {
      * [onCells] (on the main thread), then again as each missing cell lands.
      * [boundsEn] is the map's west, south, east, north.
      */
-    fun refresh(ctx: Context, boundsEn: DoubleArray, onCells: (List<FloatArray>) -> Unit) {
+    fun refresh(
+        ctx: Context,
+        boundsEn: DoubleArray,
+        onNote: (String) -> Unit = {},
+        onCells: (List<FloatArray>) -> Unit,
+    ) {
         val (south, west) = Bng.toWgs84(En(boundsEn[0], boundsEn[1]))
         val (north, east) = Bng.toWgs84(En(boundsEn[2], boundsEn[3]))
         if (east - west > MAX_VIEW_DEG || north - south > MAX_VIEW_DEG) {
@@ -103,6 +110,7 @@ object Traces {
             }
         }
         onCells(cached)
+        if (missing.isNotEmpty()) onNote("Where people have walked: looking…")
 
         for ((la, lo) in missing.take(MAX_FETCH_PER_PASS)) {
             val k = key(la, lo)
@@ -119,24 +127,34 @@ object Traces {
                 } finally {
                     synchronized(inFlight) { inFlight.remove(k) }
                 }
-                main.post { refreshCached(ctx, boundsEn, onCells) }
+                main.post { refreshCached(ctx, boundsEn, onNote, onCells) }
             }
         }
     }
 
     /** Re-deliver whatever is cached for [boundsEn] — no fetching. */
-    private fun refreshCached(ctx: Context, boundsEn: DoubleArray, onCells: (List<FloatArray>) -> Unit) {
+    private fun refreshCached(
+        ctx: Context,
+        boundsEn: DoubleArray,
+        onNote: (String) -> Unit,
+        onCells: (List<FloatArray>) -> Unit,
+    ) {
         val (south, west) = Bng.toWgs84(En(boundsEn[0], boundsEn[1]))
         val (north, east) = Bng.toWgs84(En(boundsEn[2], boundsEn[3]))
         if (east - west > MAX_VIEW_DEG || north - south > MAX_VIEW_DEG) return
         val cells = ArrayList<FloatArray>()
+        var stillMissing = 0
         for (la in Math.floor(south / CELL_DEG).toInt()..Math.floor(north / CELL_DEG).toInt()) {
             for (lo in Math.floor(west / CELL_DEG).toInt()..Math.floor(east / CELL_DEG).toInt()) {
                 val f = File(dir(ctx), key(la, lo))
-                if (f.exists()) load(f)?.takeIf { it.isNotEmpty() }?.let { cells.add(it) }
+                if (!f.exists()) stillMissing++
+                else load(f)?.takeIf { it.isNotEmpty() }?.let { cells.add(it) }
             }
         }
         onCells(cells)
+        if (stillMissing == 0 && cells.isEmpty()) {
+            onNote("Nobody has publicly recorded a GPS track around here.")
+        }
     }
 
     /** One cell's trackpoints, several pages deep, decimated, as [e,n,e,n,…]. */
