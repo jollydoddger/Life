@@ -31,11 +31,25 @@ object Traces {
 
     private const val CELL_DEG = 0.02
 
-    /** Fetch at most this many missing cells per settled viewport. */
-    private const val MAX_FETCH_PER_PASS = 8
+    /**
+     * Enough to cover the whole visible map (the zoom gate keeps a viewport
+     * to ~36 cells). The first cut fetched 8, which painted part of the
+     * screen and stopped on a hard cell edge — read, correctly, as data
+     * being held back.
+     */
+    private const val MAX_FETCH_PER_PASS = 48
+
+    /**
+     * Pages read per cell (5 000 points each). The API serves newest traces
+     * first, and recent uploads skew heavily to driving and riding apps —
+     * so a shallow read shows the roads and never reaches the older walking
+     * traces underneath. Two pages was exactly that mistake; eight goes
+     * 40 000 points deep before giving up.
+     */
+    private const val MAX_PAGES = 8
 
     /** Dots kept per cell — plenty for texture, bounded for the frame loop. */
-    private const val MAX_PTS_PER_CELL = 4_000
+    private const val MAX_PTS_PER_CELL = 6_000
 
     /** Zoomed out past this, dots are soup: draw nothing, fetch nothing. */
     private const val MAX_VIEW_DEG = 0.1
@@ -46,7 +60,13 @@ object Traces {
     private val main = Handler(Looper.getMainLooper())
     private val inFlight = HashSet<String>() // guarded by synchronized(inFlight)
 
-    private fun dir(ctx: Context) = File(ctx.filesDir, "traces").apply { mkdirs() }
+    private fun dir(ctx: Context): File {
+        // v2: the first cut cached two-page (roads-only) cells; those files
+        // under-represent footpaths and are replaced, not trusted.
+        val legacy = File(ctx.filesDir, "traces")
+        if (legacy.exists()) legacy.deleteRecursively()
+        return File(ctx.filesDir, "traces2").apply { mkdirs() }
+    }
     private fun key(latIdx: Int, lonIdx: Int) = "c_${latIdx}_$lonIdx"
 
     /**
@@ -114,12 +134,12 @@ object Traces {
         onCells(cells)
     }
 
-    /** Up to two pages of one cell's trackpoints, decimated, as [e,n,e,n,…]. */
+    /** One cell's trackpoints, several pages deep, decimated, as [e,n,e,n,…]. */
     private fun fetchCell(latIdx: Int, lonIdx: Int): FloatArray {
         val south = latIdx * CELL_DEG
         val west = lonIdx * CELL_DEG
         val pts = ArrayList<En>()
-        for (page in 0..1) {
+        for (page in 0 until MAX_PAGES) {
             val bbox = "%.5f,%.5f,%.5f,%.5f".format(west, south, west + CELL_DEG, south + CELL_DEG)
             val xml = Net.get(
                 "https://api.openstreetmap.org/api/0.6/trackpoints?bbox=$bbox&page=$page",
