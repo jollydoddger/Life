@@ -12,15 +12,17 @@ import kotlin.math.ceil
 import kotlin.math.hypot
 
 /**
- * The offline promise: every tile within ~500 m of the route, zooms 5–9
- * (Landranger overview down to full Explorer detail), fetched at import time
- * so the walk still has its map in a dead zone. A typical day walk is a few
- * hundred tiles — a handful of megabytes, once.
+ * The offline promise: every tile within ~500 m of the route, at every zoom
+ * the pyramid has (road-atlas overview down to full Explorer detail),
+ * fetched at import time so the walk still has its map in a dead zone. The
+ * overview zooms are tiles tens of kilometres wide, so "all resolutions"
+ * costs a handful of tiles more than the detail alone. A typical day walk
+ * is a few hundred tiles — a handful of megabytes, once.
  */
 object Corridor {
     private const val BUFFER_M = 500.0
     private const val STEP_M = 200.0
-    private val ZOOMS = 5..TileGrid.MAX_Z
+    private val ZOOMS = 0..TileGrid.MAX_Z
 
     data class TileId(val z: Int, val x: Int, val y: Int)
 
@@ -50,6 +52,24 @@ object Corridor {
     }
 
     /**
+     * Every tile intersecting a west/south/east/north box (grid metres), at
+     * every zoom — the "download what I'm looking at" shape. The overview
+     * zooms add a few tiles; the count is all Explorer detail.
+     */
+    fun tilesForBounds(bounds: DoubleArray): List<TileId> {
+        val (west, south, east, north) = bounds
+        val ids = ArrayList<TileId>()
+        for (z in ZOOMS) {
+            for (x in TileGrid.tileX(west, z)..TileGrid.tileX(east, z)) {
+                for (y in TileGrid.tileY(north, z)..TileGrid.tileY(south, z)) {
+                    if (x >= 0 && y >= 0) ids.add(TileId(z, x, y))
+                }
+            }
+        }
+        return ids
+    }
+
+    /**
      * Fetch every corridor tile not already on disk. Returns the number that
      * could NOT be fetched — zero is the only number that means "offline is
      * covered", and the caller must say so either way.
@@ -58,8 +78,14 @@ object Corridor {
         store: TileStore,
         route: Route,
         onProgress: (done: Int, total: Int) -> Unit,
+    ): Int = prefetchTiles(store, tilesFor(route), onProgress)
+
+    /** The same fetch over any tile list — shared by route and area saves. */
+    suspend fun prefetchTiles(
+        store: TileStore,
+        all: List<TileId>,
+        onProgress: (done: Int, total: Int) -> Unit,
     ): Int = withContext(Dispatchers.IO) {
-        val all = tilesFor(route)
         val done = AtomicInteger(0)
         val failed = AtomicInteger(0)
         val gate = Semaphore(4)

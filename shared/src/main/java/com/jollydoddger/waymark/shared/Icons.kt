@@ -10,7 +10,7 @@ import android.graphics.RectF
 import android.graphics.drawable.Drawable
 
 /** The buttons this app has. */
-enum class Glyph { LOCATE, RECORD, REVERSE, ROUTE, SETTINGS, MIC, SEND }
+enum class Glyph { LOCATE, RECORD, REVERSE, ROUTE, DOWNLOAD, SETTINGS, MIC, SEND }
 
 /**
  * The map controls, drawn rather than typed.
@@ -118,6 +118,23 @@ class IconDrawable(
                 canvas.drawPath(path, line)
                 canvas.drawCircle(cx - g * 0.85f, cy + g * 0.75f, g * 0.26f, fill)
                 canvas.drawCircle(cx + g * 0.85f, cy - g * 0.75f, g * 0.26f, fill)
+            }
+
+            Glyph.DOWNLOAD -> {
+                // An arrow dropping into a tray: save this for offline.
+                canvas.drawLine(cx, cy - g * 0.95f, cx, cy + g * 0.25f, line)
+                path.rewind()
+                path.moveTo(cx, cy + g * 0.55f)
+                path.lineTo(cx - g * 0.5f, cy - g * 0.05f)
+                path.lineTo(cx + g * 0.5f, cy - g * 0.05f)
+                path.close()
+                canvas.drawPath(path, fill)
+                path.rewind()
+                path.moveTo(cx - g * 0.9f, cy + g * 0.45f)
+                path.lineTo(cx - g * 0.9f, cy + g * 0.95f)
+                path.lineTo(cx + g * 0.9f, cy + g * 0.95f)
+                path.lineTo(cx + g * 0.9f, cy + g * 0.45f)
+                canvas.drawPath(path, line)
             }
 
             Glyph.SETTINGS -> {

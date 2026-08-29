@@ -44,6 +44,7 @@ import com.jollydoddger.waymark.shared.Prefs.trailColour
 import com.jollydoddger.waymark.shared.Prefs.wantRecording
 import com.jollydoddger.waymark.shared.RouteStore
 import com.jollydoddger.waymark.shared.Sync
+import com.jollydoddger.waymark.shared.TileGrid
 import com.jollydoddger.waymark.shared.TrackingService
 import com.jollydoddger.waymark.shared.TrailStore
 import kotlinx.coroutines.CoroutineScope
@@ -70,6 +71,7 @@ class MainActivity : Activity() {
     private var locator: Locator? = null
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private var importJob: Job? = null
+    private var areaJob: Job? = null
 
     private var lastFix: En? = null
     private var lastFixAt = 0L
@@ -138,13 +140,14 @@ class MainActivity : Activity() {
             background = recordIcon
             setOnClickListener { toggleRecording() }
         }
+        val downloadBtn = iconButton(Glyph.DOWNLOAD) { downloadArea() }
         val settingsBtn = iconButton(Glyph.SETTINGS) {
             startActivity(Intent(this, SettingsActivity::class.java))
         }
 
         val buttons = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            listOf(importBtn, reverseBtn, recentreBtn, recordBtn, settingsBtn).forEach {
+            listOf(importBtn, reverseBtn, recentreBtn, recordBtn, downloadBtn, settingsBtn).forEach {
                 addView(it, LinearLayout.LayoutParams(dp(52), dp(52)).apply { topMargin = dp(9) })
             }
         }
@@ -388,6 +391,63 @@ class MainActivity : Activity() {
     private fun say(msg: String) {
         status.text = msg
         status.visibility = View.VISIBLE
+    }
+
+    // --- offline area download -----------------------------------------------
+
+    /**
+     * Save everything on screen, at every zoom, for a day with no reception.
+     * Counted and confirmed before a byte moves: OS bills per tile served,
+     * so a whole-county tap must be a decision, not an accident. A second
+     * tap while it runs cancels; what's already saved stays saved.
+     */
+    private fun downloadArea() {
+        areaJob?.let {
+            it.cancel()
+            areaJob = null
+            say("Download stopped. Tiles already saved are kept.")
+            return
+        }
+        val all = Corridor.tilesForBounds(map.viewportBounds())
+        val missing = all.filter { !map.tiles.fileFor(it.z, it.x, it.y).exists() }
+        if (missing.isEmpty()) {
+            say("Everything on screen is already saved for offline, at every zoom.")
+            return
+        }
+        if (missing.size > 20_000) {
+            say("That view is ~${missing.size} tiles — too big a bill for one tap. Zoom in and take it in pieces.")
+            return
+        }
+        val mb = missing.size * 20 / 1024 // ~20 KB per tile, said as a rough figure
+        AlertDialog.Builder(this)
+            .setTitle("Save this area for offline?")
+            .setMessage(
+                "${missing.size} tiles at all ${TileGrid.MAX_Z + 1} zoom levels, roughly $mb MB. " +
+                    "They stay on the phone and count against your OS Maps allowance. " +
+                    "Tap the button again to stop mid-way.",
+            )
+            .setPositiveButton("Download") { _, _ ->
+                areaJob = scope.launch {
+                    var lastShown = 0
+                    val failed = Corridor.prefetchTiles(map.tiles, missing) { done, total ->
+                        if (done - lastShown >= 25 || done == total) {
+                            lastShown = done
+                            runOnUiThread { say("Saving offline tiles… $done / $total") }
+                        }
+                    }
+                    areaJob = null
+                    if (failed == 0) {
+                        say("Saved ${missing.size} tiles — this area now works with no signal, at every zoom.")
+                    } else {
+                        val why = if (map.tiles.lastAuthError != 0) {
+                            "the OS key was refused (HTTP ${map.tiles.lastAuthError}) — check it in ⚙"
+                        } else "no signal or a server wobble — tap again to fetch the rest"
+                        say("Saved ${missing.size - failed} tiles; $failed failed: $why.")
+                    }
+                }
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
     }
 
     // --- routes in: import, walks near me, the library -----------------------

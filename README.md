@@ -25,6 +25,20 @@ The maps come from Ordnance Survey's own Maps API and need your personal key:
 Tiles are cached on both devices, and the offline pre-fetch happens once per
 imported route, so ordinary use costs pennies.
 
+## Offline maps
+
+Two ways, both permanent until the app is uninstalled:
+
+- **Automatic, per route**: importing a GPX (or adopting a found walk)
+  fetches every tile within ~500 m of the line at **every zoom level**, and
+  ships them to the watch with the route — so on the hill, zoomed in or all
+  the way out, the map is simply there.
+- **The ⬇ button**: saves everything currently on screen, at every zoom.
+  It counts the tiles first and asks — OS bills per tile served, so a
+  whole-county tap should be a decision, not an accident (over ~20 000
+  tiles it refuses and asks you to zoom in). Tap ⬇ again mid-download to
+  stop; whatever is already saved stays saved. Phone only.
+
 ## Installing
 
 **Phone** — tap this on the phone and install (allow installs from browser):

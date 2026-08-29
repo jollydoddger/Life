@@ -43,10 +43,11 @@ object Traces {
      * Pages read per cell (5 000 points each). The API serves newest traces
      * first, and recent uploads skew heavily to driving and riding apps —
      * so a shallow read shows the roads and never reaches the older walking
-     * traces underneath. Two pages was exactly that mistake; eight goes
-     * 40 000 points deep before giving up.
+     * traces underneath. Two pages was exactly that mistake; twenty goes
+     * 100 000 points deep before giving up, which in practice is the
+     * bottom of the archive for any 0.02° square outside a city centre.
      */
-    private const val MAX_PAGES = 8
+    private const val MAX_PAGES = 20
 
     /** Dots kept per cell — plenty for texture, bounded for the frame loop. */
     private const val MAX_PTS_PER_CELL = 6_000
@@ -61,11 +62,15 @@ object Traces {
     private val inFlight = HashSet<String>() // guarded by synchronized(inFlight)
 
     private fun dir(ctx: Context): File {
-        // v2: the first cut cached two-page (roads-only) cells; those files
-        // under-represent footpaths and are replaced, not trusted.
-        val legacy = File(ctx.filesDir, "traces")
-        if (legacy.exists()) legacy.deleteRecursively()
-        return File(ctx.filesDir, "traces2").apply { mkdirs() }
+        // v3: earlier cuts cached shallower reads (two pages, then eight);
+        // those files under-represent footpaths and are replaced, not
+        // trusted — a deeper limit means nothing for cells already cached
+        // at the old one.
+        for (old in listOf("traces", "traces2")) {
+            val legacy = File(ctx.filesDir, old)
+            if (legacy.exists()) legacy.deleteRecursively()
+        }
+        return File(ctx.filesDir, "traces3").apply { mkdirs() }
     }
     private fun key(latIdx: Int, lonIdx: Int) = "c_${latIdx}_$lonIdx"
 
