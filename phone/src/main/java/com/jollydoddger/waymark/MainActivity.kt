@@ -629,11 +629,8 @@ class MainActivity : Activity() {
         val detail = buildString {
             append(Walks.dateLine(walk)).append(" · ").append(fmtDist(walk.distanceM))
                 .append(" · ").append(Walks.duration(walk))
-            if (walk.place.isNotBlank()) append("
-").append(walk.place)
-            if (walk.notes.isNotBlank()) append("
-
-").append(walk.notes)
+            if (walk.place.isNotBlank()) append("\n").append(walk.place)
+            if (walk.notes.isNotBlank()) append("\n\n").append(walk.notes)
         }
         AlertDialog.Builder(this)
             .setTitle(walk.name)
