@@ -53,6 +53,20 @@ android {
     kotlinOptions {
         jvmTarget = "17"
     }
+
+    packaging {
+        resources {
+            // The Anthropic SDK's Apache HTTP dependencies each carry the
+            // same licence metadata, which the merger refuses to choose
+            // between (the exact collision loose-ends already paid for).
+            // None of it is needed at runtime.
+            excludes += "/META-INF/{AL2.0,LGPL2.1}"
+            excludes += "META-INF/LICENSE*"
+            excludes += "META-INF/NOTICE*"
+            excludes += "META-INF/DEPENDENCIES"
+            excludes += "META-INF/INDEX.LIST"
+        }
+    }
 }
 
 dependencies {
