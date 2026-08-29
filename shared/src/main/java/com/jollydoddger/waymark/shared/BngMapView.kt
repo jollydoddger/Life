@@ -89,7 +89,7 @@ class BngMapView @JvmOverloads constructor(
 
     /**
      * Public GPS traces (phone only): each cell is a flat [e0,n0,e1,n1,…]
-     * array of dots, drawn faintly under everything the app itself owns.
+     * array of dots, drawn under everything the app itself owns.
      */
     private var traceCells: List<FloatArray> = emptyList()
     private var traceScratch = FloatArray(0)
@@ -318,17 +318,18 @@ class BngMapView @JvmOverloads constructor(
         }
     }
 
-    // Faint deep-purple dots: an answer to "has anyone actually walked here",
-    // deliberately quieter than anything the app draws on its own account.
+    // Deep-purple dots: an answer to "has anyone actually walked here", and
+    // he asked for it obvious at a glance — big and near-opaque. Still drawn
+    // under everything the app owns, so bold dots cannot bury the route.
     private val tracePaint = Paint().apply {
-        color = Color.argb(90, 81, 45, 168)
+        color = Color.argb(200, 81, 45, 168)
         strokeCap = Paint.Cap.ROUND
     }
 
     private fun drawTraces(canvas: Canvas) {
         if (traceCells.isEmpty()) return
         val m = mpp(zl)
-        tracePaint.strokeWidth = 1.5f * density
+        tracePaint.strokeWidth = 5f * density
         for (cell in traceCells) {
             var n = 0
             var i = 0

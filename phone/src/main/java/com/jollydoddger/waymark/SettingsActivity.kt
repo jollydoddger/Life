@@ -238,7 +238,7 @@ class SettingsActivity : Activity() {
             setOnCheckedChangeListener { _, on ->
                 tracesEnabled = on
                 result.text = if (on) {
-                    "Traces on — faint purple dots appear as you browse zoomed in."
+                    "Traces on — bold purple dots appear as you browse zoomed in."
                 } else {
                     "Traces off."
                 }
@@ -246,7 +246,7 @@ class SettingsActivity : Activity() {
         }
         val tracesNote = TextView(this).apply {
             textSize = 13f
-            text = "Faint dots on the map wherever anyone has publicly recorded a GPS " +
+            text = "Bold dots on the map wherever anyone has publicly recorded a GPS " +
                 "track (OpenStreetMap's public traces; phone only, fetched as you " +
                 "browse and cached). Dots mean the path really gets walked. One " +
                 "honest caveat: they are cumulative, not recent — a dotted path was " +
