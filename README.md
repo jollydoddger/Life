@@ -113,7 +113,7 @@ Two sources, searched together:
 
 ## Where people have walked (optional, off by default)
 
-A switch in ⚙ draws bold purple dots on the phone's map wherever anyone has
+A switch in ⚙ draws flashing red dots on the phone's map wherever anyone has
 publicly recorded a GPS track — OpenStreetMap's public traces, fetched for the
 area you're looking at (zoomed in) and cached, so a revisited area works
 offline. Dots along a path mean the path really gets walked; a right-of-way

@@ -14,7 +14,9 @@ import android.view.HapticFeedbackConstants
 import android.view.MotionEvent
 import android.view.ScaleGestureDetector
 import android.view.View
+import kotlin.math.PI
 import kotlin.math.atan2
+import kotlin.math.cos
 import kotlin.math.hypot
 import kotlin.math.ln
 import kotlin.math.min
@@ -318,17 +320,23 @@ class BngMapView @JvmOverloads constructor(
         }
     }
 
-    // Deep-purple dots: an answer to "has anyone actually walked here", and
-    // he asked for it obvious at a glance — big and near-opaque. Still drawn
-    // under everything the app owns, so bold dots cannot bury the route.
+    // Bright red, flashing: even the faintest trace on a footpath has to be
+    // unmissable. The pulse bottoms out well above invisible on purpose — a
+    // dot that vanishes half the time is a dot that can be missed, which is
+    // the exact failure this exists to prevent.
     private val tracePaint = Paint().apply {
-        color = Color.argb(200, 81, 45, 168)
+        color = Color.rgb(255, 40, 40)
         strokeCap = Paint.Cap.ROUND
     }
+    private val tracePulse = Runnable { if (traceCells.isNotEmpty()) invalidate() }
 
     private fun drawTraces(canvas: Canvas) {
         if (traceCells.isEmpty()) return
         val m = mpp(zl)
+        // One-second pulse between ~45% and full opacity: clearly flashing,
+        // never gone.
+        val phase = (System.currentTimeMillis() % 1000L) / 1000.0
+        tracePaint.alpha = (115 + 140 * (0.5 - 0.5 * cos(2 * PI * phase))).toInt()
         tracePaint.strokeWidth = 5f * density
         for (cell in traceCells) {
             var n = 0
@@ -340,6 +348,10 @@ class BngMapView @JvmOverloads constructor(
             }
             canvas.drawPoints(traceScratch, 0, n, tracePaint)
         }
+        // Keep the flash alive while dots are on screen — one pending tick,
+        // self-stopping the moment the cells are cleared.
+        removeCallbacks(tracePulse)
+        postDelayed(tracePulse, 50)
     }
 
     private val previewCasing = Paint(Paint.ANTI_ALIAS_FLAG).apply {
