@@ -8,7 +8,6 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.graphics.Color
-import android.graphics.drawable.GradientDrawable
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
@@ -25,6 +24,8 @@ import com.google.android.gms.wearable.DataEventBuffer
 import com.google.android.gms.wearable.DataMapItem
 import com.google.android.gms.wearable.Wearable
 import com.jollydoddger.waymark.shared.BngMapView
+import com.jollydoddger.waymark.shared.Glyph
+import com.jollydoddger.waymark.shared.IconDrawable
 import com.jollydoddger.waymark.shared.Locator
 import com.jollydoddger.waymark.shared.PoiStore
 import com.jollydoddger.waymark.shared.Prefs.arrowColour
@@ -82,16 +83,8 @@ class MainActivity : Activity(), DataClient.OnDataChangedListener {
         // Left edge, vertical centre: the widest part of a round screen, and
         // where he expected this button to be. A dark disc with a white glyph,
         // because a default button is invisible against pale map paper.
-        val recentreBtn = TextView(this).apply {
-            text = "◉"
-            textSize = 20f
-            setTextColor(Color.WHITE)
-            gravity = Gravity.CENTER
-            background = GradientDrawable().apply {
-                shape = GradientDrawable.OVAL
-                setColor(Color.argb(205, 20, 20, 20))
-                setStroke(dp(1), Color.argb(120, 255, 255, 255))
-            }
+        val recentreBtn = View(this).apply {
+            background = IconDrawable(Glyph.LOCATE, d)
             setOnClickListener {
                 map.recentre()
                 keepAwake()

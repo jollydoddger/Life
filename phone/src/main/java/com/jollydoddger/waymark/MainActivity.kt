@@ -15,8 +15,8 @@ import android.annotation.SuppressLint
 import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
+import android.view.WindowInsets
 import android.view.inputmethod.EditorInfo
-import android.widget.Button
 import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.LinearLayout
@@ -25,6 +25,8 @@ import android.widget.TextView
 import com.jollydoddger.waymark.shared.BngMapView
 import com.jollydoddger.waymark.shared.Corridor
 import com.jollydoddger.waymark.shared.En
+import com.jollydoddger.waymark.shared.Glyph
+import com.jollydoddger.waymark.shared.IconDrawable
 import com.jollydoddger.waymark.shared.PoiStore
 import com.jollydoddger.waymark.shared.Route
 import com.jollydoddger.waymark.shared.Gpx
@@ -57,8 +59,9 @@ class MainActivity : Activity() {
 
     private lateinit var map: BngMapView
     private lateinit var status: TextView
-    private lateinit var recentreBtn: Button
-    private lateinit var recordBtn: Button
+    private lateinit var recordIcon: IconDrawable
+    /** Auto-centre once per opening, then leave him alone. */
+    private var centredThisOpen = false
     private var locator: Locator? = null
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private var importJob: Job? = null
@@ -98,14 +101,16 @@ class MainActivity : Activity() {
         val d = resources.displayMetrics.density
         fun dp(v: Int) = (v * d).toInt()
 
-        fun roundButton(label: String, onClick: () -> Unit) = Button(this).apply {
-            text = label
-            textSize = 18f
-            setOnClickListener { onClick() }
+        fun iconButton(glyph: Glyph, onClick: () -> Unit): View {
+            val icon = IconDrawable(glyph, d)
+            return View(this).apply {
+                background = icon
+                setOnClickListener { onClick() }
+            }
         }
 
-        val importBtn = roundButton("GPX") { pickGpx() }
-        val reverseBtn = roundButton("⇄") {
+        val importBtn = iconButton(Glyph.ROUTE) { pickGpx() }
+        val reverseBtn = iconButton(Glyph.REVERSE) {
             routeReversed = !routeReversed
             map.routeReversed = routeReversed
             say(
@@ -121,14 +126,20 @@ class MainActivity : Activity() {
                 }
             }
         }
-        recentreBtn = roundButton("◉") { map.recentre() }
-        recordBtn = roundButton("●") { toggleRecording() }
-        val settingsBtn = roundButton("⚙") { startActivity(Intent(this, SettingsActivity::class.java)) }
+        val recentreBtn = iconButton(Glyph.LOCATE) { map.recentre() }
+        recordIcon = IconDrawable(Glyph.RECORD, d)
+        val recordBtn = View(this).apply {
+            background = recordIcon
+            setOnClickListener { toggleRecording() }
+        }
+        val settingsBtn = iconButton(Glyph.SETTINGS) {
+            startActivity(Intent(this, SettingsActivity::class.java))
+        }
 
         val buttons = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             listOf(importBtn, reverseBtn, recentreBtn, recordBtn, settingsBtn).forEach {
-                addView(it, LinearLayout.LayoutParams(dp(64), dp(56)).apply { topMargin = dp(6) })
+                addView(it, LinearLayout.LayoutParams(dp(52), dp(52)).apply { topMargin = dp(9) })
             }
         }
 
@@ -155,14 +166,12 @@ class MainActivity : Activity() {
                 if (actionId == EditorInfo.IME_ACTION_SEND) { sendAsk(); true } else false
             }
         }
-        val micBtn = Button(this).apply {
-            text = "🎤"
-            textSize = 18f
+        val micBtn = View(this).apply {
+            background = IconDrawable(Glyph.MIC, d)
             bindHoldToTalk(this)
         }
-        val sendBtn = Button(this).apply {
-            text = "➤"
-            textSize = 18f
+        val sendBtn = View(this).apply {
+            background = IconDrawable(Glyph.SEND, d)
             setOnClickListener { sendAsk() }
         }
         val askBar = LinearLayout(this).apply {
@@ -170,8 +179,8 @@ class MainActivity : Activity() {
             gravity = Gravity.CENTER_VERTICAL
             setPadding(dp(8), dp(2), dp(4), dp(2))
             addView(askBox, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
-            addView(micBtn, LinearLayout.LayoutParams(dp(52), dp(44)))
-            addView(sendBtn, LinearLayout.LayoutParams(dp(52), dp(44)))
+            addView(micBtn, LinearLayout.LayoutParams(dp(42), dp(42)).apply { leftMargin = dp(6) })
+            addView(sendBtn, LinearLayout.LayoutParams(dp(42), dp(42)).apply { leftMargin = dp(6) })
         }
 
         replyText = TextView(this).apply {
@@ -186,6 +195,19 @@ class MainActivity : Activity() {
             setOnClickListener { visibility = View.GONE }
         }
 
+        // Reply above the ask bar, both in one stack pinned to the bottom, so
+        // padding the stack lifts the whole thing clear of the system bars —
+        // and of the keyboard.
+        val bottomStack = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            addView(replyPanel, LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, dp(210),
+            ))
+            addView(askBar, LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT,
+            ))
+        }
+
         val root = FrameLayout(this).apply {
             addView(map, FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT)
             addView(buttons, FrameLayout.LayoutParams(
@@ -195,16 +217,38 @@ class MainActivity : Activity() {
             addView(status, FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT,
                 Gravity.TOP,
-            ).apply { topMargin = dp(40); leftMargin = dp(10); rightMargin = dp(10) })
-            addView(replyPanel, FrameLayout.LayoutParams(
-                FrameLayout.LayoutParams.MATCH_PARENT, dp(220), Gravity.BOTTOM,
-            ).apply { bottomMargin = dp(50) })
-            addView(askBar, FrameLayout.LayoutParams(
+            ).apply { leftMargin = dp(10); rightMargin = dp(10) })
+            addView(bottomStack, FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT,
                 Gravity.BOTTOM,
             ))
         }
         setContentView(root)
+
+        // From targetSdk 35 Android draws every app edge-to-edge, so anything
+        // pinned to the bottom sits *under* the navigation bar unless it is
+        // told otherwise — which is exactly where the ask box went. Pad the
+        // stack by whichever is deeper, the system bars or the keyboard, and
+        // the box rides up to sit on the keyboard when it opens.
+        root.setOnApplyWindowInsetsListener { _, insets ->
+            val top: Int
+            val bottom: Int
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                val bars = insets.getInsets(WindowInsets.Type.systemBars())
+                val ime = insets.getInsets(WindowInsets.Type.ime())
+                top = bars.top
+                bottom = maxOf(bars.bottom, ime.bottom)
+            } else {
+                @Suppress("DEPRECATION")
+                top = insets.systemWindowInsetTop
+                @Suppress("DEPRECATION")
+                bottom = insets.systemWindowInsetBottom
+            }
+            bottomStack.setPadding(0, 0, 0, bottom)
+            (status.layoutParams as FrameLayout.LayoutParams).topMargin = top + dp(8)
+            status.requestLayout()
+            insets
+        }
 
         voice = Voice(this).apply {
             onFinal = { heard ->
@@ -242,6 +286,7 @@ class MainActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
+        centredThisOpen = false
         map.setRoute(RouteStore.load(this))
         map.setTrail(TrailStore.points(this))
         map.setPois(PoiStore.load(this))
@@ -264,6 +309,12 @@ class MainActivity : Activity() {
                 lastFix = en
                 if (!stale) lastFixAt = System.currentTimeMillis()
                 map.setFix(en.e, en.n, stale)
+                // Opening the app should answer "where am I" without a tap.
+                // Once only: after that the map is his to move.
+                if (!centredThisOpen) {
+                    centredThisOpen = true
+                    map.recentre()
+                }
             }, { map.setHeading(it) }).also { it.start() }
         }
     }
@@ -312,7 +363,7 @@ class MainActivity : Activity() {
     }
 
     private fun paintRecordButton() {
-        recordBtn.text = if (recording) "■" else "●"
+        recordIcon.active = recording
     }
 
     private fun say(msg: String) {
@@ -423,7 +474,7 @@ class MainActivity : Activity() {
 
     /** Hold to talk, release to send — the finger coming off IS the send. */
     @SuppressLint("ClickableViewAccessibility")
-    private fun bindHoldToTalk(button: Button) {
+    private fun bindHoldToTalk(button: View) {
         button.setOnTouchListener { _, event ->
             when (event.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
