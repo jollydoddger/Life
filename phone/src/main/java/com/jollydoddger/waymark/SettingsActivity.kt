@@ -16,6 +16,10 @@ import android.view.View
 import com.jollydoddger.waymark.shared.Bng
 import com.jollydoddger.waymark.shared.Colours
 import com.jollydoddger.waymark.shared.Prefs
+import com.anthropic.client.okhttp.AnthropicOkHttpClient
+import com.anthropic.models.messages.MessageCreateParams
+import com.anthropic.models.messages.Model
+import com.jollydoddger.waymark.shared.Prefs.anthropicKey
 import com.jollydoddger.waymark.shared.Prefs.arrowColour
 import com.jollydoddger.waymark.shared.Prefs.osApiKey
 import com.jollydoddger.waymark.shared.Prefs.routeColour
@@ -169,6 +173,31 @@ class SettingsActivity : Activity() {
             return strip
         }
 
+        val claudeBox = EditText(this).apply {
+            hint = "Anthropic API key (sk-ant-…)"
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
+            setText(anthropicKey)
+        }
+        val claudeSave = Button(this).apply {
+            text = "Save"
+            setOnClickListener {
+                anthropicKey = claudeBox.text.toString()
+                result.text = "Assistant key saved."
+            }
+        }
+        val claudeTest = Button(this).apply {
+            text = "Test key"
+            setOnClickListener {
+                anthropicKey = claudeBox.text.toString()
+                result.text = "Asking Claude for one word…"
+                scope.launch { result.text = testAnthropicKey(anthropicKey) }
+            }
+        }
+        val claudeRow = LinearLayout(this).apply {
+            addView(claudeSave, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+            addView(claudeTest, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+        }
+
         val col = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(20), dp(28), dp(20), dp(20))
@@ -180,6 +209,18 @@ class SettingsActivity : Activity() {
             addView(result, LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT,
             ).apply { topMargin = dp(12) })
+
+            addView(heading("Assistant (Claude)"))
+            addView(TextView(this@SettingsActivity).apply {
+                textSize = 13f
+                text = "The ask bar on the map runs on your Anthropic API key " +
+                    "(console.anthropic.com). Each question costs a few pence. " +
+                    "The key stays on this phone only."
+            })
+            addView(claudeBox, LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT,
+            ).apply { topMargin = dp(6) })
+            addView(claudeRow)
 
             addView(heading("Route line"))
             addView(swatches({ routeColour }) { routeColour = it })
@@ -223,6 +264,33 @@ class SettingsActivity : Activity() {
             } catch (e: Exception) {
                 result.text = "Saved on the phone — the watch will pick it up next time " +
                     "you open Waymark on it. (${e.javaClass.simpleName})"
+            }
+        }
+    }
+
+    /** One tiny real request — the only honest test of a paid key. */
+    private suspend fun testAnthropicKey(key: String): String = withContext(Dispatchers.IO) {
+        if (key.isEmpty()) return@withContext "No Anthropic key entered."
+        try {
+            val client = AnthropicOkHttpClient.builder().apiKey(key).build()
+            val response = client.messages().create(
+                MessageCreateParams.builder()
+                    .model(Model.of(Assistant.MODEL))
+                    .maxTokens(16L)
+                    .addUserMessage("Say OK and nothing else.")
+                    .build(),
+            )
+            val text = response.content()
+                .mapNotNull { block -> block.text().map { it.text() }.orElse(null) }
+                .joinToString("").trim()
+            if (text.isNotEmpty()) "Claude answered (\"$text\") — the assistant is live. ✓"
+            else "The key works but the reply was empty — odd; try asking something on the map."
+        } catch (e: Exception) {
+            val m = e.message ?: e.javaClass.simpleName
+            when {
+                "401" in m || "authentication" in m.lowercase() -> "Key rejected — check it was copied whole."
+                "credit" in m.lowercase() -> "Key is real but the account is out of credit."
+                else -> "Couldn't reach Anthropic: $m"
             }
         }
     }

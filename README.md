@@ -86,6 +86,30 @@ normally", which is also the kindest to the battery, since the watch then really
 sleeps instead of being held awake. For darker sooner, lower the watch's own
 Settings → Display → Screen timeout.
 
+## Ask it things
+
+The bar at the bottom of the phone's map talks to Claude (hold 🎤 to speak —
+release to send — or type). It answers from the app's own arithmetic and real
+databases, never from its own head; anything it changes shows as a ✓ receipt.
+
+- **"How far is left?"** — measured along the route from your GPS position.
+- **"Toilets on the route?" / "cafés near me?"** — OpenStreetMap (plus the
+  Toilet Map for toilets), dropped on the map as markers on both devices.
+  Finding nothing is a fact about the database, not the ground — bin coverage
+  especially is patchy, because no national bin registry exists.
+- **"Plan me a 6 km circular walk"** — routed over OpenStreetMap paths by the
+  FOSSGIS foot router, never drawn by the model. It replaces the current route
+  (offline tiles fetched, watch updated); *"put my old route back"* undoes it.
+  OSM paths are usually right, not gospel — glance at the OS map before
+  trusting a stile.
+- **"Will it rain?" / "how much climbing?"** — Open-Meteo forecast and terrain.
+- **"Where am I?"** — an OS grid reference (the form mountain rescue wants),
+  the nearest named place, and today's sunset.
+
+It needs your own Anthropic API key (console.anthropic.com) in ⚙, phone-only.
+A question costs a few pence. Place data © OpenStreetMap contributors; routing
+by FOSSGIS; weather by Open-Meteo; toilets also from the Toilet Map.
+
 Both maps are always north-up, like the paper they're printed from; the arrow
 is you, rotated to the compass (corrected to grid north). A grey arrow means
 the GPS fix has gone stale — the arrow never pretends.

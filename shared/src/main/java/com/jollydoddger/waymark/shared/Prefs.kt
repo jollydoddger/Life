@@ -39,6 +39,15 @@ object Prefs {
     private fun p(ctx: Context): SharedPreferences =
         ctx.getSharedPreferences(FILE, Context.MODE_PRIVATE)
 
+    /**
+     * The Anthropic key for the assistant. Phone-only and never synced: the
+     * watch has no use for it, and fewer stored copies of a paid key is
+     * strictly better. Never committed anywhere, as ever.
+     */
+    var Context.anthropicKey: String
+        get() = p(this).getString("anthropicKey", "") ?: ""
+        set(v) = p(this).edit().putString("anthropicKey", v.trim()).apply()
+
     var Context.osApiKey: String
         get() = p(this).getString("osApiKey", "") ?: ""
         set(v) = p(this).edit().putString("osApiKey", v.trim()).apply()

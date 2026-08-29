@@ -46,6 +46,8 @@ android {
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
+        // The Anthropic SDK reaches for java.time and friends beyond minSdk 26.
+        isCoreLibraryDesugaringEnabled = true
     }
 
     kotlinOptions {
@@ -55,4 +57,9 @@ android {
 
 dependencies {
     implementation(project(":shared"))
+
+    // The assistant. Same pinned version as loose-ends, whose tool-use loop
+    // this app's is modelled on — its API quirks are already paid for.
+    implementation("com.anthropic:anthropic-java:2.10.0")
+    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.3")
 }

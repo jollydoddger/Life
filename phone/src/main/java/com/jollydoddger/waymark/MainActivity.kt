@@ -11,14 +11,22 @@ import android.content.Context
 import android.content.IntentFilter
 import android.os.Build
 import android.os.Bundle
+import android.annotation.SuppressLint
 import android.view.Gravity
+import android.view.MotionEvent
 import android.view.View
+import android.view.inputmethod.EditorInfo
 import android.widget.Button
+import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.LinearLayout
+import android.widget.ScrollView
 import android.widget.TextView
 import com.jollydoddger.waymark.shared.BngMapView
 import com.jollydoddger.waymark.shared.Corridor
+import com.jollydoddger.waymark.shared.En
+import com.jollydoddger.waymark.shared.PoiStore
+import com.jollydoddger.waymark.shared.Route
 import com.jollydoddger.waymark.shared.Gpx
 import com.jollydoddger.waymark.shared.Locator
 import com.jollydoddger.waymark.shared.Prefs.arrowColour
@@ -54,6 +62,19 @@ class MainActivity : Activity() {
     private var locator: Locator? = null
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private var importJob: Job? = null
+
+    private var lastFix: En? = null
+    private var lastFixAt = 0L
+    private lateinit var voice: Voice
+    private lateinit var askBox: EditText
+    private lateinit var replyText: TextView
+    private lateinit var replyPanel: ScrollView
+    private var askBusy = false
+    private val assistant by lazy {
+        Assistant(this, GeoTools(this, { lastFix }, {
+            if (lastFixAt == 0L) Long.MAX_VALUE else System.currentTimeMillis() - lastFixAt
+        }))
+    }
 
     private val trailWatcher = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
@@ -115,6 +136,48 @@ class MainActivity : Activity() {
             }
         }
 
+        // --- the ask bar: talk to the assistant without leaving the map ---
+        askBox = EditText(this).apply {
+            hint = "Ask… (toilets on the route? how far left?)"
+            textSize = 15f
+            maxLines = 2
+            imeOptions = EditorInfo.IME_ACTION_SEND
+            setSingleLine(true)
+            setOnEditorActionListener { _, actionId, _ ->
+                if (actionId == EditorInfo.IME_ACTION_SEND) { sendAsk(); true } else false
+            }
+        }
+        val micBtn = Button(this).apply {
+            text = "🎤"
+            textSize = 18f
+            bindHoldToTalk(this)
+        }
+        val sendBtn = Button(this).apply {
+            text = "➤"
+            textSize = 18f
+            setOnClickListener { sendAsk() }
+        }
+        val askBar = LinearLayout(this).apply {
+            setBackgroundColor(Color.argb(235, 250, 250, 248))
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(8), dp(2), dp(4), dp(2))
+            addView(askBox, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+            addView(micBtn, LinearLayout.LayoutParams(dp(52), dp(44)))
+            addView(sendBtn, LinearLayout.LayoutParams(dp(52), dp(44)))
+        }
+
+        replyText = TextView(this).apply {
+            textSize = 15f
+            setTextColor(Color.WHITE)
+            setPadding(dp(14), dp(10), dp(14), dp(10))
+        }
+        replyPanel = ScrollView(this).apply {
+            setBackgroundColor(Color.argb(225, 28, 32, 30))
+            visibility = View.GONE
+            addView(replyText)
+            setOnClickListener { visibility = View.GONE }
+        }
+
         val root = FrameLayout(this).apply {
             addView(map, FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT)
             addView(buttons, FrameLayout.LayoutParams(
@@ -125,8 +188,23 @@ class MainActivity : Activity() {
                 FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT,
                 Gravity.TOP,
             ).apply { topMargin = dp(40); leftMargin = dp(10); rightMargin = dp(10) })
+            addView(replyPanel, FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT, dp(220), Gravity.BOTTOM,
+            ).apply { bottomMargin = dp(50) })
+            addView(askBar, FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT,
+                Gravity.BOTTOM,
+            ))
         }
         setContentView(root)
+
+        voice = Voice(this).apply {
+            onFinal = { heard ->
+                askBox.setText(heard)
+                sendAsk()
+            }
+            onChange = { state -> if (state.isNotBlank()) askBox.hint = state }
+        }
 
         map.routeReversed = routeReversed
         map.setColours(routeColour, arrowColour, trailColour)
@@ -158,6 +236,7 @@ class MainActivity : Activity() {
         super.onResume()
         map.setRoute(RouteStore.load(this))
         map.setTrail(TrailStore.points(this))
+        map.setPois(PoiStore.load(this))
         map.setColours(routeColour, arrowColour, trailColour)
         // A Start pressed on the watch while this app was closed waits here.
         if (wantRecording && !recording) TrackingService.start(this)
@@ -173,8 +252,11 @@ class MainActivity : Activity() {
             say("No map without a key — tap here to enter your OS Maps API key")
         }
         if (checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
-            locator = Locator(this, { en, stale -> map.setFix(en.e, en.n, stale) }, { map.setHeading(it) })
-                .also { it.start() }
+            locator = Locator(this, { en, stale ->
+                lastFix = en
+                if (!stale) lastFixAt = System.currentTimeMillis()
+                map.setFix(en.e, en.n, stale)
+            }, { map.setHeading(it) }).also { it.start() }
         }
     }
 
@@ -186,6 +268,7 @@ class MainActivity : Activity() {
     }
 
     override fun onDestroy() {
+        voice.dispose()
         scope.cancel()
         super.onDestroy()
     }
@@ -254,29 +337,100 @@ class MainActivity : Activity() {
                     contentResolver.openInputStream(uri)!!.use { Gpx.parse(it) }
                         .also { RouteStore.save(this@MainActivity, it) }
                 }
-                map.setRoute(route)
                 say("Imported “${route.name}” — fetching offline tiles…")
-
-                var lastShown = 0
-                val failed = Corridor.prefetch(map.tiles, route) { done, total ->
-                    if (done - lastShown >= 25 || done == total) {
-                        lastShown = done
-                        runOnUiThread { say("Fetching offline tiles… $done / $total") }
-                    }
-                }
-                if (failed > 0) {
-                    val why = if (map.tiles.lastAuthError != 0) {
-                        "the OS key was refused (HTTP ${map.tiles.lastAuthError}) — check it in ⚙"
-                    } else "no signal or a server wobble; they'll fill in as you browse"
-                    say("Offline tiles: $failed of the route's tiles missing — $why. Sending to watch…")
-                } else {
-                    say("Offline tiles saved. Sending to watch…")
-                }
-
-                Sync.sendRoute(this@MainActivity, route, map.tiles)
-                say("“${route.name}” is on the watch (or will be the moment it connects)")
+                publishRoute(route)
             } catch (e: Exception) {
                 say("Import failed: ${e.message ?: e.javaClass.simpleName}")
+            }
+        }
+    }
+
+    /**
+     * A route became current — imported or planned by the assistant. Draw it,
+     * fetch its offline corridor, and put route + tiles on the watch.
+     */
+    private suspend fun publishRoute(route: Route) {
+        map.setRoute(route)
+        var lastShown = 0
+        val failed = Corridor.prefetch(map.tiles, route) { done, total ->
+            if (done - lastShown >= 25 || done == total) {
+                lastShown = done
+                runOnUiThread { say("Fetching offline tiles… $done / $total") }
+            }
+        }
+        if (failed > 0) {
+            val why = if (map.tiles.lastAuthError != 0) {
+                "the OS key was refused (HTTP ${map.tiles.lastAuthError}) — check it in ⚙"
+            } else "no signal or a server wobble; they'll fill in as you browse"
+            say("Offline tiles: $failed of the route's tiles missing — $why. Sending to watch…")
+        } else {
+            say("Offline tiles saved. Sending to watch…")
+        }
+        try {
+            Sync.sendRoute(this@MainActivity, route, map.tiles)
+            say("“${route.name}” is on the watch (or will be the moment it connects)")
+        } catch (e: Exception) {
+            say("“${route.name}” is set here; the watch will get it when it reconnects")
+        }
+    }
+
+    // --- the assistant -------------------------------------------------------
+
+    private fun sendAsk() {
+        val question = askBox.text.toString().trim()
+        if (question.isEmpty() || askBusy) return
+        askBusy = true
+        askBox.setText("")
+        replyText.text = "…"
+        replyPanel.visibility = View.VISIBLE
+
+        // Remember what the tools might change, so changes can be published.
+        val routeBefore = RouteStore.load(this)?.let { it.name to it.points.size }
+
+        scope.launch {
+            val reply = withContext(Dispatchers.IO) { assistant.ask(question) }
+
+            val sb = StringBuilder(reply.text)
+            if (reply.actions.isNotEmpty()) {
+                sb.append("\n")
+                reply.actions.forEach { sb.append("\n✓ ").append(it.summary) }
+            }
+            replyText.text = sb.toString()
+            replyPanel.visibility = View.VISIBLE
+
+            // Show what the tools did: markers, and possibly a new route.
+            map.setPois(PoiStore.load(this@MainActivity))
+            launch {
+                try { Sync.sendPois(this@MainActivity, PoiStore.load(this@MainActivity)) } catch (e: Exception) { }
+            }
+            val routeNow = RouteStore.load(this@MainActivity)
+            if (routeNow != null && (routeNow.name to routeNow.points.size) != routeBefore) {
+                publishRoute(routeNow)
+            } else {
+                map.setRoute(routeNow)
+            }
+            askBusy = false
+        }
+    }
+
+    /** Hold to talk, release to send — the finger coming off IS the send. */
+    @SuppressLint("ClickableViewAccessibility")
+    private fun bindHoldToTalk(button: Button) {
+        button.setOnTouchListener { _, event ->
+            when (event.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {
+                    if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+                        requestPermissions(arrayOf(Manifest.permission.RECORD_AUDIO), 4)
+                    } else {
+                        voice.start()
+                    }
+                    true
+                }
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                    voice.stop()
+                    true
+                }
+                else -> false
             }
         }
     }

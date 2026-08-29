@@ -1,0 +1,373 @@
+package com.jollydoddger.waymark
+
+import android.content.Context
+import android.util.Log
+import com.anthropic.client.okhttp.AnthropicOkHttpClient
+import com.anthropic.core.JsonValue
+import com.anthropic.models.messages.CacheControlEphemeral
+import com.anthropic.models.messages.ContentBlockParam
+import com.anthropic.models.messages.MessageCreateParams
+import com.anthropic.models.messages.Model
+import com.anthropic.models.messages.StopReason
+import com.anthropic.models.messages.TextBlockParam
+import com.anthropic.models.messages.Tool
+import com.anthropic.models.messages.ToolResultBlockParam
+import com.anthropic.models.messages.ToolUseBlock
+import com.anthropic.models.messages.WebSearchTool20250305
+import com.jollydoddger.waymark.shared.Prefs.anthropicKey
+import org.json.JSONArray
+import org.json.JSONObject
+import java.io.File
+
+/** What the assistant actually did, so the UI shows receipts, not claims. */
+data class Action(val summary: String)
+
+data class Reply(val text: String, val actions: List<Action>)
+
+/**
+ * The assistant: a Claude tool-use loop over [GeoTools], modelled directly on
+ * the one in loose-ends (same pinned SDK; its API quirks are already paid
+ * for). The standing rule is in the system prompt and enforced by the shape
+ * of the tools: Claude never states a distance, direction, or existence it
+ * did not get from a tool — the tools are arithmetic and databases, and
+ * Claude is the interpreter between them and a person on a hillside.
+ */
+class Assistant(private val ctx: Context, private val tools: GeoTools) {
+
+    private sealed interface Wire {
+        data class Said(val text: String) : Wire
+        data class Answered(val blocks: List<ContentBlockParam>) : Wire
+        data class Returned(val blocks: List<ContentBlockParam>) : Wire
+    }
+
+    fun ask(question: String): Reply {
+        val key = ctx.anthropicKey
+        if (key.isEmpty()) {
+            return Reply("No Anthropic key yet — add one in ⚙ and the assistant wakes up.", emptyList())
+        }
+        val client = AnthropicOkHttpClient.builder().apiKey(key).build()
+
+        val wire = mutableListOf<Wire>()
+        for ((who, text) in ChatStore.recent(ctx)) {
+            when (who) {
+                "you" -> wire += Wire.Said(text)
+                else -> wire += Wire.Answered(
+                    listOf(
+                        ContentBlockParam.ofText(
+                            TextBlockParam.builder().text(text.ifBlank { "(no reply)" }).build(),
+                        ),
+                    ),
+                )
+            }
+        }
+        wire += Wire.Said(question)
+
+        val actions = mutableListOf<Action>()
+        repeat(MAX_STEPS) {
+            val response = runCatching { client.messages().create(params(wire)) }
+                .onFailure { Log.e(TAG, "assistant call failed", it) }
+                .getOrElse { failure ->
+                    return Reply(explain(failure.message ?: failure.javaClass.simpleName), actions)
+                }
+
+            val text = response.content()
+                .mapNotNull { block -> block.text().map { it.text() }.orElse(null) }
+                .joinToString("\n").trim()
+            val calls = response.content().mapNotNull { it.toolUse().orElse(null) }
+            val stop = response.stopReason().orElse(null)
+
+            for (block in response.content()) {
+                block.serverToolUse().ifPresent { use ->
+                    val query = runCatching {
+                        (use._input().convert(Map::class.java) as Map<*, *>)["query"] as? String
+                    }.getOrNull()
+                    actions += Action("Searched the web" + (query?.let { ": \"$it\"" }.orEmpty()))
+                }
+            }
+
+            // Every block back verbatim — hand-listing block kinds silently
+            // drops the server's own search blocks (loose-ends learnt this).
+            val echo = { wire += Wire.Answered(response.content().map { it.toParam() }) }
+
+            if (stop == StopReason.PAUSE_TURN) {
+                echo()
+                return@repeat
+            }
+            if (stop != StopReason.TOOL_USE || calls.isEmpty()) {
+                val reply = text.ifBlank {
+                    "Claude declined to answer that one." // refusal or empty turn, said plainly
+                }
+                ChatStore.append(ctx, question, reply)
+                return Reply(reply, actions)
+            }
+
+            echo()
+            wire += Wire.Returned(
+                calls.map { call ->
+                    val outcome = runCatching { run(call, actions) }
+                        .getOrElse { "Failed: ${it.message ?: "unknown error"}" }
+                    ContentBlockParam.ofToolResult(
+                        ToolResultBlockParam.builder().toolUseId(call.id()).content(outcome).build(),
+                    )
+                },
+            )
+        }
+        return Reply("That turned into more steps than expected — try one thing at a time.", actions)
+    }
+
+    // --- tool dispatch -------------------------------------------------------
+
+    private fun run(call: ToolUseBlock, actions: MutableList<Action>): String {
+        val input = runCatching { call._input().convert(Map::class.java) as Map<*, *> }
+            .getOrDefault(emptyMap<String, Any>())
+        fun str(key: String): String = (input[key] as? String).orEmpty().trim()
+        fun num(key: String): Double = (input[key] as? Number)?.toDouble() ?: 0.0
+        fun flag(key: String): Boolean = (input[key] as? Boolean) ?: false
+
+        return when (call.name()) {
+            "route_info" -> tools.routeInfo()
+            "route_profile" -> tools.routeProfile()
+            "find_places" -> {
+                val result = tools.findPlaces(str("kind"), flag("along_route"))
+                if (result.startsWith("Marked")) {
+                    actions += Action(result.lineSequence().first())
+                }
+                result
+            }
+            "plan_route" -> {
+                val places = (input["via"] as? List<*>)?.filterIsInstance<String>().orEmpty()
+                val result = tools.planRoute(places, num("circular_km"))
+                if (result.startsWith("Route set")) {
+                    actions += Action(result.substringBefore('.') + " — previous route banked")
+                }
+                result
+            }
+            "restore_previous_route" -> {
+                val result = tools.restorePreviousRoute()
+                if (result.startsWith("Restored")) actions += Action(result.substringBefore('.'))
+                result
+            }
+            "measure_to" -> tools.measureTo(str("place"))
+            "weather" -> tools.weather()
+            "where_am_i" -> tools.whereAmI()
+            "clear_markers" -> {
+                actions += Action("Cleared the markers")
+                tools.clearMarkers()
+            }
+            else -> "Failed: unknown tool ${call.name()}."
+        }
+    }
+
+    // --- the request ---------------------------------------------------------
+
+    private fun params(wire: List<Wire>): MessageCreateParams {
+        val builder = MessageCreateParams.builder()
+            .model(Model.of(MODEL))
+            .maxTokens(4_000L)
+            // Cache breakpoint after the frozen prompt: one question is up to
+            // eight requests within seconds, replaying the same prompt and
+            // tool list — rounds two onward read it at a tenth of the price.
+            .systemOfTextBlockParams(
+                listOf(
+                    TextBlockParam.builder()
+                        .text(SYSTEM)
+                        .cacheControl(CacheControlEphemeral.builder().build())
+                        .build(),
+                ),
+            )
+        TOOLS.forEach { builder.addTool(it) }
+        builder.addTool(WebSearchTool20250305.builder().maxUses(MAX_SEARCHES).build())
+        for (turn in wire) {
+            when (turn) {
+                is Wire.Said -> builder.addUserMessage(turn.text)
+                is Wire.Answered -> builder.addAssistantMessageOfBlockParams(turn.blocks)
+                is Wire.Returned -> builder.addUserMessageOfBlockParams(turn.blocks)
+            }
+        }
+        return builder.build()
+    }
+
+    private fun explain(message: String): String = when {
+        "401" in message || "authentication" in message.lowercase() ->
+            "The Anthropic key was rejected — check it in ⚙."
+        "credit" in message.lowercase() || "billing" in message.lowercase() ->
+            "The Anthropic account is out of credit."
+        "overloaded" in message.lowercase() || "529" in message ->
+            "Anthropic's servers are busy — try again in a moment."
+        "Unable to resolve host" in message || "timeout" in message.lowercase() ->
+            "No connection to Anthropic — signal?"
+        else -> "The assistant call failed: $message"
+    }
+
+    companion object {
+        private const val TAG = "Assistant"
+        const val MODEL = "claude-opus-5"
+        const val MAX_STEPS = 8
+        const val MAX_SEARCHES = 3L
+
+        private val SYSTEM = """
+            You are the assistant inside Waymark, a deliberately simple app that
+            shows one walker (in the UK, on a Galaxy phone and watch) as an
+            arrow on an Ordnance Survey map, usually following an imported GPX
+            route on a walk.
+
+            The one rule: never state a distance, direction, place, or route
+            that did not come from a tool result in this conversation. Your
+            tools are the app's own grid arithmetic and real databases —
+            OpenStreetMap, the Toilet Map, the FOSSGIS foot router, Open-Meteo.
+            If a tool fails or finds nothing, say so plainly; never fill the
+            gap from general knowledge. Finding nothing in OSM is a fact about
+            the database, not the ground — say that too, especially for bins.
+
+            plan_route replaces the current route on the map (the old one is
+            banked and restore_previous_route brings it back — mention that
+            when you replace a route). Planned routes follow paths mapped in
+            OpenStreetMap: usually right, not gospel; advise a glance against
+            the OS map. Keep replies short — they are read on a phone,
+            mid-walk, possibly in rain. Use km and metres.
+
+            Web search is for things the tools cannot know (opening hours, a
+            bus time); name the source when you use it.
+        """.trimIndent()
+
+        private fun property(type: String, description: String): JsonValue =
+            JsonValue.from(mapOf("type" to type, "description" to description))
+
+        private fun schema(
+            properties: Map<String, JsonValue>,
+            required: List<String>,
+        ): Tool.InputSchema {
+            val props = Tool.InputSchema.Properties.builder()
+            properties.forEach { (name, spec) -> props.putAdditionalProperty(name, spec) }
+            return Tool.InputSchema.builder()
+                .type(JsonValue.from("object"))
+                .properties(props.build())
+                .required(required)
+                .build()
+        }
+
+        private fun tool(name: String, description: String, schema: Tool.InputSchema): Tool =
+            Tool.builder().name(name).description(description).inputSchema(schema).build()
+
+        val TOOLS: List<Tool> = listOf(
+            tool(
+                "route_info",
+                "The loaded route's length, and — given a GPS fix — how far along it he is " +
+                    "and how much remains. Measured by the app; always current.",
+                schema(emptyMap(), emptyList()),
+            ),
+            tool(
+                "route_profile",
+                "Total ascent/descent and high/low points of the loaded route " +
+                    "(Open-Meteo terrain model).",
+                schema(emptyMap(), emptyList()),
+            ),
+            tool(
+                "find_places",
+                "Find real mapped places near him or along the route and mark them on the map. " +
+                    "Sources: OpenStreetMap, plus the Toilet Map for toilets.",
+                schema(
+                    mapOf(
+                        "kind" to property(
+                            "string",
+                            "One of: toilets, cafe, pub, bin, water, parking, defibrillator, bus_stop, bench.",
+                        ),
+                        "along_route" to property(
+                            "boolean",
+                            "true = search a corridor along the whole route; false = around his position.",
+                        ),
+                    ),
+                    listOf("kind"),
+                ),
+            ),
+            tool(
+                "plan_route",
+                "Plan a walking route from his position using the FOSSGIS foot router over " +
+                    "OpenStreetMap paths, and set it as the app's route (the old route is banked). " +
+                    "Give via places, or circular_km for a round walk, or both.",
+                schema(
+                    mapOf(
+                        "via" to JsonValue.from(
+                            mapOf(
+                                "type" to "array",
+                                "items" to mapOf("type" to "string"),
+                                "description" to "Place names to route via, in order, nearby (geocoded locally).",
+                            ),
+                        ),
+                        "circular_km" to property(
+                            "number",
+                            "Rough length in km for a circular walk returning to his position. 0 or absent for point-to-point.",
+                        ),
+                    ),
+                    emptyList(),
+                ),
+            ),
+            tool(
+                "restore_previous_route",
+                "Put back the route that the last plan_route or GPX import replaced.",
+                schema(emptyMap(), emptyList()),
+            ),
+            tool(
+                "measure_to",
+                "Straight-line distance and compass direction from his position to a named place.",
+                schema(mapOf("place" to property("string", "The place name.")), listOf("place")),
+            ),
+            tool(
+                "weather",
+                "Hourly forecast for the next 8 hours where he is: temperature, rain chance and " +
+                    "amount, wind (Open-Meteo).",
+                schema(emptyMap(), emptyList()),
+            ),
+            tool(
+                "where_am_i",
+                "His position as an OS grid reference (the form mountain rescue uses), nearest " +
+                    "named place, and today's sunset time.",
+                schema(emptyMap(), emptyList()),
+            ),
+            tool(
+                "clear_markers",
+                "Remove the found-place markers from the map on both devices.",
+                schema(emptyMap(), emptyList()),
+            ),
+        )
+    }
+}
+
+/**
+ * A short conversational memory, so "and cafés?" works after "toilets on the
+ * route?". A working surface, not an archive: capped, plain JSON.
+ */
+object ChatStore {
+    private const val KEEP = 12
+    private fun file(ctx: Context) = File(ctx.filesDir, "chat.json")
+
+    fun recent(ctx: Context): List<Pair<String, String>> {
+        val f = file(ctx)
+        if (!f.exists()) return emptyList()
+        return try {
+            val arr = JSONArray(f.readText())
+            (0 until arr.length()).map { i ->
+                val o = arr.getJSONObject(i)
+                o.getString("who") to o.getString("text")
+            }
+        } catch (e: Exception) {
+            emptyList()
+        }
+    }
+
+    fun append(ctx: Context, question: String, reply: String) {
+        val all = recent(ctx).toMutableList()
+        all.add("you" to question)
+        all.add("claude" to reply)
+        val arr = JSONArray()
+        all.takeLast(KEEP * 2).forEach { (who, text) ->
+            arr.put(JSONObject().put("who", who).put("text", text))
+        }
+        val tmp = File(ctx.filesDir, "chat.json.tmp")
+        tmp.writeText(arr.toString())
+        if (!tmp.renameTo(file(ctx))) {
+            file(ctx).delete()
+            tmp.renameTo(file(ctx))
+        }
+    }
+}

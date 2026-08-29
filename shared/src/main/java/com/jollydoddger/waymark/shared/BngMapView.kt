@@ -66,6 +66,14 @@ class BngMapView @JvmOverloads constructor(
         invalidate()
     }
 
+    /** What the assistant found — toilets, cafés, bins — as glyph markers. */
+    private var pois: List<Poi> = emptyList()
+
+    fun setPois(list: List<Poi>) {
+        pois = list
+        invalidate()
+    }
+
     private var fixE = 0.0
     private var fixN = 0.0
     private var hasFix = false
@@ -197,6 +205,7 @@ class BngMapView @JvmOverloads constructor(
         drawTiles(canvas)
         drawTrail(canvas)
         drawRoute(canvas)
+        drawPois(canvas)
         drawHere(canvas)
     }
 
@@ -303,6 +312,28 @@ class BngMapView @JvmOverloads constructor(
         canvas.drawPath(path, fill)
         canvas.drawPath(path, arrowOutline)
         canvas.restore()
+    }
+
+    private val poiDisc = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.argb(235, 255, 255, 255) }
+    private val poiRing = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE; color = Color.argb(200, 60, 60, 60)
+    }
+    private val poiText = Paint(Paint.ANTI_ALIAS_FLAG).apply { textAlign = Paint.Align.CENTER }
+
+    private fun drawPois(canvas: Canvas) {
+        if (pois.isEmpty()) return
+        val m = mpp(zl)
+        val r = 12f * density
+        poiRing.strokeWidth = 1.5f * density
+        poiText.textSize = 13f * density
+        for (poi in pois) {
+            val x = sx(poi.at.e, m)
+            val y = sy(poi.at.n, m)
+            if (x < -r || y < -r || x > width + r || y > height + r) continue
+            canvas.drawCircle(x, y, r, poiDisc)
+            canvas.drawCircle(x, y, r, poiRing)
+            canvas.drawText(Pois.glyph(poi.kind), x, y + 4.5f * density, poiText)
+        }
     }
 
     private fun drawHere(canvas: Canvas) {

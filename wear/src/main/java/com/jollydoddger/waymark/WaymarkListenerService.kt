@@ -31,6 +31,7 @@ class WaymarkListenerService : WearableListenerService() {
                 Sync.PATH_KEY -> Sync.applyKey(this, data)
                 Sync.PATH_STYLE -> Sync.applyStyle(this, data)
                 Sync.PATH_RECORD -> Sync.applyRecordWish(this, data)
+                Sync.PATH_POIS -> Sync.applyPois(this, data)
             }
         }
     }

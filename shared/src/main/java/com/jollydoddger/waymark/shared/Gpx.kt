@@ -62,6 +62,7 @@ object Gpx {
  */
 object RouteStore {
     private fun file(ctx: Context) = File(ctx.filesDir, "route.json")
+    private fun previous(ctx: Context) = File(ctx.filesDir, "route.previous.json")
 
     fun toJson(route: Route): String {
         val es = JSONArray()
@@ -82,6 +83,11 @@ object RouteStore {
     }
 
     fun save(ctx: Context, route: Route) {
+        // One level of undo: a planned route overwriting his imported GPX
+        // must be reversible, or "plan me a walk" can silently destroy the
+        // route he meant to do tomorrow.
+        val f = file(ctx)
+        if (f.exists()) f.copyTo(previous(ctx), overwrite = true)
         val tmp = File(ctx.filesDir, "route.json.tmp")
         tmp.writeText(toJson(route))
         if (!tmp.renameTo(file(ctx))) {
@@ -94,5 +100,14 @@ object RouteStore {
         val f = file(ctx)
         if (!f.exists()) return null
         return try { fromJson(f.readText()) } catch (e: Exception) { null }
+    }
+
+    /** Swap the current route for the one it replaced. Null if there is none. */
+    fun restorePrevious(ctx: Context): Route? {
+        val p = previous(ctx)
+        if (!p.exists()) return null
+        val restored = try { fromJson(p.readText()) } catch (e: Exception) { null } ?: return null
+        save(ctx, restored) // save() banks the current one, so restore toggles
+        return restored
     }
 }

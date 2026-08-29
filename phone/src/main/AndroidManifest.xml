@@ -7,6 +7,17 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Hold-to-talk needs the recording under this app's control. -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+
+    <!-- Load-bearing (a loose-ends lesson): without declaring interest, the
+         speech recogniser is invisible from Android 11 and the mic reports
+         "no recogniser" on a phone that plainly has one. -->
+    <queries>
+        <intent>
+            <action android:name="android.speech.RecognitionService" />
+        </intent>
+    </queries>
 
     <application
         android:label="@string/app_name"

@@ -26,6 +26,7 @@ import com.google.android.gms.wearable.DataMapItem
 import com.google.android.gms.wearable.Wearable
 import com.jollydoddger.waymark.shared.BngMapView
 import com.jollydoddger.waymark.shared.Locator
+import com.jollydoddger.waymark.shared.PoiStore
 import com.jollydoddger.waymark.shared.Prefs.arrowColour
 import com.jollydoddger.waymark.shared.Prefs.osApiKey
 import com.jollydoddger.waymark.shared.Prefs.recording
@@ -168,6 +169,7 @@ class MainActivity : Activity(), DataClient.OnDataChangedListener {
         super.onResume()
         map.setRoute(RouteStore.load(this))
         map.setTrail(TrailStore.points(this))
+        map.setPois(PoiStore.load(this))
         applySettings()
         showHint()
 
@@ -179,6 +181,7 @@ class MainActivity : Activity(), DataClient.OnDataChangedListener {
             try {
                 if (Sync.pullAll(this@MainActivity)) {
                     applySettings()
+                    map.setPois(PoiStore.load(this@MainActivity))
                     showHint()
                     startRecordingIfWanted()
                 }
@@ -263,6 +266,10 @@ class MainActivity : Activity(), DataClient.OnDataChangedListener {
                 Sync.PATH_RECORD -> {
                     Sync.applyRecordWish(this, data)
                     startRecordingIfWanted()
+                }
+                Sync.PATH_POIS -> {
+                    Sync.applyPois(this, data)
+                    map.setPois(PoiStore.load(this))
                 }
             }
         }

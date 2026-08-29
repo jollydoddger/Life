@@ -35,6 +35,33 @@ class BngTest {
         assertEquals(313177.270, en.n, 0.10)
     }
 
+    /** The inverse against the same worked example, both directions. */
+    @Test
+    fun inverseRoundTrips() {
+        // BNG → WGS84 → BNG closes to under a centimetre.
+        val en = En(651409.903, 313177.270)
+        val (lat, lon) = Bng.toWgs84(en)
+        val back = Bng.fromWgs84(lat, lon)
+        assertEquals(en.e, back.e, 0.01)
+        assertEquals(en.n, back.n, 0.01)
+
+        // WGS84 → BNG → WGS84 (Anglesey) closes to a few centimetres.
+        val start = Bng.fromWgs84(53.222, -4.208)
+        val (lat2, lon2) = Bng.toWgs84(start)
+        assertEquals(53.222, lat2, 1e-6)
+        assertEquals(-4.208, lon2, 1e-6)
+    }
+
+    @Test
+    fun gridRefLettersAndDigits() {
+        // OS worked example square: TG.
+        assertEquals("TG 51409 13177", Bng.gridRef(En(651409.903, 313177.270)))
+        // Anglesey: SH.
+        assertEquals("SH 31517 71671", Bng.gridRef(En(231517.0, 371671.0)))
+        // Off the lettered grid.
+        assertEquals(null, Bng.gridRef(En(-300000.0, 50000.0)))
+    }
+
     @Test
     fun convergenceSignAndMagnitude() {
         // On the central meridian there is none.

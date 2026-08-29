@@ -39,6 +39,7 @@ object Sync {
     const val PATH_KEY = "/waymark/key"
     const val PATH_STYLE = "/waymark/style"
     const val PATH_RECORD = "/waymark/record"
+    const val PATH_POIS = "/waymark/pois"
 
     private val TILE_ENTRY = Regex("""\d{1,2}/\d{1,7}/\d{1,7}\.png""")
 
@@ -146,6 +147,19 @@ object Sync {
         if (!on && ctx.recording) TrackingService.stop(ctx)
     }
 
+    /** The assistant's found places, so the wrist shows the same markers. */
+    suspend fun sendPois(ctx: Context, pois: List<Poi>) {
+        val req = PutDataMapRequest.create(PATH_POIS).apply {
+            dataMap.putString("json", Pois.toJson(pois))
+            dataMap.putLong("stamp", System.currentTimeMillis())
+        }.asPutDataRequest().setUrgent()
+        Wearable.getDataClient(ctx).putDataItem(req).await()
+    }
+
+    fun applyPois(ctx: Context, data: DataMap) {
+        PoiStore.save(ctx, Pois.fromJson(data.getString("json") ?: "[]"))
+    }
+
     /**
      * Ask the Data Layer what the current settings are, rather than waiting to
      * be told.
@@ -167,6 +181,7 @@ object Sync {
                     PATH_KEY -> { applyKey(ctx, data); applied = true }
                     PATH_STYLE -> { applyStyle(ctx, data); applied = true }
                     PATH_RECORD -> { applyRecordWish(ctx, data); applied = true }
+                    PATH_POIS -> { applyPois(ctx, data); applied = true }
                 }
             }
             applied
