@@ -27,7 +27,10 @@ import com.jollydoddger.waymark.shared.Prefs.arrowColour
 import com.jollydoddger.waymark.shared.Prefs.assistantEnabled
 import com.jollydoddger.waymark.shared.Prefs.osApiKey
 import com.jollydoddger.waymark.shared.Prefs.prowEnabled
+import com.jollydoddger.waymark.shared.Prefs.cloudEnabled
 import com.jollydoddger.waymark.shared.Prefs.radarEnabled
+import com.jollydoddger.waymark.shared.Prefs.tempEnabled
+import com.jollydoddger.waymark.shared.Prefs.windEnabled
 import com.jollydoddger.waymark.shared.Prefs.routeColour
 import com.jollydoddger.waymark.shared.Prefs.screenTimeoutSec
 import com.jollydoddger.waymark.shared.Prefs.tracesEnabled
@@ -256,6 +259,57 @@ class SettingsActivity : Activity() {
                 "Weather data by RainViewer (rainviewer.com)."
         }
 
+        val windSwitch = Switch(this).apply {
+            text = "  Wind"
+            textSize = 16f
+            isChecked = windEnabled
+            setOnCheckedChangeListener { _, on ->
+                windEnabled = on
+                result.text = if (on) "Wind on — arrows fly the way it is blowing." else "Wind off."
+            }
+        }
+        val windNote = TextView(this).apply {
+            textSize = 13f
+            text = "Arrows across the map, coloured and sized by speed: grey a breath, " +
+                "green a breeze, amber when it starts pushing you about, red when an " +
+                "exposed ridge stops being a good idea. Each arrow flies the way the " +
+                "wind is going; the reading beside the timeline names the direction it " +
+                "comes from, which is how a forecast states it. Moves with the timeline, " +
+                "so you can see what it will be doing when you get there."
+        }
+
+        val tempSwitch = Switch(this).apply {
+            text = "  Temperature"
+            textSize = 16f
+            isChecked = tempEnabled
+            setOnCheckedChangeListener { _, on ->
+                tempEnabled = on
+                result.text = if (on) "Temperature on — blue cold, red warm." else "Temperature off."
+            }
+        }
+
+        val cloudSwitch = Switch(this).apply {
+            text = "  Cloud and sunshine"
+            textSize = 16f
+            isChecked = cloudEnabled
+            setOnCheckedChangeListener { _, on ->
+                cloudEnabled = on
+                result.text = if (on) "Cloud on — grey where it is dull, gold where the sun is out."
+                else "Cloud off."
+            }
+        }
+        val washNote = TextView(this).apply {
+            textSize = 13f
+            text = "Two colour washes over each other say nothing legible, so only one is " +
+                "drawn at a time: forecast rain wherever the radar cannot see, then " +
+                "temperature, then cloud. All three come from one forecast request, so " +
+                "switching a second one on costs nothing.\n\n" +
+                "These are a model, not a measurement — the forecast's opinion about the " +
+                "sky, a few kilometres between readings. Only the radar frames are " +
+                "observations, and the timeline label says which you are looking at.\n\n" +
+                "Forecast by Open-Meteo (open-meteo.com)."
+        }
+
         val tracesSwitch = Switch(this).apply {
             text = "  Where people have walked"
             textSize = 16f
@@ -401,6 +455,17 @@ class SettingsActivity : Activity() {
                 LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT,
             ).apply { topMargin = dp(16) })
             addView(radarNote)
+            addView(windSwitch, LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT,
+            ).apply { topMargin = dp(16) })
+            addView(windNote)
+            addView(tempSwitch, LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT,
+            ).apply { topMargin = dp(12) })
+            addView(cloudSwitch, LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT,
+            ).apply { topMargin = dp(6) })
+            addView(washNote)
 
             addView(heading("Route line"))
             addView(swatches({ routeColour }) { routeColour = it })

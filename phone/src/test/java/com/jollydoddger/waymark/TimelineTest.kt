@@ -62,7 +62,7 @@ class TimelineTest {
     @Test
     fun withNoRadarAtAllTheForecastStillFillsTheTimeline() {
         val merged = Timeline.merge(emptyList(), hours(-5, 5), now)
-        assertEquals(11, merged.size)
+        assertEquals(11L, merged.size.toLong())
         merged.forEach { assertNull(it.radarPath) }
         assertEquals("forecast", merged.first().kind)
     }

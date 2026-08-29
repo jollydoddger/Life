@@ -24,6 +24,7 @@ import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.SeekBar
 import android.widget.TextView
+import com.jollydoddger.waymark.shared.Bng
 import com.jollydoddger.waymark.shared.BngMapView
 import com.jollydoddger.waymark.shared.Corridor
 import com.jollydoddger.waymark.shared.En
@@ -34,13 +35,16 @@ import com.jollydoddger.waymark.shared.Route
 import com.jollydoddger.waymark.shared.Gpx
 import com.jollydoddger.waymark.shared.Locator
 import com.jollydoddger.waymark.shared.Prefs.allPathsEnabled
+import com.jollydoddger.waymark.shared.Prefs.cloudEnabled
 import com.jollydoddger.waymark.shared.Prefs.arrowColour
 import com.jollydoddger.waymark.shared.Prefs.assistantEnabled
 import com.jollydoddger.waymark.shared.Prefs.libraryFolder
 import com.jollydoddger.waymark.shared.Prefs.osApiKey
 import com.jollydoddger.waymark.shared.Prefs.prowEnabled
 import com.jollydoddger.waymark.shared.Prefs.radarEnabled
+import com.jollydoddger.waymark.shared.Prefs.tempEnabled
 import com.jollydoddger.waymark.shared.Prefs.tracesEnabled
+import com.jollydoddger.waymark.shared.Prefs.windEnabled
 import com.jollydoddger.waymark.shared.Prefs.recording
 import com.jollydoddger.waymark.shared.Prefs.recordingStartedAt
 import com.jollydoddger.waymark.shared.Prefs.routeColour
@@ -49,6 +53,7 @@ import com.jollydoddger.waymark.shared.Prefs.routeReversed
 import com.jollydoddger.waymark.shared.Prefs.trailColour
 import com.jollydoddger.waymark.shared.Prefs.wantRecording
 import com.jollydoddger.waymark.shared.RouteStore
+import com.jollydoddger.waymark.shared.Sun
 import com.jollydoddger.waymark.shared.Sync
 import com.jollydoddger.waymark.shared.TileGrid
 import com.jollydoddger.waymark.shared.TrackingService
@@ -94,6 +99,8 @@ class MainActivity : Activity() {
     private lateinit var wxSeek: SeekBar
     private var wxFrames: List<WxFrame> = emptyList()
     private var wxIndex = 0
+    private var radarFrames: List<WxFrame> = emptyList()
+    private var wxField: Weather.Field? = null
     private var askBusy = false
     private val assistant by lazy {
         Assistant(
@@ -472,14 +479,23 @@ class MainActivity : Activity() {
         val wantTraces = tracesEnabled
         val wantProw = prowEnabled
         val wantRadar = radarEnabled
+        // Wind, temperature and cloud all come off one grid, so any of them
+        // pays for all three — and the radar wants it too, for the forecast
+        // hours either side of what the radar itself can see.
+        val wantGrid = windEnabled || tempEnabled || cloudEnabled
+        val wantWeather = wantRadar || wantGrid
         if (!wantTraces) map.setTraces(emptyList())
         if (!wantProw) map.setProw(emptyList())
         if (!wantRadar) map.setRadar(emptyList())
-        if (!wantRadar) {
+        if (!windEnabled) map.setWind(emptyList())
+        if (!wantGrid && !wantRadar) map.setField(null, 255)
+        if (!wantWeather) {
             wxFrames = emptyList()
+            radarFrames = emptyList()
+            wxField = null
             wxBar.visibility = View.GONE
         }
-        if (!wantTraces && !wantProw && !wantRadar) {
+        if (!wantTraces && !wantProw && !wantWeather) {
             map.onViewportSettled = null
             return
         }
@@ -487,8 +503,11 @@ class MainActivity : Activity() {
         // so it is asked for once here rather than on every pan.
         if (wantRadar) {
             Radar.catalogue({ note -> sayBriefly(note) }) { frames ->
-                setWxFrames(Timeline.merge(frames, emptyList(), System.currentTimeMillis()))
+                radarFrames = frames
+                rebuildWxFrames()
             }
+        } else {
+            radarFrames = emptyList()
         }
         val fetch = {
             val bounds = map.viewportBounds()
@@ -500,10 +519,16 @@ class MainActivity : Activity() {
             if (wantTraces) {
                 Traces.refresh(this, bounds, { note -> sayBriefly(note) }) { cells -> map.setTraces(cells) }
             }
+            if (wantWeather) {
+                Weather.refresh(bounds, { note -> sayBriefly(note) }) { field ->
+                    wxField = field
+                    rebuildWxFrames()
+                }
+            }
             // A pan or a zoom needs the moment already on the scrubber, not
             // the newest one: dragging back an hour and then moving the map
             // must not silently jump the clock forward again.
-            if (wantRadar && wxFrames.isNotEmpty()) showWxFrame(wxIndex)
+            if (wantWeather && wxFrames.isNotEmpty()) showWxFrame(wxIndex)
         }
         map.onViewportSettled = fetch
         // Switching a layer on in Settings and coming back left the map
@@ -516,8 +541,23 @@ class MainActivity : Activity() {
 
     // --- the weather timeline ------------------------------------------------
 
-    /** Hand the scrubber a new set of moments and open it on now. */
-    private fun setWxFrames(frames: List<WxFrame>) {
+    /**
+     * Rebuild the timeline from whatever has arrived. The radar catalogue and
+     * the forecast grid land independently, so this runs on each and keeps
+     * the moment he had chosen rather than snapping back to now under him.
+     */
+    private fun rebuildWxFrames() {
+        val keep = wxFrames.getOrNull(wxIndex)?.timeMs
+        val hours = if (radarEnabled || windEnabled || tempEnabled || cloudEnabled) {
+            wxField?.hours() ?: emptyList()
+        } else {
+            emptyList()
+        }
+        setWxFrames(Timeline.merge(radarFrames, hours, System.currentTimeMillis()), keep)
+    }
+
+    /** Hand the scrubber a new set of moments, keeping [keep] if it can. */
+    private fun setWxFrames(frames: List<WxFrame>, keep: Long? = null) {
         wxFrames = frames
         if (frames.isEmpty()) {
             wxBar.visibility = View.GONE
@@ -525,7 +565,7 @@ class MainActivity : Activity() {
         }
         wxBar.visibility = View.VISIBLE
         wxSeek.max = frames.size - 1
-        val i = Timeline.indexOfNow(frames, System.currentTimeMillis())
+        val i = Timeline.indexOfNow(frames, keep ?: System.currentTimeMillis())
         wxSeek.progress = i
         showWxFrame(i)
     }
@@ -539,7 +579,14 @@ class MainActivity : Activity() {
         if (wxFrames.isEmpty()) return
         wxIndex = i.coerceIn(0, wxFrames.size - 1)
         val frame = wxFrames[wxIndex]
-        wxLabel.text = frameLabel(frame)
+        // The catalogue can land before the map has been measured, and a
+        // viewport of nothing asks for the wrong tiles. The label is still
+        // worth setting; the drawing waits for the layout pass, which calls
+        // straight back here.
+        if (map.width == 0 || map.height == 0) {
+            wxLabel.text = frameLabel(frame)
+            return
+        }
         val bounds = map.viewportBounds()
         if (radarEnabled) {
             Radar.tiles(bounds, frame) { tiles -> map.setRadar(tiles) }
@@ -550,6 +597,74 @@ class MainActivity : Activity() {
             }
             Radar.prefetch(bounds, ahead)
         }
+        val field = wxField
+        val hour = field?.hourIndex(frame.timeMs) ?: -1
+        drawWeatherField(field, hour, frame)
+        drawWind(field, hour)
+        wxLabel.text = frameLabel(frame) + readings(field, hour)
+    }
+
+    /**
+     * One colour wash at a time: two of them over each other say nothing
+     * legible, and this is a map first. Forecast rain takes the map wherever
+     * the radar cannot see, because rain is the thing that changes a plan;
+     * otherwise temperature, then cloud.
+     */
+    private fun drawWeatherField(field: Weather.Field?, hour: Int, frame: WxFrame) {
+        if (field == null || hour < 0) { map.setField(null, 255); return }
+        fun tile(values: DoubleArray, ramp: (Double) -> Int) = BngMapView.MeshTile(
+            Weather.render(values, ramp),
+            field.south, field.west, field.north, field.east,
+        )
+        when {
+            radarEnabled && frame.radarPath == null ->
+                map.setField(tile(field.rain[hour]) { Ramp.rain(it) }, 255)
+            tempEnabled ->
+                map.setField(tile(field.temp[hour]) { Ramp.temperature(it) }, 125)
+            cloudEnabled ->
+                map.setField(tile(field.cloud[hour]) { Ramp.cloud(it) }, 255)
+            else -> map.setField(null, 255)
+        }
+    }
+
+    private fun drawWind(field: Weather.Field?, hour: Int) {
+        if (!windEnabled || field == null || hour < 0) {
+            map.setWind(emptyList())
+            return
+        }
+        val arrows = ArrayList<BngMapView.WindArrow>()
+        for (i in field.lat.indices) {
+            val speed = field.windSpeed[hour][i]
+            val from = field.windDir[hour][i]
+            if (speed.isNaN() || from.isNaN()) continue
+            val en = Bng.fromWgs84(field.lat[i], field.lon[i])
+            arrows.add(BngMapView.WindArrow(en.e, en.n, speed, from))
+        }
+        map.setWind(arrows)
+    }
+
+    /**
+     * The middle of the map in numbers, for the layers a colour cannot state
+     * precisely. Wind is given the way a forecast gives it — the direction it
+     * blows *from* — while the arrows on the map fly the way it is going.
+     */
+    private fun readings(field: Weather.Field?, hour: Int): String {
+        if (field == null || hour < 0) return ""
+        val centre = (Weather.GRID / 2) * Weather.GRID + Weather.GRID / 2
+        if (centre >= field.lat.size) return ""
+        val sb = StringBuilder()
+        val temp = field.temp[hour][centre]
+        if (!temp.isNaN()) sb.append(" · ${temp.roundToInt()}°C")
+        val speed = field.windSpeed[hour][centre]
+        val from = field.windDir[hour][centre]
+        if (!speed.isNaN() && !from.isNaN()) {
+            sb.append(" · ${Sun.compass(from)} ${speed.roundToInt()} mph")
+        }
+        val cloud = field.cloud[hour][centre]
+        if (!cloud.isNaN()) {
+            sb.append(if (cloud < 20) " · sunny" else " · ${cloud.roundToInt()}% cloud")
+        }
+        return sb.toString()
     }
 
     /** "14:20 · in 40 min · forecast" — the clock, the offset, and the source. */

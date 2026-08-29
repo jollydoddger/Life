@@ -93,6 +93,25 @@ object Prefs {
         set(v) = p(this).edit().putBoolean("radarEnabled", v).apply()
 
     /**
+     * Wind speed and direction as arrows across the map. Of the weather
+     * layers this is the one that changes a plan: a headwind on an exposed
+     * ridge is the difference between a good afternoon and a fight.
+     */
+    var Context.windEnabled: Boolean
+        get() = p(this).getBoolean("windEnabled", false)
+        set(v) = p(this).edit().putBoolean("windEnabled", v).apply()
+
+    /** Temperature as a colour wash over the map. */
+    var Context.tempEnabled: Boolean
+        get() = p(this).getBoolean("tempEnabled", false)
+        set(v) = p(this).edit().putBoolean("tempEnabled", v).apply()
+
+    /** Cloud cover — grey where it is dull, gold where the sun is out. */
+    var Context.cloudEnabled: Boolean
+        get() = p(this).getBoolean("cloudEnabled", false)
+        set(v) = p(this).edit().putBoolean("cloudEnabled", v).apply()
+
+    /**
      * Hide the route line on the phone's map without touching the stored
      * route or the watch — for reading the map underneath it. Phone-only
      * and never synced; cleared whenever a new route is adopted, because

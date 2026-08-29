@@ -522,7 +522,8 @@ class GeoTools(
             val json = JSONObject(
                 Net.get(
                     "https://api.open-meteo.com/v1/forecast?latitude=%.4f&longitude=%.4f".format(lat, lon) +
-                        "&hourly=temperature_2m,precipitation_probability,precipitation,wind_speed_10m" +
+                        "&hourly=temperature_2m,precipitation_probability,precipitation," +
+                        "wind_speed_10m,wind_direction_10m,wind_gusts_10m" +
                         "&daily=sunrise,sunset&forecast_days=2&wind_speed_unit=mph&timezone=auto",
                 ),
             )
@@ -532,9 +533,13 @@ class GeoTools(
             val rain = hourly.getJSONArray("precipitation")
             val temp = hourly.getJSONArray("temperature_2m")
             val wind = hourly.getJSONArray("wind_speed_10m")
+            val windDir = hourly.optJSONArray("wind_direction_10m")
+            val gusts = hourly.optJSONArray("wind_gusts_10m")
             val iso = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm", java.util.Locale.UK)
             var worstProb = 0; var totalRain = 0.0
             var tMin = Double.MAX_VALUE; var tMax = -Double.MAX_VALUE; var maxWind = 0.0
+            var maxGust = 0.0
+            var fromDeg = Double.NaN
             var covered = 0
             for (i in 0 until times.length()) {
                 val h = iso.parse(times.getString(i))?.time ?: continue
@@ -544,6 +549,11 @@ class GeoTools(
                 totalRain += rain.optDouble(i, 0.0)
                 tMin = minOf(tMin, temp.getDouble(i)); tMax = maxOf(tMax, temp.getDouble(i))
                 maxWind = maxOf(maxWind, wind.getDouble(i))
+                gusts?.let { maxGust = maxOf(maxGust, it.optDouble(i, 0.0)) }
+                // The direction at the start of the walk, not an average:
+                // averaging 350° with 10° gives due south, which is the
+                // opposite of the truth.
+                if (fromDeg.isNaN()) fromDeg = windDir?.optDouble(i, Double.NaN) ?: Double.NaN
             }
             if (covered > 0) {
                 sb.append(
@@ -555,7 +565,24 @@ class GeoTools(
                         "Rain: none expected in the window. "
                     },
                 )
-                sb.append("%.0f–%.0f°C, wind up to %.0f mph.\n".format(tMin, tMax, maxWind))
+                sb.append("%.0f–%.0f°C. ".format(tMin, tMax))
+                // Wind gets its own sentence: he asked for it to count in the
+                // planning, and a number without a direction cannot — whether
+                // it is behind you or in your face is the whole question on an
+                // exposed walk.
+                sb.append(
+                    if (fromDeg.isNaN()) "Wind up to %.0f mph".format(maxWind)
+                    else "Wind from the ${Sun.compass(fromDeg)}, up to %.0f mph".format(maxWind),
+                )
+                if (maxGust > maxWind + 3) sb.append(", gusting %.0f".format(maxGust))
+                sb.append(
+                    when {
+                        maxWind >= 38 -> " — that is enough to be dangerous on a ridge or a cliff path.\n"
+                        maxWind >= 25 -> " — hard going into it, and worth keeping off exposed ground.\n"
+                        maxWind >= 16 -> " — noticeable, not a problem.\n"
+                        else -> ".\n"
+                    },
+                )
             }
         }.onFailure {
             sb.append("No connection for the forecast. ")

@@ -174,14 +174,47 @@ sit behind a login, and Strava's API agreement forbids third-party surfacing
 of aggregate activity data — at any price. This overlay is the legal
 substitute, and its one weakness is recency.
 
-## Rainfall radar (optional, off by default)
+## Weather over the map (optional, all off by default)
 
-A switch in ⚙ paints live rainfall over the map — blue where real weather
-radars see rain falling now, warped properly from the web's projection
-onto the OS grid, refreshed about every five minutes as you browse.
-Deliberately never cached: radar is *now* by definition, so with no signal
-there is no radar rather than a stale lie about the sky. Weather data by
-[RainViewer](https://rainviewer.com). Phone only.
+Four switches in Settings, each independent, all fed from two sources and
+one timeline. Phone only.
+
+**Rainfall radar.** Real weather radars, painted boldly over the map and
+warped properly from the web's projection onto the OS grid. Drawn heavy on
+purpose: the radar image carries its own transparency, so light rain used to
+vanish against pale Explorer paper — each tile is now composited over itself,
+which lifts the faint returns without changing what heavy rain looks like.
+Never cached: radar is *now* by definition, so with no signal there is no
+radar rather than a stale lie about the sky.
+
+**Wind.** Arrows across the map, coloured and sized by speed — grey a breath,
+green a breeze, amber when it starts pushing you about, red when an exposed
+ridge stops being a good idea. Each arrow flies the way the wind is *going*;
+the reading beside the timeline names the direction it comes *from*, which is
+how a forecast states it. The walk brief reports it too, with gusts.
+
+**Temperature** and **cloud** as colour washes — cloud grey where it is dull
+and gold where the sun is getting through, so sunshine is marked rather than
+merely absent. Only one wash is drawn at a time (two over each other say
+nothing legible): forecast rain wherever the radar cannot see, then
+temperature, then cloud.
+
+**The timeline.** A scrubber along the bottom, five hours back and five
+forward. Drag it and watch a shower travel — which is the one thing a radar
+tells you that a forecast cannot: not whether it will rain, but whether it is
+coming for you. Frames are held in memory and the next few warmed as you
+drag, so it animates rather than blinks, and panning the map keeps the moment
+you chose.
+
+The two halves are not made of the same stuff, and the label under the
+scrubber says which you are looking at. RainViewer publishes about two hours
+back and half an hour on; that is measured radar. The rest of the ten hours
+is the hourly forecast on a grid a few kilometres across — a model's opinion
+about the sky, not an observation. Wind, temperature and cloud are always the
+model.
+
+Weather data by [RainViewer](https://rainviewer.com); forecast by
+[Open-Meteo](https://open-meteo.com).
 
 The overlays stack in a deliberate order, bottom to top: the GPX route
 (able to be covered), then the information layers — red dots, rights of
