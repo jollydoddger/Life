@@ -58,6 +58,19 @@ object Prefs {
         get() = p(this).getString("anthropicKey", "") ?: ""
         set(v) = p(this).edit().putString("anthropicKey", v.trim()).apply()
 
+    /** The tree URI of his GPX library folder, once one is chosen. */
+    var Context.libraryFolder: String
+        get() = p(this).getString("libraryFolder", "") ?: ""
+        set(v) = p(this).edit().putString("libraryFolder", v).apply()
+
+    /**
+     * The public-GPS-traces overlay (phone only). Off by default: it is an
+     * answer to "does this path exist on the ground", not decoration.
+     */
+    var Context.tracesEnabled: Boolean
+        get() = p(this).getBoolean("tracesEnabled", false)
+        set(v) = p(this).edit().putBoolean("tracesEnabled", v).apply()
+
     var Context.osApiKey: String
         get() = p(this).getString("osApiKey", "") ?: ""
         set(v) = p(this).edit().putString("osApiKey", v.trim()).apply()

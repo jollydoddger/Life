@@ -418,7 +418,7 @@ class GeoTools(
         var best = ideal
         var bestD = withinM
         for ((a, b) in paths) {
-            val p = nearestOnSegment(ideal, a, b)
+            val p = Geom.nearestOnSegment(ideal, a, b)
             val d = hypot(p.e - ideal.e, p.n - ideal.n)
             if (d < bestD) {
                 bestD = d
@@ -440,7 +440,7 @@ class GeoTools(
         var on = 0
         for (s in samples) {
             for ((a, b) in paths) {
-                val p = nearestOnSegment(s, a, b)
+                val p = Geom.nearestOnSegment(s, a, b)
                 if (hypot(p.e - s.e, p.n - s.n) <= NEAR_PATH_M) {
                     on++
                     break
@@ -450,13 +450,28 @@ class GeoTools(
         return on.toDouble() / samples.size
     }
 
-    private fun nearestOnSegment(p: En, a: En, b: En): En {
-        val dx = b.e - a.e
-        val dy = b.n - a.n
-        val len2 = dx * dx + dy * dy
-        if (len2 <= 0) return a
-        val t = (((p.e - a.e) * dx + (p.n - a.n) * dy) / len2).coerceIn(0.0, 1.0)
-        return En(a.e + t * dx, a.n + t * dy)
+    /**
+     * The same search as the GPX button's "Walks near me" — OSM walking-route
+     * relations plus his indexed GPX library, ranked by how close each line
+     * comes. A listing, not an adoption: choosing and loading one stays a
+     * deliberate act in the UI, where the preview is.
+     */
+    fun findWalks(radiusKm: Double): String {
+        val here = fix() ?: return "No GPS fix yet — the search is centred on his position."
+        val radius = (if (radiusKm <= 0) 1.0 else radiusKm).coerceAtMost(5.0) * 1000
+        val result = RouteFinder.find(ctx, here, radius)
+        val prefix = result.note?.plus("\n").orEmpty()
+        if (result.walks.isEmpty()) {
+            return prefix + "No walking route's line comes within ${km(radius)} of him — " +
+                "neither OpenStreetMap's route relations nor his GPX library " +
+                "(${Library.count(ctx)} routes indexed). A bigger radius may."
+        }
+        val listing = result.walks.take(10).joinToString("\n") { w ->
+            "- ${w.name}: line ${w.closestM.roundToInt()} m away, ${km(w.lengthM)} of path (${w.source})"
+        }
+        return prefix + "Walks whose line passes within ${km(radius)} (closest first):\n" +
+            listing + "\nThese are listed, not loaded — he adopts one from the GPX " +
+            "button's \"Walks near me\", where a preview is drawn first."
     }
 
     fun restorePreviousRoute(): String {

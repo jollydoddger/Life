@@ -52,7 +52,7 @@ an app that steals it for zoom is an app you cannot reliably get out of.
 
 | | |
 |---|---|
-| GPX | import a route file |
+| GPX | import a route file, find walks near you, or set up your GPX library |
 | ⇄ | flip the direction of the arrows along the route |
 | ◉ | centre on you, and zoom right in |
 | ● | start recording a trail (■ stops it) |
@@ -86,6 +86,47 @@ normally", which is also the kindest to the battery, since the watch then really
 sleeps instead of being held awake. For darker sooner, lower the watch's own
 Settings → Display → Screen timeout.
 
+## Walks near me
+
+Community route apps show a pin where a walk *starts*; a walk that passes 400 m
+from your door can start two villages away. The GPX button's **Walks near me**
+answers the better question: which walks' *lines* come within 500 m / 1 km /
+2 km / 5 km of where you stand. Results are ranked by how close the line comes;
+tap one and it is drawn dashed on the map first — **Use it** makes it the
+route (offline tiles fetched, watch updated, and the previous route banked so
+it can be put back).
+
+Two sources, searched together:
+
+- **OpenStreetMap's walking routes** — the named and community
+  walking/hiking routes mapped in OSM, with their full geometry. Nothing to
+  set up. An OSM route is stitched from its mapped sections, so the line can
+  have gaps; the shape is right, the join-up isn't guaranteed. Long trails
+  are clipped to the ~20 km around you.
+- **Your own GPX library** — point Waymark at a folder (GPX button → *GPX
+  library folder…*) and every `.gpx` inside, subfolders included, is indexed
+  and searched the same way. Fill it yourself: komoot, AllTrails, OS Maps and
+  the rest all let a signed-in user **export their own saved routes** as GPX,
+  and that export is yours to make. Waymark deliberately does not scrape any
+  route website — their terms forbid it, and it would put your accounts at
+  risk. Rescan from the same menu after adding files.
+
+## Where people have walked (optional, off by default)
+
+A switch in ⚙ draws faint purple dots on the phone's map wherever anyone has
+publicly recorded a GPS track — OpenStreetMap's public traces, fetched for the
+area you're looking at (zoomed in) and cached, so a revisited area works
+offline. Dots along a path mean the path really gets walked; a right-of-way
+on the map with no dots at all is worth a raised eyebrow.
+
+The honest caveat, stated here because the feature was asked for as "a Strava
+heatmap": the dots are **cumulative, not recent** — a dotted path was walked
+at some point since people started uploading traces, not necessarily this
+year. Nothing purchasable fixes that: Strava's heatmap has no API, its tiles
+sit behind a login, and Strava's API agreement forbids third-party surfacing
+of aggregate activity data — at any price. This overlay is the legal
+substitute, and its one weakness is recency.
+
 ## Ask it things (optional, off by default)
 
 Waymark's job is a map, an arrow and a line, and out of the box that is all it
@@ -112,6 +153,9 @@ head; anything it changes shows as a ✓ receipt.
   *"put my old route back"* undoes it. OSM paths are usually right, not
   gospel — glance at the OS map before trusting a stile.
 - **"Will it rain?" / "how much climbing?"** — Open-Meteo forecast and terrain.
+- **"Any walks near me?"** — the same search as the GPX button's Walks near
+  me, as a list; loading one stays a deliberate act in that menu, where the
+  preview is.
 - **"Where am I?"** — an OS grid reference (the form mountain rescue wants),
   the nearest named place, and today's sunset.
 

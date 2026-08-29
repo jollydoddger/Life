@@ -147,6 +147,7 @@ class Assistant(private val ctx: Context, private val tools: GeoTools) {
                 if (result.startsWith("Restored")) actions += Action(result.substringBefore('.'))
                 result
             }
+            "find_walks" -> tools.findWalks(num("radius_km"))
             "measure_to" -> tools.measureTo(str("place"))
             "weather" -> tools.weather()
             "where_am_i" -> tools.whereAmI()
@@ -312,6 +313,22 @@ class Assistant(private val ctx: Context, private val tools: GeoTools) {
                 "restore_previous_route",
                 "Put back the route that the last plan_route or GPX import replaced.",
                 schema(emptyMap(), emptyList()),
+            ),
+            tool(
+                "find_walks",
+                "List existing walking routes whose LINE passes within a radius of his " +
+                    "position — OpenStreetMap's named walking/hiking routes plus his own " +
+                    "indexed GPX library, ranked by closest approach. Listing only: he " +
+                    "loads one himself via the GPX button's \"Walks near me\".",
+                schema(
+                    mapOf(
+                        "radius_km" to property(
+                            "number",
+                            "Search radius in KILOMETRES (0.5–5; convert miles first).",
+                        ),
+                    ),
+                    listOf("radius_km"),
+                ),
             ),
             tool(
                 "measure_to",

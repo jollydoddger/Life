@@ -2,6 +2,7 @@ package com.jollydoddger.waymark
 
 import android.Manifest
 import android.app.Activity
+import android.app.AlertDialog
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Color
@@ -33,7 +34,9 @@ import com.jollydoddger.waymark.shared.Gpx
 import com.jollydoddger.waymark.shared.Locator
 import com.jollydoddger.waymark.shared.Prefs.arrowColour
 import com.jollydoddger.waymark.shared.Prefs.assistantEnabled
+import com.jollydoddger.waymark.shared.Prefs.libraryFolder
 import com.jollydoddger.waymark.shared.Prefs.osApiKey
+import com.jollydoddger.waymark.shared.Prefs.tracesEnabled
 import com.jollydoddger.waymark.shared.Prefs.recording
 import com.jollydoddger.waymark.shared.Prefs.routeColour
 import com.jollydoddger.waymark.shared.Prefs.routeReversed
@@ -50,6 +53,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlin.math.roundToInt
 
 /**
  * The whole phone app: the map, four small buttons, one status line.
@@ -111,7 +115,7 @@ class MainActivity : Activity() {
             }
         }
 
-        val importBtn = iconButton(Glyph.ROUTE) { pickGpx() }
+        val importBtn = iconButton(Glyph.ROUTE) { routeMenu() }
         val reverseBtn = iconButton(Glyph.REVERSE) {
             routeReversed = !routeReversed
             map.routeReversed = routeReversed
@@ -309,6 +313,16 @@ class MainActivity : Activity() {
         if (osApiKey.isEmpty()) {
             say("No map without a key — tap here to enter your OS Maps API key")
         }
+        // The traces overlay only exists while its switch is on; off means the
+        // dots are gone and nothing is fetched, not merely hidden.
+        if (tracesEnabled) {
+            map.onViewportSettled = {
+                Traces.refresh(this, map.viewportBounds()) { cells -> map.setTraces(cells) }
+            }
+        } else {
+            map.onViewportSettled = null
+            map.setTraces(emptyList())
+        }
         if (checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
             locator = Locator(this, { en, stale ->
                 lastFix = en
@@ -376,6 +390,152 @@ class MainActivity : Activity() {
         status.visibility = View.VISIBLE
     }
 
+    // --- routes in: import, walks near me, the library -----------------------
+
+    /**
+     * The GPX button's small menu. Everything here works with the ask bar
+     * switched off — none of it is the assistant's.
+     */
+    private fun routeMenu() {
+        val items = arrayOf("Import a GPX file", "Walks near me", "GPX library folder…")
+        AlertDialog.Builder(this)
+            .setItems(items) { _, i ->
+                when (i) {
+                    0 -> pickGpx()
+                    1 -> walksNearMe()
+                    2 -> libraryDialog()
+                }
+            }
+            .show()
+    }
+
+    private fun fmtDist(m: Double) =
+        if (m < 1000) "${m.roundToInt()} m" else "%.1f km".format(m / 1000)
+
+    private fun walksNearMe() {
+        val here = lastFix ?: run {
+            say("No GPS fix yet — the search is centred on where you are.")
+            return
+        }
+        val options = listOf("500 m" to 500.0, "1 km" to 1_000.0, "2 km" to 2_000.0, "5 km" to 5_000.0)
+        AlertDialog.Builder(this)
+            .setTitle("Walks whose line comes within…")
+            .setItems(options.map { it.first }.toTypedArray()) { _, i ->
+                findWalks(here, options[i].second)
+            }
+            .show()
+    }
+
+    private fun findWalks(here: En, radiusM: Double) {
+        say("Searching walking routes within ${fmtDist(radiusM)}…")
+        scope.launch {
+            val result = withContext(Dispatchers.IO) {
+                RouteFinder.find(this@MainActivity, here, radiusM)
+            }
+            status.visibility = View.GONE
+            result.note?.let { say(it) }
+            if (result.walks.isEmpty()) {
+                val libNote = Library.count(this@MainActivity).let { n ->
+                    if (n > 0) " or your $n-route library" else
+                        " (no library folder is indexed yet — GPX menu → GPX library folder)"
+                }
+                say("No walking route's line comes within ${fmtDist(radiusM)} — " +
+                    "nothing in OpenStreetMap's route relations$libNote. Try a bigger radius.")
+                return@launch
+            }
+            showWalkList(result.walks)
+        }
+    }
+
+    private fun showWalkList(walks: List<RouteFinder.FoundWalk>) {
+        val rows = walks.map {
+            "${it.name} — line ${fmtDist(it.closestM)} away · ${fmtDist(it.lengthM)} · ${it.source}"
+        }
+        AlertDialog.Builder(this)
+            .setTitle("Walks near you")
+            .setItems(rows.toTypedArray()) { _, i -> previewWalk(walks, i) }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun previewWalk(walks: List<RouteFinder.FoundWalk>, i: Int) {
+        val walk = walks[i]
+        map.setPreview(walk.lines)
+        map.fitTo(walk.routePoints())
+        val note = if (walk.source == "OSM") {
+            "\n\nAn OSM route is stitched from its mapped sections, so the line can " +
+                "have gaps or run out of order — the shape is right, the join-up isn't guaranteed."
+        } else ""
+        AlertDialog.Builder(this)
+            .setTitle(walk.name)
+            .setMessage(
+                "Line ${fmtDist(walk.closestM)} from you · ${fmtDist(walk.lengthM)} of path · " +
+                    "from ${if (walk.source == "OSM") "OpenStreetMap" else "your library"}$note",
+            )
+            .setPositiveButton("Use it") { _, _ -> adoptFound(walk) }
+            .setNegativeButton("Back") { _, _ ->
+                map.setPreview(emptyList())
+                showWalkList(walks)
+            }
+            .setOnCancelListener { map.setPreview(emptyList()) }
+            .show()
+    }
+
+    private fun adoptFound(walk: RouteFinder.FoundWalk) {
+        map.setPreview(emptyList())
+        importJob?.cancel()
+        importJob = scope.launch {
+            try {
+                val route = withContext(Dispatchers.IO) {
+                    // A library walk re-parses its GPX for the full line; the
+                    // index only keeps a decimated one. The file can have gone
+                    // since the scan, in which case the index line still works.
+                    val full = walk.uri?.let { u ->
+                        runCatching {
+                            contentResolver.openInputStream(Uri.parse(u))!!.use { Gpx.parse(it) }
+                        }.getOrNull()
+                    }
+                    (full?.copy(name = walk.name) ?: Route(walk.name, walk.routePoints()))
+                        .also { RouteStore.save(this@MainActivity, it) } // banks the old route
+                }
+                say("“${walk.name}” set — fetching offline tiles…")
+                publishRoute(route)
+            } catch (e: Exception) {
+                say("Couldn't set that walk: ${e.message ?: e.javaClass.simpleName}")
+            }
+        }
+    }
+
+    private fun libraryDialog() {
+        val b = AlertDialog.Builder(this)
+            .setTitle("GPX library")
+            .setMessage(
+                if (libraryFolder.isEmpty()) {
+                    "Point Waymark at a folder of GPX files — your own exports from " +
+                        "komoot, AllTrails, OS Maps and the rest — and Walks near me " +
+                        "searches them by how close each line comes to you."
+                } else {
+                    "${Library.count(this)} routes indexed. Rescan after adding files, " +
+                        "or choose a different folder."
+                },
+            )
+            .setPositiveButton("Choose folder") { _, _ ->
+                @Suppress("DEPRECATION")
+                startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT_TREE), 5)
+            }
+            .setNegativeButton("Cancel", null)
+        if (libraryFolder.isNotEmpty()) b.setNeutralButton("Rescan") { _, _ -> rescanLibrary() }
+        b.show()
+    }
+
+    private fun rescanLibrary() {
+        say("Reading the library folder…")
+        scope.launch {
+            val outcome = withContext(Dispatchers.IO) { Library.rescan(this@MainActivity) }
+            say(outcome)
+        }
+    }
+
     private fun pickGpx() {
         val pick = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
             addCategory(Intent.CATEGORY_OPENABLE)
@@ -391,6 +551,12 @@ class MainActivity : Activity() {
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
         if (requestCode == 2 && resultCode == RESULT_OK) data?.data?.let { importGpx(it) }
+        if (requestCode == 5 && resultCode == RESULT_OK) data?.data?.let { tree ->
+            // Keep the grant across reboots, or every rescan would need re-picking.
+            contentResolver.takePersistableUriPermission(tree, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            libraryFolder = tree.toString()
+            rescanLibrary()
+        }
     }
 
     private fun importGpx(uri: Uri) {

@@ -26,6 +26,7 @@ import com.jollydoddger.waymark.shared.Prefs.assistantEnabled
 import com.jollydoddger.waymark.shared.Prefs.osApiKey
 import com.jollydoddger.waymark.shared.Prefs.routeColour
 import com.jollydoddger.waymark.shared.Prefs.screenTimeoutSec
+import com.jollydoddger.waymark.shared.Prefs.tracesEnabled
 import com.jollydoddger.waymark.shared.Prefs.trailColour
 import com.jollydoddger.waymark.shared.Sync
 import com.jollydoddger.waymark.shared.TileGrid
@@ -230,6 +231,29 @@ class SettingsActivity : Activity() {
             }
         }
 
+        val tracesSwitch = Switch(this).apply {
+            text = "  Where people have walked"
+            textSize = 16f
+            isChecked = tracesEnabled
+            setOnCheckedChangeListener { _, on ->
+                tracesEnabled = on
+                result.text = if (on) {
+                    "Traces on — faint purple dots appear as you browse zoomed in."
+                } else {
+                    "Traces off."
+                }
+            }
+        }
+        val tracesNote = TextView(this).apply {
+            textSize = 13f
+            text = "Faint dots on the map wherever anyone has publicly recorded a GPS " +
+                "track (OpenStreetMap's public traces; phone only, fetched as you " +
+                "browse and cached). Dots mean the path really gets walked. One " +
+                "honest caveat: they are cumulative, not recent — a dotted path was " +
+                "walked at some point, not necessarily lately. No public source " +
+                "answers recency; Strava's heatmap isn't licensable at any price."
+        }
+
         val col = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(20), dp(28), dp(20), dp(20))
@@ -248,6 +272,10 @@ class SettingsActivity : Activity() {
             addView(claudeKeyBlock, LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT,
             ))
+
+            addView(heading("Map overlay"))
+            addView(tracesSwitch)
+            addView(tracesNote)
 
             addView(heading("Route line"))
             addView(swatches({ routeColour }) { routeColour = it })

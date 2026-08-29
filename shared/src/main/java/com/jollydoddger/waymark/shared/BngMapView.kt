@@ -74,6 +74,56 @@ class BngMapView @JvmOverloads constructor(
         invalidate()
     }
 
+    /**
+     * A walk being looked at but not yet adopted — dashed, over the route, so
+     * "this is what you'd get" never masquerades as "this is what you have".
+     * Kept as separate polylines: an OSM relation's members can be gappy, and
+     * joining them up would draw lines the walk doesn't contain.
+     */
+    private var previewLines: List<List<En>> = emptyList()
+
+    fun setPreview(lines: List<List<En>>) {
+        previewLines = lines
+        invalidate()
+    }
+
+    /**
+     * Public GPS traces (phone only): each cell is a flat [e0,n0,e1,n1,…]
+     * array of dots, drawn faintly under everything the app itself owns.
+     */
+    private var traceCells: List<FloatArray> = emptyList()
+    private var traceScratch = FloatArray(0)
+
+    fun setTraces(cells: List<FloatArray>) {
+        traceCells = cells
+        val largest = cells.maxOfOrNull { it.size } ?: 0
+        if (traceScratch.size < largest) traceScratch = FloatArray(largest)
+        invalidate()
+    }
+
+    /** West, south, east, north of the visible map, in grid metres. */
+    fun viewportBounds(): DoubleArray {
+        val m = mpp(zl)
+        return doubleArrayOf(
+            centreE - width / 2.0 * m, centreN - height / 2.0 * m,
+            centreE + width / 2.0 * m, centreN + height / 2.0 * m,
+        )
+    }
+
+    /**
+     * Fires ~600 ms after the viewport last moved (pan, zoom, or the fix
+     * dragging a following map) — the hook the traces overlay fetches on,
+     * so a fling across the country doesn't request every cell it crossed.
+     */
+    var onViewportSettled: (() -> Unit)? = null
+    private val settleRunnable = Runnable { onViewportSettled?.invoke() }
+
+    private fun viewportChanged() {
+        if (onViewportSettled == null) return
+        removeCallbacks(settleRunnable)
+        postDelayed(settleRunnable, 600)
+    }
+
     private var fixE = 0.0
     private var fixN = 0.0
     private var hasFix = false
@@ -111,7 +161,7 @@ class BngMapView @JvmOverloads constructor(
 
     fun setFix(e: Double, n: Double, stale: Boolean) {
         fixE = e; fixN = n; hasFix = true; fixStale = stale
-        if (follow) { centreE = e; centreN = n }
+        if (follow) { centreE = e; centreN = n; viewportChanged() }
         invalidate()
     }
 
@@ -150,11 +200,22 @@ class BngMapView @JvmOverloads constructor(
 
     private fun setZoom(z: Double) {
         zl = z.coerceIn(minZl, maxZl)
+        viewportChanged()
         invalidate()
     }
 
-    private fun centreOnRoute() {
-        val pts = routePts.ifEmpty { return }
+    private fun centreOnRoute() = fit(routePts)
+
+    /** Pan and zoom so [pts] fills the screen — how a preview is shown. */
+    fun fitTo(pts: List<En>) {
+        if (pts.isEmpty()) return
+        follow = false
+        fit(pts)
+        invalidate()
+    }
+
+    private fun fit(pts: List<En>) {
+        if (pts.isEmpty()) return
         centreE = (pts.minOf { it.e } + pts.maxOf { it.e }) / 2
         centreN = (pts.minOf { it.n } + pts.maxOf { it.n }) / 2
         if (width > 0) {
@@ -169,6 +230,7 @@ class BngMapView @JvmOverloads constructor(
         super.onSizeChanged(w, h, oldw, oldh)
         // A route set before layout couldn't pick its zoom; do it now.
         if (oldw == 0 && routePts.isNotEmpty() && !hasFix) centreOnRoute()
+        viewportChanged()
     }
 
     // --- drawing ------------------------------------------------------------
@@ -203,8 +265,10 @@ class BngMapView @JvmOverloads constructor(
         if (width == 0 || height == 0) return
         canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), bgPaint)
         drawTiles(canvas)
+        drawTraces(canvas)
         drawTrail(canvas)
         drawRoute(canvas)
+        drawPreview(canvas)
         drawPois(canvas)
         drawHere(canvas)
     }
@@ -252,6 +316,57 @@ class BngMapView @JvmOverloads constructor(
                 }
             }
         }
+    }
+
+    // Faint deep-purple dots: an answer to "has anyone actually walked here",
+    // deliberately quieter than anything the app draws on its own account.
+    private val tracePaint = Paint().apply {
+        color = Color.argb(90, 81, 45, 168)
+        strokeCap = Paint.Cap.ROUND
+    }
+
+    private fun drawTraces(canvas: Canvas) {
+        if (traceCells.isEmpty()) return
+        val m = mpp(zl)
+        tracePaint.strokeWidth = 1.5f * density
+        for (cell in traceCells) {
+            var n = 0
+            var i = 0
+            while (i + 1 < cell.size) {
+                traceScratch[n++] = sx(cell[i].toDouble(), m)
+                traceScratch[n++] = sy(cell[i + 1].toDouble(), m)
+                i += 2
+            }
+            canvas.drawPoints(traceScratch, 0, n, tracePaint)
+        }
+    }
+
+    private val previewCasing = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE; color = Color.argb(190, 255, 255, 255)
+        strokeJoin = Paint.Join.ROUND; strokeCap = Paint.Cap.ROUND
+    }
+    private val previewPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE; color = Color.rgb(0, 122, 255)
+        strokeJoin = Paint.Join.ROUND; strokeCap = Paint.Cap.ROUND
+    }
+
+    private fun drawPreview(canvas: Canvas) {
+        if (previewLines.isEmpty()) return
+        val m = mpp(zl)
+        path.rewind()
+        for (line in previewLines) {
+            if (line.size < 2) continue
+            path.moveTo(sx(line[0].e, m), sy(line[0].n, m))
+            for (i in 1 until line.size) path.lineTo(sx(line[i].e, m), sy(line[i].n, m))
+        }
+        previewCasing.strokeWidth = 8f * density
+        previewCasing.pathEffect = android.graphics.DashPathEffect(
+            floatArrayOf(10f * density, 6f * density), 0f,
+        )
+        previewPaint.strokeWidth = 4.5f * density
+        previewPaint.pathEffect = previewCasing.pathEffect
+        canvas.drawPath(path, previewCasing)
+        canvas.drawPath(path, previewPaint)
     }
 
     private fun drawTrail(canvas: Canvas) {
@@ -364,6 +479,7 @@ class BngMapView @JvmOverloads constructor(
             centreE += dx * m
             centreN -= dy * m
             follow = false
+            viewportChanged()
             invalidate()
             return true
         }
@@ -412,6 +528,7 @@ class BngMapView @JvmOverloads constructor(
         val m2 = mpp(zl)
         centreE = we - (fx - width / 2.0) * m2
         centreN = wn + (fy - height / 2.0) * m2
+        viewportChanged()
         invalidate()
     }
 
