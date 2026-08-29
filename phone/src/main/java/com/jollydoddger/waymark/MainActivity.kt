@@ -22,6 +22,7 @@ import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.ScrollView
+import android.widget.SeekBar
 import android.widget.TextView
 import com.jollydoddger.waymark.shared.BngMapView
 import com.jollydoddger.waymark.shared.Corridor
@@ -85,6 +86,14 @@ class MainActivity : Activity() {
     private lateinit var replyText: TextView
     private lateinit var replyPanel: ScrollView
     private lateinit var bottomStack: LinearLayout
+    private lateinit var askBar: LinearLayout
+
+    // The weather scrubber: five hours back, five forward, one moment shown.
+    private lateinit var wxBar: LinearLayout
+    private lateinit var wxLabel: TextView
+    private lateinit var wxSeek: SeekBar
+    private var wxFrames: List<WxFrame> = emptyList()
+    private var wxIndex = 0
     private var askBusy = false
     private val assistant by lazy {
         Assistant(
@@ -199,7 +208,7 @@ class MainActivity : Activity() {
             background = IconDrawable(Glyph.SEND, d)
             setOnClickListener { sendAsk() }
         }
-        val askBar = LinearLayout(this).apply {
+        askBar = LinearLayout(this).apply {
             setBackgroundColor(Color.argb(235, 250, 250, 248))
             gravity = Gravity.CENTER_VERTICAL
             setPadding(dp(8), dp(2), dp(4), dp(2))
@@ -220,11 +229,44 @@ class MainActivity : Activity() {
             setOnClickListener { visibility = View.GONE }
         }
 
-        // Reply above the ask bar, both in one stack pinned to the bottom, so
-        // padding the stack lifts the whole thing clear of the system bars —
-        // and of the keyboard.
+        // --- the weather scrubber: drag time, watch the rain move ---
+        wxLabel = TextView(this).apply {
+            setTextColor(Color.WHITE)
+            textSize = 13f
+            setPadding(dp(14), dp(6), dp(14), 0)
+        }
+        wxSeek = SeekBar(this).apply {
+            setPadding(dp(14), dp(2), dp(14), dp(6))
+            setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+                override fun onProgressChanged(bar: SeekBar?, value: Int, fromUser: Boolean) {
+                    if (fromUser) showWxFrame(value)
+                }
+                override fun onStartTrackingTouch(bar: SeekBar?) { }
+                override fun onStopTrackingTouch(bar: SeekBar?) { }
+            })
+        }
+        wxBar = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundColor(Color.argb(215, 22, 26, 24))
+            visibility = View.GONE
+            addView(wxLabel, LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT,
+            ))
+            addView(wxSeek, LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT,
+            ))
+        }
+
+        // Scrubber, then reply, then the ask bar, all in one stack pinned to
+        // the bottom, so padding the stack lifts the whole thing clear of the
+        // system bars — and of the keyboard. The stack itself is always
+        // present now: the weather timeline has to work with the assistant
+        // switched off, which is how the app ships.
         bottomStack = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
+            addView(wxBar, LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT,
+            ))
             addView(replyPanel, LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, dp(210),
             ))
@@ -312,8 +354,10 @@ class MainActivity : Activity() {
     override fun onResume() {
         super.onResume()
         // Switched off in Settings, the ask bar is absent rather than idle —
-        // the map gets the whole screen back, which is the point of it.
-        bottomStack.visibility = if (assistantEnabled) View.VISIBLE else View.GONE
+        // the map gets the whole screen back, which is the point of it. The
+        // scrubber above it comes and goes with the weather layers instead.
+        askBar.visibility = if (assistantEnabled) View.VISIBLE else View.GONE
+        if (!assistantEnabled) replyPanel.visibility = View.GONE
         // centredThisOpen is deliberately NOT reset here: onResume also runs
         // on the way back from Settings, and re-centring there yanked the map
         // away from wherever he was planning. One centre per opening of the
@@ -431,9 +475,20 @@ class MainActivity : Activity() {
         if (!wantTraces) map.setTraces(emptyList())
         if (!wantProw) map.setProw(emptyList())
         if (!wantRadar) map.setRadar(emptyList())
+        if (!wantRadar) {
+            wxFrames = emptyList()
+            wxBar.visibility = View.GONE
+        }
         if (!wantTraces && !wantProw && !wantRadar) {
             map.onViewportSettled = null
             return
+        }
+        // The frame catalogue is a property of the sky, not of the viewport,
+        // so it is asked for once here rather than on every pan.
+        if (wantRadar) {
+            Radar.catalogue({ note -> sayBriefly(note) }) { frames ->
+                setWxFrames(Timeline.merge(frames, emptyList(), System.currentTimeMillis()))
+            }
         }
         val fetch = {
             val bounds = map.viewportBounds()
@@ -445,9 +500,10 @@ class MainActivity : Activity() {
             if (wantTraces) {
                 Traces.refresh(this, bounds, { note -> sayBriefly(note) }) { cells -> map.setTraces(cells) }
             }
-            if (wantRadar) {
-                Radar.refresh(bounds, { note -> sayBriefly(note) }) { tiles -> map.setRadar(tiles) }
-            }
+            // A pan or a zoom needs the moment already on the scrubber, not
+            // the newest one: dragging back an hour and then moving the map
+            // must not silently jump the clock forward again.
+            if (wantRadar && wxFrames.isNotEmpty()) showWxFrame(wxIndex)
         }
         map.onViewportSettled = fetch
         // Switching a layer on in Settings and coming back left the map
@@ -456,6 +512,58 @@ class MainActivity : Activity() {
         // overlay looked broken. Ask once, here, as soon as there is a
         // viewport to ask about.
         if (map.width > 0) fetch() else map.post { if (map.width > 0) fetch() }
+    }
+
+    // --- the weather timeline ------------------------------------------------
+
+    /** Hand the scrubber a new set of moments and open it on now. */
+    private fun setWxFrames(frames: List<WxFrame>) {
+        wxFrames = frames
+        if (frames.isEmpty()) {
+            wxBar.visibility = View.GONE
+            return
+        }
+        wxBar.visibility = View.VISIBLE
+        wxSeek.max = frames.size - 1
+        val i = Timeline.indexOfNow(frames, System.currentTimeMillis())
+        wxSeek.progress = i
+        showWxFrame(i)
+    }
+
+    /**
+     * Draw one moment. Tiles already decoded arrive immediately, so a drag
+     * across the bar animates instead of blinking, and the frames just ahead
+     * are warmed in the background for the same reason.
+     */
+    private fun showWxFrame(i: Int) {
+        if (wxFrames.isEmpty()) return
+        wxIndex = i.coerceIn(0, wxFrames.size - 1)
+        val frame = wxFrames[wxIndex]
+        wxLabel.text = frameLabel(frame)
+        val bounds = map.viewportBounds()
+        if (radarEnabled) {
+            Radar.tiles(bounds, frame) { tiles -> map.setRadar(tiles) }
+            val ahead = ArrayList<WxFrame>()
+            for (d in intArrayOf(1, 2, -1, 3)) {
+                val j = wxIndex + d
+                if (j >= 0 && j < wxFrames.size) ahead.add(wxFrames[j])
+            }
+            Radar.prefetch(bounds, ahead)
+        }
+    }
+
+    /** "14:20 · in 40 min · forecast" — the clock, the offset, and the source. */
+    private fun frameLabel(frame: WxFrame): String {
+        fun span(m: Int): String = if (m >= 90) "${m / 60} h ${m % 60} min" else "$m min"
+        val clock = java.text.SimpleDateFormat("HH:mm", java.util.Locale.UK)
+            .format(java.util.Date(frame.timeMs))
+        val mins = ((frame.timeMs - System.currentTimeMillis()) / 60_000L).toInt()
+        val rel = when {
+            kotlin.math.abs(mins) <= 7 -> "now"
+            mins < 0 -> span(-mins) + " ago"
+            else -> "in " + span(mins)
+        }
+        return "$clock · $rel · ${frame.kind}"
     }
 
     // --- offline area download -----------------------------------------------

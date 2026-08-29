@@ -241,14 +241,16 @@ class SettingsActivity : Activity() {
             isChecked = radarEnabled
             setOnCheckedChangeListener { _, on ->
                 radarEnabled = on
-                result.text = if (on) "Rain radar on — blue where rain is falling now."
+                result.text = if (on) "Rain radar on — with a timeline to scrub at the bottom of the map."
                 else "Rain radar off."
             }
         }
         val radarNote = TextView(this).apply {
             textSize = 13f
-            text = "Live rainfall painted over the map — blue where real weather radars " +
-                "see rain falling, updated about every five minutes as you browse. " +
+            text = "Rainfall painted boldly over the map, from real weather radars, with " +
+                "a timeline along the bottom: drag it back through the last couple of " +
+                "hours to see which way a shower is travelling, or forward through the " +
+                "nowcast. Each frame says whether it is measured radar or a forecast.\n\n" +
                 "Never cached: radar is now by definition, so with no signal there is " +
                 "no radar rather than a stale lie about the sky. Phone only.\n\n" +
                 "Weather data by RainViewer (rainviewer.com)."

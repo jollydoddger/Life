@@ -122,19 +122,19 @@ class BngMapView @JvmOverloads constructor(
     }
 
     /**
-     * One rainfall-radar tile: a Web-Mercator bitmap and the lat/lon box it
-     * covers. Radar is served in the web's projection and this map lives in
-     * the National Grid, so each tile is drawn through a warped mesh rather
-     * than pretending the two agree.
+     * A bitmap that belongs on a lat/lon box rather than on the grid: a
+     * rainfall-radar tile, or a rendered weather field. Both arrive in the
+     * web's projection and this map lives in the National Grid, so each is
+     * drawn through a warped mesh rather than pretending the two agree.
      */
-    class RadarTile(
+    class MeshTile(
         val bitmap: android.graphics.Bitmap,
         val south: Double, val west: Double, val north: Double, val east: Double,
     )
 
-    private var radarTiles: List<RadarTile> = emptyList()
+    private var radarTiles: List<MeshTile> = emptyList()
 
-    fun setRadar(tiles: List<RadarTile>) {
+    fun setRadar(tiles: List<MeshTile>) {
         radarTiles = tiles
         invalidate()
     }
@@ -303,6 +303,9 @@ class BngMapView @JvmOverloads constructor(
         if (width == 0 || height == 0) return
         canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), bgPaint)
         drawTiles(canvas)
+        // Weather sits directly on the map paper and under everything he is
+        // navigating by: a rain cell must never hide the line he is walking.
+        drawField(canvas)
         drawRadar(canvas)
         // His stacking order, bottom to top: the GPX route first (able to be
         // covered), then the information layers — dots and rights of way —
@@ -313,6 +316,7 @@ class BngMapView @JvmOverloads constructor(
         drawTrail(canvas)
         drawPreview(canvas)
         drawPois(canvas)
+        drawWind(canvas)
         drawHere(canvas)
     }
 
@@ -395,7 +399,20 @@ class BngMapView @JvmOverloads constructor(
         postDelayed(tracePulse, 50)
     }
 
-    private val radarPaint = Paint(Paint.FILTER_BITMAP_FLAG).apply { alpha = 140 }
+    /**
+     * Rain has to be seen at a glance on a bright OS sheet in daylight, so
+     * this is deliberately heavy: nearly opaque, and drawn twice.
+     *
+     * The second pass is the part that matters. The radar PNG carries its own
+     * alpha, so a light shower arrives as a nearly transparent wash that
+     * vanishes over pale paper however high this alpha goes — the ceiling is
+     * the tile's alpha, not the paint's. Compositing the same tile over
+     * itself squares the transparency instead, which lifts the faint returns
+     * hard while leaving heavy rain looking the same. Light rain is exactly
+     * the rain worth warning about.
+     */
+    private val radarPaint = Paint(Paint.FILTER_BITMAP_FLAG).apply { alpha = 235 }
+    private val RADAR_PASSES = 2
 
     /** Mesh resolution per tile: 6x6 quads is plenty at county scale. */
     private val radarMeshN = 6
@@ -419,7 +436,115 @@ class BngMapView @JvmOverloads constructor(
                     radarMesh[i++] = sy(en.n, m)
                 }
             }
-            canvas.drawBitmapMesh(t.bitmap, radarMeshN, radarMeshN, radarMesh, 0, null, 0, radarPaint)
+            repeat(RADAR_PASSES) {
+                canvas.drawBitmapMesh(
+                    t.bitmap, radarMeshN, radarMeshN, radarMesh, 0, null, 0, radarPaint,
+                )
+            }
+        }
+    }
+
+    /**
+     * A rendered weather field — temperature, cloud, forecast rain — drawn
+     * exactly like a radar tile, because it is the same problem: a bitmap on
+     * a lat/lon box that has to be bent onto the grid. One at a time: two
+     * colour washes over each other say nothing legible.
+     */
+    private var fieldTile: MeshTile? = null
+    private var fieldPaint = Paint(Paint.FILTER_BITMAP_FLAG).apply { alpha = 150 }
+
+    fun setField(tile: MeshTile?, alpha: Int) {
+        fieldTile = tile
+        fieldPaint.alpha = alpha
+        invalidate()
+    }
+
+    private fun drawField(canvas: Canvas) {
+        val t = fieldTile ?: return
+        val m = mpp(zl)
+        val yN = mercY(t.north)
+        val yS = mercY(t.south)
+        var i = 0
+        for (r in 0..radarMeshN) {
+            val lat = invMercY(yN + (yS - yN) * r / radarMeshN)
+            for (c in 0..radarMeshN) {
+                val lon = t.west + (t.east - t.west) * c / radarMeshN
+                val en = Bng.fromWgs84(lat, lon)
+                radarMesh[i++] = sx(en.e, m)
+                radarMesh[i++] = sy(en.n, m)
+            }
+        }
+        canvas.drawBitmapMesh(t.bitmap, radarMeshN, radarMeshN, radarMesh, 0, null, 0, fieldPaint)
+    }
+
+    /**
+     * One wind reading, placed on the grid. [fromDeg] is the direction the
+     * wind blows *from*, which is how every forecast in the country states it
+     * — and the opposite of the way the arrow points, which is the way it is
+     * going. Both are needed: the number to compare against a forecast, the
+     * arrow to see at a glance whether it is behind you on the climb.
+     */
+    class WindArrow(
+        val e: Double, val n: Double,
+        val speedMph: Double, val fromDeg: Double,
+    )
+
+    private var windArrows: List<WindArrow> = emptyList()
+
+    fun setWind(arrows: List<WindArrow>) {
+        windArrows = arrows
+        invalidate()
+    }
+
+    private val windCasing = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE; color = Color.argb(210, 255, 255, 255)
+        strokeJoin = Paint.Join.ROUND; strokeCap = Paint.Cap.ROUND
+    }
+    private val windPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeJoin = Paint.Join.ROUND; strokeCap = Paint.Cap.ROUND
+    }
+    private val windFill = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
+
+    /**
+     * Wind by the feel of it rather than by a rainbow: a grey breath, a green
+     * breeze, amber when it starts pushing you about, red when a walk on an
+     * exposed ridge stops being a good idea.
+     */
+    private fun windColour(mph: Double): Int = when {
+        mph < 8 -> Color.rgb(96, 116, 128)
+        mph < 16 -> Color.rgb(24, 132, 72)
+        mph < 25 -> Color.rgb(214, 132, 12)
+        mph < 38 -> Color.rgb(206, 62, 24)
+        else -> Color.rgb(146, 24, 120)
+    }
+
+    private fun drawWind(canvas: Canvas) {
+        if (windArrows.isEmpty()) return
+        val m = mpp(zl)
+        windCasing.strokeWidth = 6.5f * density
+        windPaint.strokeWidth = 3.2f * density
+        for (a in windArrows) {
+            val x = sx(a.e, m)
+            val y = sy(a.n, m)
+            if (x < -40 || y < -40 || x > width + 40 || y > height + 40) continue
+            // Downwind: where it is going, not where it came from. True north
+            // rather than grid north — the convergence is a couple of degrees
+            // in Wales, far below what an arrow this size can show.
+            val going = Math.toRadians(a.fromDeg + 180.0)
+            val len = (14f + (a.speedMph.coerceIn(0.0, 40.0) / 40.0 * 16f)).toFloat() * density
+            val dx = kotlin.math.sin(going).toFloat()
+            val dy = -kotlin.math.cos(going).toFloat()
+            val x0 = x - dx * len / 2
+            val y0 = y - dy * len / 2
+            val x1 = x + dx * len / 2
+            val y1 = y + dy * len / 2
+            canvas.drawLine(x0, y0, x1, y1, windCasing)
+            windPaint.color = windColour(a.speedMph)
+            canvas.drawLine(x0, y0, x1, y1, windPaint)
+            windFill.color = windPaint.color
+            val bearing = Math.toDegrees(going).toFloat()
+            drawArrowHead(canvas, x1, y1, bearing, 7f * density, windFill)
         }
     }
 
