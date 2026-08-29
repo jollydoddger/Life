@@ -32,7 +32,17 @@ class GeoTools(
     private val fix: () -> En?,
     /** Age of that fix in ms, so "where am I" can admit staleness. */
     private val fixAgeMs: () -> Long = { 0L },
+    /** Progress for the slow ones — planning is several calls, not one. */
+    private val progress: (String) -> Unit = {},
 ) {
+
+    private companion object {
+        /** Loops tried per plan. Each is one routing call on a free server. */
+        const val CANDIDATES = 3
+
+        /** Within this of a mapped path counts as walking on it. */
+        const val NEAR_PATH_M = 25.0
+    }
 
     private fun route(): Route? = RouteStore.load(ctx)
 
@@ -255,42 +265,104 @@ class GeoTools(
 
     // --- routing -------------------------------------------------------------
 
+    /** One routed candidate, with how green it turned out. */
+    private data class Candidate(val points: List<En>, val metres: Double, val pathFraction: Double)
+
     /**
-     * A route from the FOSSGIS foot router — real OSM-mapped paths, never a
-     * line the model drew. Waypoints are lat,lon pairs; a circular request
-     * turns into three deterministic waypoints on a circle whose circumference
-     * matches the asked-for length, so nothing about the shape is invented
-     * either.
+     * Plan a walk. Point-to-point when given places; otherwise a circular loop
+     * that actually tries to be a country walk.
+     *
+     * "Countryside" cannot be asserted by the model and is not something the
+     * router reports — OSRM returns geometry and distance, not OSM highway
+     * tags. So it is measured here instead: one Overpass query fetches the
+     * real footpaths, tracks and bridleways around the start, those paths are
+     * used to *place* each candidate loop's waypoints, and each routed result
+     * is then scored geometrically against the same path data. The percentage
+     * in the reply is that measurement, not an impression.
      */
     fun planRoute(placeNames: List<String>, circularKm: Double): String {
         val here = fix() ?: return "No GPS fix yet — can't plan from where you are."
-        val waypoints = ArrayList<Pair<Double, Double>>()
-        waypoints.add(Bng.toWgs84(here))
 
-        for (name in placeNames) {
-            val g = geocode(name) ?: return "Failed: couldn't find \"$name\" on the map (Nominatim)."
-            waypoints.add(g)
-        }
-        if (circularKm > 0) {
-            // Circumference ≈ asked-for distance → radius; three points, random
-            // starting bearing so repeated asks explore different directions.
-            val radius = circularKm * 1000 / (2 * PI)
-            val start = Math.random() * 2 * PI
-            for (k in 0..2) {
-                val b = start + k * 2 * PI / 3
-                waypoints.add(Bng.toWgs84(En(here.e + radius * sin(b), here.n + radius * cos(b))))
+        if (placeNames.isNotEmpty()) {
+            val waypoints = ArrayList<Pair<Double, Double>>()
+            waypoints.add(Bng.toWgs84(here))
+            for (name in placeNames) {
+                val g = geocode(name) ?: return "Failed: couldn't find \"$name\" on the map (Nominatim)."
+                waypoints.add(g)
             }
-            waypoints.add(Bng.toWgs84(here)) // and home again
+            if (circularKm > 0) waypoints.add(Bng.toWgs84(here))
+            val routed = routeVia(waypoints)
+                ?: return "The router found no walkable route between those points."
+            return adopt(routed, "Planned walk", null)
         }
-        if (waypoints.size < 2) return "Failed: give either place names or a circular distance."
 
+        if (circularKm <= 0) return "Failed: give either place names or a circular distance."
+
+        val target = circularKm * 1000
+        val radius = target / (2 * PI)
+        progress("Looking up the footpaths round here…")
+        val paths = pathSegments(here, radius * 1.6 + 500)
+
+        // Candidates: loops in evenly spread directions, each hung off real
+        // path nodes where there are any within reach of the ideal circle.
+        val spin = Math.random() * 2 * PI
+        val candidates = ArrayList<Candidate>()
+        for (c in 0 until CANDIDATES) {
+            val bearing0 = spin + c * 2 * PI / CANDIDATES
+            val waypoints = ArrayList<Pair<Double, Double>>()
+            waypoints.add(Bng.toWgs84(here))
+            for (k in 0..2) {
+                val b = bearing0 + k * 2 * PI / 3
+                val ideal = En(here.e + radius * sin(b), here.n + radius * cos(b))
+                waypoints.add(Bng.toWgs84(snapToPath(ideal, paths, radius * 0.45)))
+            }
+            waypoints.add(Bng.toWgs84(here))
+            progress("Trying route ${c + 1} of $CANDIDATES…")
+            val routed = routeVia(waypoints) ?: continue
+            candidates.add(
+                Candidate(routed.first, routed.second, pathFraction(routed.first, paths)),
+            )
+        }
+        if (candidates.isEmpty()) {
+            return "The foot router couldn't find a loop from here. It is a free shared " +
+                "server, so this may also just be a busy moment — worth one retry."
+        }
+
+        // Greenest wins, with length error as the tie-breaker: a beautifully
+        // green loop of the wrong length is not what was asked for.
+        val best = candidates.maxByOrNull {
+            it.pathFraction - 0.6 * kotlin.math.abs(it.metres - target) / target
+        }!!
+        val note = if (paths.isEmpty()) {
+            "No footpaths or tracks are mapped near here, so this follows whatever is walkable."
+        } else {
+            "${(best.pathFraction * 100).roundToInt()}% of it runs on or beside mapped " +
+                "footpaths, tracks or bridleways" +
+                (if (candidates.size > 1) " — the greenest of ${candidates.size} loops tried." else ".")
+        }
+        return adopt(best.points to best.metres, "Planned ${km(best.metres)} circular", note)
+    }
+
+    /** Save a routed line as the app's route and say so honestly. */
+    private fun adopt(routed: Pair<List<En>, Double>, name: String, note: String?): String {
+        RouteStore.save(ctx, Route(name, routed.first)) // save() banks the old route first
+        return "Route set: ${km(routed.second)}. " + (note?.plus(" ") ?: "") +
+            "It follows paths mapped in OpenStreetMap (FOSSGIS routing) — usually right, " +
+            "not gospel, so worth a glance against the OS map. The previous route is banked; " +
+            "restore_previous_route brings it back."
+    }
+
+    /** One routing call: waypoints in, (line in grid metres, distance) out. */
+    private fun routeVia(waypoints: List<Pair<Double, Double>>): Pair<List<En>, Double>? {
         val coords = waypoints.joinToString(";") { (lat, lon) -> "%.6f,%.6f".format(lon, lat) }
-        val json = Net.get(
-            "https://routing.openstreetmap.de/routed-foot/route/v1/foot/$coords" +
-                "?overview=full&geometries=geojson&steps=false",
-        )
-        val routes = JSONObject(json).optJSONArray("routes")
-        if (routes == null || routes.length() == 0) return "The router found no walkable route between those points."
+        val json = runCatching {
+            Net.get(
+                "https://routing.openstreetmap.de/routed-foot/route/v1/foot/$coords" +
+                    "?overview=full&geometries=geojson&steps=false",
+            )
+        }.getOrNull() ?: return null
+        val routes = JSONObject(json).optJSONArray("routes") ?: return null
+        if (routes.length() == 0) return null
         val best = routes.getJSONObject(0)
         val line = best.getJSONObject("geometry").getJSONArray("coordinates")
         val pts = ArrayList<En>(line.length())
@@ -298,14 +370,93 @@ class GeoTools(
             val c = line.getJSONArray(i)
             pts.add(Bng.fromWgs84(c.getDouble(1), c.getDouble(0)))
         }
-        if (pts.size < 2) return "The router returned an empty line."
-        val dist = best.getDouble("distance")
+        if (pts.size < 2) return null
+        return pts to best.getDouble("distance")
+    }
 
-        val name = if (circularKm > 0) "Planned ${km(dist)} circular" else "Planned walk"
-        RouteStore.save(ctx, Route(name, pts)) // save() banks the old route first
-        return "Route set: ${km(dist)}, following paths mapped in OpenStreetMap (FOSSGIS routing). " +
-            "The previous route is banked — restore_previous_route brings it back. " +
-            "OSM paths are usually right but not gospel: worth a glance against the OS map."
+    /**
+     * Every mapped footpath, track, bridleway and the like near a point, as
+     * straight segments in grid metres. One Overpass query, reused for both
+     * placing the waypoints and scoring the results.
+     */
+    private fun pathSegments(centre: En, searchM: Double): List<Pair<En, En>> {
+        val (lat, lon) = Bng.toWgs84(centre)
+        // One literal with templates: a .format() spanning concatenated
+        // literals binds only to the last one, which is a silent misbuild.
+        val at = "%.5f,%.5f".format(lat, lon)
+        val kinds = "footway|path|track|bridleway|cycleway|steps|pedestrian"
+        val end = "${'$'}" // a bare $ before a quote is not worth risking
+        val query = "[out:json][timeout:25];" +
+            "way[\"highway\"~\"^($kinds)$end\"](around:${searchM.roundToInt()},$at);" +
+            "out geom;"
+        val json = runCatching {
+            Net.post(
+                "https://overpass-api.de/api/interpreter",
+                "data=" + Net.encode(query),
+                "application/x-www-form-urlencoded",
+            )
+        }.getOrNull() ?: return emptyList()
+
+        val segs = ArrayList<Pair<En, En>>()
+        val elements = runCatching { JSONObject(json).getJSONArray("elements") }.getOrNull()
+            ?: return emptyList()
+        for (i in 0 until elements.length()) {
+            val geom = elements.getJSONObject(i).optJSONArray("geometry") ?: continue
+            var prev: En? = null
+            for (j in 0 until geom.length()) {
+                val nd = geom.getJSONObject(j)
+                val en = Bng.fromWgs84(nd.getDouble("lat"), nd.getDouble("lon"))
+                prev?.let { segs.add(it to en) }
+                prev = en
+            }
+        }
+        return segs
+    }
+
+    /** The nearest point on a mapped path, if one is within reach. */
+    private fun snapToPath(ideal: En, paths: List<Pair<En, En>>, withinM: Double): En {
+        var best = ideal
+        var bestD = withinM
+        for ((a, b) in paths) {
+            val p = nearestOnSegment(ideal, a, b)
+            val d = hypot(p.e - ideal.e, p.n - ideal.n)
+            if (d < bestD) {
+                bestD = d
+                best = p
+            }
+        }
+        return best
+    }
+
+    /**
+     * How much of a routed line runs on or beside a mapped path — sampled
+     * every 100 m and counted against the real path geometry, so the figure
+     * is measured rather than guessed.
+     */
+    private fun pathFraction(line: List<En>, paths: List<Pair<En, En>>): Double {
+        if (paths.isEmpty() || line.size < 2) return 0.0
+        val samples = sampleAlong(line, 100.0)
+        if (samples.isEmpty()) return 0.0
+        var on = 0
+        for (s in samples) {
+            for ((a, b) in paths) {
+                val p = nearestOnSegment(s, a, b)
+                if (hypot(p.e - s.e, p.n - s.n) <= NEAR_PATH_M) {
+                    on++
+                    break
+                }
+            }
+        }
+        return on.toDouble() / samples.size
+    }
+
+    private fun nearestOnSegment(p: En, a: En, b: En): En {
+        val dx = b.e - a.e
+        val dy = b.n - a.n
+        val len2 = dx * dx + dy * dy
+        if (len2 <= 0) return a
+        val t = (((p.e - a.e) * dx + (p.n - a.n) * dy) / len2).coerceIn(0.0, 1.0)
+        return En(a.e + t * dx, a.n + t * dy)
     }
 
     fun restorePreviousRoute(): String {

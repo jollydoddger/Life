@@ -71,9 +71,17 @@ class MainActivity : Activity() {
     private lateinit var replyPanel: ScrollView
     private var askBusy = false
     private val assistant by lazy {
-        Assistant(this, GeoTools(this, { lastFix }, {
-            if (lastFixAt == 0L) Long.MAX_VALUE else System.currentTimeMillis() - lastFixAt
-        }))
+        Assistant(
+            this,
+            GeoTools(
+                this,
+                { lastFix },
+                { if (lastFixAt == 0L) Long.MAX_VALUE else System.currentTimeMillis() - lastFixAt },
+                // Planning is several calls to free servers; say what it is
+                // doing rather than leaving a blank screen for half a minute.
+                { note -> runOnUiThread { say(note) } },
+            ),
+        )
     }
 
     private val trailWatcher = object : BroadcastReceiver() {

@@ -282,9 +282,14 @@ class Assistant(private val ctx: Context, private val tools: GeoTools) {
             ),
             tool(
                 "plan_route",
-                "Plan a walking route from his position using the FOSSGIS foot router over " +
-                    "OpenStreetMap paths, and set it as the app's route (the old route is banked). " +
-                    "Give via places, or circular_km for a round walk, or both.",
+                "Plan a walking route from his position and set it as the app's route (the old " +
+                    "one is banked). Give via places for point-to-point, or circular_km for a " +
+                    "round walk. For a circular walk it tries several loops in different " +
+                    "directions, hangs their waypoints off real mapped footpaths, and keeps the " +
+                    "one that runs most on paths and tracks — so it genuinely favours " +
+                    "countryside, and reports the measured percentage. Takes about half a " +
+                    "minute. Distances are in KILOMETRES: convert miles yourself (1 mile = " +
+                    "1.61 km) before calling.",
                 schema(
                     mapOf(
                         "via" to JsonValue.from(
@@ -296,7 +301,8 @@ class Assistant(private val ctx: Context, private val tools: GeoTools) {
                         ),
                         "circular_km" to property(
                             "number",
-                            "Rough length in km for a circular walk returning to his position. 0 or absent for point-to-point.",
+                            "Rough length in KILOMETRES for a circular walk back to his position " +
+                                "(convert from miles first). 0 or absent for point-to-point.",
                         ),
                     ),
                     emptyList(),

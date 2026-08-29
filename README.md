@@ -97,11 +97,15 @@ databases, never from its own head; anything it changes shows as a ✓ receipt.
   Toilet Map for toilets), dropped on the map as markers on both devices.
   Finding nothing is a fact about the database, not the ground — bin coverage
   especially is patchy, because no national bin registry exists.
-- **"Plan me a 6 km circular walk"** — routed over OpenStreetMap paths by the
-  FOSSGIS foot router, never drawn by the model. It replaces the current route
-  (offline tiles fetched, watch updated); *"put my old route back"* undoes it.
-  OSM paths are usually right, not gospel — glance at the OS map before
-  trusting a stile.
+- **"Plan me a 3 mile countryside walk from here"** — and *countryside* is a
+  measurement, not a hope. It fetches the footpaths, tracks and bridleways
+  actually mapped around you, hangs three candidate loops off them in
+  different directions, routes each with the FOSSGIS foot router, and keeps
+  whichever runs most on paths — telling you the figure ("82% on mapped
+  paths"). Takes about half a minute and says what it's doing meanwhile. The
+  loop replaces the current route (offline tiles fetched, watch updated);
+  *"put my old route back"* undoes it. OSM paths are usually right, not
+  gospel — glance at the OS map before trusting a stile.
 - **"Will it rain?" / "how much climbing?"** — Open-Meteo forecast and terrain.
 - **"Where am I?"** — an OS grid reference (the form mountain rescue wants),
   the nearest named place, and today's sunset.
