@@ -36,6 +36,7 @@ import com.jollydoddger.waymark.shared.Prefs.arrowColour
 import com.jollydoddger.waymark.shared.Prefs.assistantEnabled
 import com.jollydoddger.waymark.shared.Prefs.libraryFolder
 import com.jollydoddger.waymark.shared.Prefs.osApiKey
+import com.jollydoddger.waymark.shared.Prefs.prowEnabled
 import com.jollydoddger.waymark.shared.Prefs.tracesEnabled
 import com.jollydoddger.waymark.shared.Prefs.recording
 import com.jollydoddger.waymark.shared.Prefs.routeColour
@@ -316,16 +317,7 @@ class MainActivity : Activity() {
         if (osApiKey.isEmpty()) {
             say("No map without a key — tap here to enter your OS Maps API key")
         }
-        // The traces overlay only exists while its switch is on; off means the
-        // dots are gone and nothing is fetched, not merely hidden.
-        if (tracesEnabled) {
-            map.onViewportSettled = {
-                Traces.refresh(this, map.viewportBounds()) { cells -> map.setTraces(cells) }
-            }
-        } else {
-            map.onViewportSettled = null
-            map.setTraces(emptyList())
-        }
+        bindOverlays()
         if (checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
             locator = Locator(this, { en, stale ->
                 lastFix = en
@@ -391,6 +383,29 @@ class MainActivity : Activity() {
     private fun say(msg: String) {
         status.text = msg
         status.visibility = View.VISIBLE
+    }
+
+    // --- map overlays ---------------------------------------------------------
+
+    /**
+     * Wire whichever overlays are switched on to the map settling. Switched
+     * off means gone and nothing fetched, not merely hidden — one settle
+     * hook serves both, so neither can quietly disable the other.
+     */
+    private fun bindOverlays() {
+        val wantTraces = tracesEnabled
+        val wantProw = prowEnabled
+        if (!wantTraces) map.setTraces(emptyList())
+        if (!wantProw) map.setProw(emptyList())
+        if (!wantTraces && !wantProw) {
+            map.onViewportSettled = null
+            return
+        }
+        map.onViewportSettled = {
+            val bounds = map.viewportBounds()
+            if (wantTraces) Traces.refresh(this, bounds) { cells -> map.setTraces(cells) }
+            if (wantProw) Prow.refresh(this, bounds) { lines -> map.setProw(lines) }
+        }
     }
 
     // --- offline area download -----------------------------------------------

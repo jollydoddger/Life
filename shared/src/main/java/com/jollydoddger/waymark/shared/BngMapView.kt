@@ -24,6 +24,13 @@ import kotlin.math.pow
 import kotlin.math.roundToInt
 
 /**
+ * One public right of way: its geometry in grid metres as [e0,n0,e1,n1,…]
+ * and which kind of right it carries, since a bridleway and a footpath are
+ * not the same permission.
+ */
+class ProwLine(val kind: Int, val pts: FloatArray)
+
+/**
  * The map: OS Leisure tiles, the route line with direction arrows, and the
  * you-arrow — all in British National Grid metres with a plain linear
  * transform to the screen. North-up always; it is a paper map.
@@ -100,6 +107,17 @@ class BngMapView @JvmOverloads constructor(
         traceCells = cells
         val largest = cells.maxOfOrNull { it.size } ?: 0
         if (traceScratch.size < largest) traceScratch = FloatArray(largest)
+        invalidate()
+    }
+
+    /**
+     * Public rights of way (phone only): what he is legally entitled to
+     * walk, drawn over the traces but under his own route and trail.
+     */
+    private var prowLines: List<ProwLine> = emptyList()
+
+    fun setProw(lines: List<ProwLine>) {
+        prowLines = lines
         invalidate()
     }
 
@@ -268,6 +286,7 @@ class BngMapView @JvmOverloads constructor(
         canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), bgPaint)
         drawTiles(canvas)
         drawTraces(canvas)
+        drawProw(canvas)
         drawTrail(canvas)
         drawRoute(canvas)
         drawPreview(canvas)
@@ -352,6 +371,54 @@ class BngMapView @JvmOverloads constructor(
         // self-stopping the moment the cells are cleared.
         removeCallbacks(tracePulse)
         postDelayed(tracePulse, 50)
+    }
+
+    // A right of way per kind, because the permissions differ: green for a
+    // footpath, amber for a bridleway, purple for a restricted byway, brown
+    // for one open to all traffic. Kept translucent so the OS map's own
+    // green dashes stay readable underneath — where the two disagree, the
+    // printed map is the one to believe.
+    private val prowCasing = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE; color = Color.argb(170, 255, 255, 255)
+        strokeJoin = Paint.Join.ROUND; strokeCap = Paint.Cap.ROUND
+    }
+    private val prowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeJoin = Paint.Join.ROUND; strokeCap = Paint.Cap.ROUND
+    }
+    private val prowColours = intArrayOf(
+        Color.argb(205, 20, 145, 55), // public footpath
+        Color.argb(205, 224, 138, 16), // public bridleway
+        Color.argb(205, 138, 62, 180), // restricted byway
+        Color.argb(205, 150, 74, 40), // byway open to all traffic
+    )
+
+    private fun drawProw(canvas: Canvas) {
+        if (prowLines.isEmpty()) return
+        val m = mpp(zl)
+        // Casing for every line first, so one path's halo cannot sit on top
+        // of a neighbouring path's colour.
+        prowCasing.strokeWidth = 9f * density
+        for (pass in 0..1) {
+            for (line in prowLines) {
+                val pts = line.pts
+                if (pts.size < 4) continue
+                path.rewind()
+                path.moveTo(sx(pts[0].toDouble(), m), sy(pts[1].toDouble(), m))
+                var i = 2
+                while (i + 1 < pts.size) {
+                    path.lineTo(sx(pts[i].toDouble(), m), sy(pts[i + 1].toDouble(), m))
+                    i += 2
+                }
+                if (pass == 0) {
+                    canvas.drawPath(path, prowCasing)
+                } else {
+                    prowPaint.color = prowColours[line.kind.coerceIn(0, prowColours.size - 1)]
+                    prowPaint.strokeWidth = 5f * density
+                    canvas.drawPath(path, prowPaint)
+                }
+            }
+        }
     }
 
     private val previewCasing = Paint(Paint.ANTI_ALIAS_FLAG).apply {

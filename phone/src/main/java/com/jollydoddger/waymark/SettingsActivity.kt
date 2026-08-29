@@ -24,6 +24,7 @@ import com.jollydoddger.waymark.shared.Prefs.anthropicKey
 import com.jollydoddger.waymark.shared.Prefs.arrowColour
 import com.jollydoddger.waymark.shared.Prefs.assistantEnabled
 import com.jollydoddger.waymark.shared.Prefs.osApiKey
+import com.jollydoddger.waymark.shared.Prefs.prowEnabled
 import com.jollydoddger.waymark.shared.Prefs.routeColour
 import com.jollydoddger.waymark.shared.Prefs.screenTimeoutSec
 import com.jollydoddger.waymark.shared.Prefs.tracesEnabled
@@ -254,6 +255,32 @@ class SettingsActivity : Activity() {
                 "answers recency; Strava's heatmap isn't licensable at any price."
         }
 
+        val prowSwitch = Switch(this).apply {
+            text = "  Rights of way"
+            textSize = 16f
+            isChecked = prowEnabled
+            setOnCheckedChangeListener { _, on ->
+                prowEnabled = on
+                result.text = if (on) {
+                    "Rights of way on — they draw in as you browse."
+                } else {
+                    "Rights of way off."
+                }
+            }
+        }
+        val prowNote = TextView(this).apply {
+            textSize = 13f
+            text = "The paths you are legally entitled to walk, drawn bold: green " +
+                "footpaths, amber bridleways, purple restricted byways, brown byways " +
+                "open to all traffic. Phone only, cached as you browse.\n\n" +
+                "This comes from OpenStreetMap's record of what each council's " +
+                "definitive map says — one source covering every council in England " +
+                "and Wales, rather than a different feed per authority. It is a copy " +
+                "of the legal record, not the record itself, and the OS map " +
+                "underneath draws the same paths in green dashes: where the two " +
+                "disagree, believe the printed map."
+        }
+
         val col = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(20), dp(28), dp(20), dp(20))
@@ -273,8 +300,12 @@ class SettingsActivity : Activity() {
                 LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT,
             ))
 
-            addView(heading("Map overlay"))
-            addView(tracesSwitch)
+            addView(heading("Map overlays"))
+            addView(prowSwitch)
+            addView(prowNote)
+            addView(tracesSwitch, LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT,
+            ).apply { topMargin = dp(16) })
             addView(tracesNote)
 
             addView(heading("Route line"))

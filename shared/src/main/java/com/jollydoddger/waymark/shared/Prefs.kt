@@ -71,6 +71,14 @@ object Prefs {
         get() = p(this).getBoolean("tracesEnabled", false)
         set(v) = p(this).edit().putBoolean("tracesEnabled", v).apply()
 
+    /**
+     * Public rights of way (phone only). Off by default like every overlay:
+     * the OS map already draws them, and this is the loud version.
+     */
+    var Context.prowEnabled: Boolean
+        get() = p(this).getBoolean("prowEnabled", false)
+        set(v) = p(this).edit().putBoolean("prowEnabled", v).apply()
+
     var Context.osApiKey: String
         get() = p(this).getString("osApiKey", "") ?: ""
         set(v) = p(this).edit().putString("osApiKey", v.trim()).apply()

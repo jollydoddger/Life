@@ -125,6 +125,22 @@ Two sources, searched together:
   route website — their terms forbid it, and it would put your accounts at
   risk. Rescan from the same menu after adding files.
 
+## Rights of way (optional, off by default)
+
+A switch in ⚙ draws the paths you are **legally entitled to walk**, bold and
+colour-coded: green public footpaths, amber bridleways, purple restricted
+byways, brown byways open to all traffic. Cached as you browse, so a
+revisited area works with no signal.
+
+The source is OpenStreetMap's record of what each council's definitive map
+says — the `designation` tagging used across England and Wales. That means
+one source covering every council at once, instead of a different feed,
+schema and licence per authority. It is a *copy* of the legal record rather
+than the record itself, and the honest check is built into the screen: OS
+Explorer draws the same paths in green dashes underneath, so where the two
+disagree, believe the printed map. For a formal question — a blocked path, a
+diversion order — the council's own definitive map is the only authority.
+
 ## Where people have walked (optional, off by default)
 
 A switch in ⚙ draws flashing red dots on the phone's map wherever anyone has
