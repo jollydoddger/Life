@@ -424,6 +424,13 @@ class BngMapView @JvmOverloads constructor(
     private var radarBaseAlpha = 235
     private var fieldBaseAlpha = 150
 
+    // Declared above [applyWeatherAlpha] rather than beside the field drawing
+    // it belongs to, because that function dereferences it. Both its callers
+    // happen to be public and post-construction today, so the order is safe
+    // by luck; anything calling it from an init block or onSizeChanged would
+    // get a null on a non-null property, with no warning of any kind.
+    private var fieldPaint = Paint(Paint.FILTER_BITMAP_FLAG).apply { alpha = 150 }
+
     fun setWeatherOpacity(percent: Int) {
         weatherOpacity = (percent.coerceIn(0, 100)) / 100f
         applyWeatherAlpha()
@@ -472,7 +479,6 @@ class BngMapView @JvmOverloads constructor(
      * colour washes over each other say nothing legible.
      */
     private var fieldTile: MeshTile? = null
-    private var fieldPaint = Paint(Paint.FILTER_BITMAP_FLAG).apply { alpha = 150 }
 
     fun setField(tile: MeshTile?, alpha: Int) {
         fieldTile = tile
@@ -549,7 +555,12 @@ class BngMapView @JvmOverloads constructor(
         for (a in windArrows) {
             val x = sx(a.e, m)
             val y = sy(a.n, m)
-            if (x < -40 || y < -40 || x > width + 40 || y > height + 40) continue
+            // In pixels this margin was smaller than the arrows themselves
+            // on a dense screen, so an arrow with half of it still on screen
+            // was dropped — visible as arrows popping in at the edges after
+            // a pan.
+            val edge = 48f * density
+            if (x < -edge || y < -edge || x > width + edge || y > height + edge) continue
             // Downwind: where it is going, not where it came from. True north
             // rather than grid north — the convergence is a couple of degrees
             // in Wales, far below what an arrow this size can show.

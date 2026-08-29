@@ -53,7 +53,13 @@ object Weather {
         val windDir: Array<DoubleArray>,
         val south: Double, val west: Double, val north: Double, val east: Double,
     ) {
-        /** The hour nearest a moment on the scrubber. */
+        /**
+         * The hour nearest a moment on the scrubber, or -1 if the nearest one
+         * is not near. The tolerance is the honest half: without it a frame
+         * five hours outside the data was painted with the edge hour's
+         * values and labelled with its own time — a reading from the wrong
+         * afternoon, presented as this one.
+         */
         fun hourIndex(timeMs: Long): Int {
             if (timesMs.isEmpty()) return -1
             var best = 0
@@ -62,10 +68,17 @@ object Weather {
                 val g = kotlin.math.abs(timesMs[i] - timeMs)
                 if (g < gap) { gap = g; best = i }
             }
-            return best
+            return if (gap <= TOLERANCE_MS) best else -1
         }
 
         fun hours(): List<Long> = timesMs.toList()
+
+        companion object {
+            /** How far from an hour a moment may sit and still be described
+             *  by it. Radar frames land on ten-minute marks, so a shade over
+             *  half an hour covers every legitimate case and nothing else. */
+            private const val TOLERANCE_MS = 40 * 60_000L
+        }
     }
 
     private var cached: Field? = null
@@ -84,7 +97,11 @@ object Weather {
     ) {
         val box = latLonBox(boundsEn)
         // Rounded to about a kilometre: a nudge of the map is not a new sky.
-        val key = "%.2f,%.2f,%.2f,%.2f".format(box[0], box[1], box[2], box[3])
+        // Locale.UK explicitly, here and in the URL below: String.format
+        // uses the default locale, and in a comma-decimal one "53.12" becomes
+        // "53,12" — which in a comma-separated coordinate list is not a typo
+        // the server can see, it is a different request.
+        val key = "%.2f,%.2f,%.2f,%.2f".format(java.util.Locale.UK, box[0], box[1], box[2], box[3])
         synchronized(this) {
             val f = cached
             if (f != null && key == cachedKey && System.currentTimeMillis() - cachedAt < TTL_MS) {
@@ -137,8 +154,8 @@ object Weather {
                 lat[i] = north - (north - south) * r / (GRID - 1)
                 lon[i] = west + (east - west) * c / (GRID - 1)
                 if (i > 0) { lats.append(','); lons.append(',') }
-                lats.append("%.4f".format(lat[i]))
-                lons.append("%.4f".format(lon[i]))
+                lats.append("%.4f".format(java.util.Locale.UK, lat[i]))
+                lons.append("%.4f".format(java.util.Locale.UK, lon[i]))
             }
         }
 
@@ -171,9 +188,20 @@ object Weather {
         val temp = grid(); val rain = grid(); val cloud = grid()
         val wind = grid(); val dir = grid()
 
-        for (p in places.indices) {
-            if (p >= GRID * GRID) break
-            val h = places[p].optJSONObject("hourly") ?: continue
+        for (place in places) {
+            val h = place.optJSONObject("hourly") ?: continue
+            // Which grid point this actually is, read off the answer rather
+            // than assumed from its position in it. If the ordering is ever
+            // not the order asked for, position-trusting would scramble the
+            // field into something that still looks like weather and is in
+            // the wrong places — a failure with nothing on screen to show
+            // for it. Falling back to the position keeps the old behaviour
+            // for a response that omits the coordinates.
+            val p = place.optDouble("latitude", Double.NaN).let { la ->
+                val lo = place.optDouble("longitude", Double.NaN)
+                if (la.isNaN() || lo.isNaN()) places.indexOf(place) else nearestPoint(lat, lon, la, lo)
+            }
+            if (p < 0 || p >= GRID * GRID) continue
             fun pull(name: String, into: Array<DoubleArray>) {
                 val a = h.optJSONArray(name) ?: return
                 for (t in 0 until minOf(hours, a.length())) into[t][p] = a.optDouble(t, Double.NaN)
@@ -185,6 +213,19 @@ object Weather {
             pull("wind_direction_10m", dir)
         }
         return Field(timesMs, lat, lon, temp, rain, cloud, wind, dir, south, west, north, east)
+    }
+
+    /** The grid point a returned location belongs to. Open-Meteo snaps a
+     *  request to its own grid, so the coordinates come back close but not
+     *  identical — nearest, not equal. */
+    private fun nearestPoint(lat: DoubleArray, lon: DoubleArray, la: Double, lo: Double): Int {
+        var best = -1
+        var bestD = Double.MAX_VALUE
+        for (i in lat.indices) {
+            val d = (lat[i] - la) * (lat[i] - la) + (lon[i] - lo) * (lon[i] - lo)
+            if (d < bestD) { bestD = d; best = i }
+        }
+        return best
     }
 
     // --- rendering -----------------------------------------------------------

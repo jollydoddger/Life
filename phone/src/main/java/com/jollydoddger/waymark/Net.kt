@@ -21,7 +21,7 @@ object Net {
         conn.setRequestProperty("User-Agent", UA)
         try {
             val code = conn.responseCode
-            if (code != 200) throw RuntimeException("HTTP $code from ${URL(url).host}")
+            if (code != 200) throw HttpError(code, URL(url).host)
             return conn.inputStream.use { it.readBytes().decodeToString() }
         } finally {
             conn.disconnect()
@@ -41,7 +41,7 @@ object Net {
         conn.setRequestProperty("Accept-Encoding", "gzip")
         try {
             val code = conn.responseCode
-            if (code != 200) throw RuntimeException("HTTP $code from ${URL(url).host}")
+            if (code != 200) throw HttpError(code, URL(url).host)
             val raw = conn.inputStream
             val body = if (conn.contentEncoding?.contains("gzip", true) == true) {
                 java.util.zip.GZIPInputStream(raw)
@@ -54,6 +54,15 @@ object Net {
         }
     }
 
+    /**
+     * A server that answered, and said no. Distinct from a dropped
+     * connection on purpose: a 404 means *this URL* is wrong and will stay
+     * wrong, while a timeout on a hill means nothing about the URL at all.
+     * Anything that decides to stop asking for something needs to know which
+     * of those it just saw.
+     */
+    class HttpError(val code: Int, val host: String) : RuntimeException("HTTP $code from $host")
+
     /** A small binary fetch — radar tiles, nothing else so far. */
     fun getBytes(url: String, timeoutMs: Int = 20_000): ByteArray {
         val conn = URL(url).openConnection() as HttpURLConnection
@@ -62,7 +71,7 @@ object Net {
         conn.setRequestProperty("User-Agent", UA)
         try {
             val code = conn.responseCode
-            if (code != 200) throw RuntimeException("HTTP $code from ${URL(url).host}")
+            if (code != 200) throw HttpError(code, URL(url).host)
             return conn.inputStream.use { it.readBytes() }
         } finally {
             conn.disconnect()
@@ -80,7 +89,7 @@ object Net {
         try {
             conn.outputStream.use { it.write(body.toByteArray()) }
             val code = conn.responseCode
-            if (code != 200) throw RuntimeException("HTTP $code from ${URL(url).host}")
+            if (code != 200) throw HttpError(code, URL(url).host)
             return conn.inputStream.use { it.readBytes().decodeToString() }
         } finally {
             conn.disconnect()

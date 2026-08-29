@@ -6,6 +6,7 @@ import android.app.AlertDialog
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Color
+import android.graphics.Rect
 import android.net.Uri
 import android.content.BroadcastReceiver
 import android.content.Context
@@ -102,6 +103,15 @@ class MainActivity : Activity() {
     private lateinit var wxFade: SeekBar
     private lateinit var wxLegend: LinearLayout
     private var legendKey = ""
+
+    /**
+     * Whether this screen is still the one on the phone. Radar and Weather
+     * are process-wide objects holding a main-thread handler, and every
+     * callback closes over this activity — so a rotation mid-fetch leaves
+     * their callbacks holding a dead activity and its whole view tree for up
+     * to half a minute, doing work nobody will see.
+     */
+    private var alive = true
     private var wxFrames: List<WxFrame> = emptyList()
     private var wxIndex = 0
     private var radarFrames: List<WxFrame> = emptyList()
@@ -246,9 +256,25 @@ class MainActivity : Activity() {
             setTextColor(Color.WHITE)
             textSize = 13f
             setPadding(dp(14), dp(6), dp(14), 0)
+            // One line, always. "14:20 · in 40 min · radar nowcast · 14°C ·
+            // SW 18 mph · 62% cloud" wraps to two and drops back to one as
+            // the readings come and go — and since the bar is wrap-height at
+            // the bottom of the stack, that moves the scrubber vertically
+            // under the finger dragging it.
+            setSingleLine(true)
+            ellipsize = android.text.TextUtils.TruncateAt.END
         }
         wxSeek = SeekBar(this).apply {
             setPadding(dp(14), dp(2), dp(14), dp(6))
+            // At the far left the thumb sits about 25dp in, low down the
+            // screen — squarely in the back-swipe strip on a phone with
+            // gesture navigation. Grabbing the oldest frame should not throw
+            // him out of the map.
+            if (Build.VERSION.SDK_INT >= 29) {
+                addOnLayoutChangeListener { v, _, _, _, _, _, _, _, _ ->
+                    v.systemGestureExclusionRects = listOf(Rect(0, 0, v.width, v.height))
+                }
+            }
             setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
                 override fun onProgressChanged(bar: SeekBar?, value: Int, fromUser: Boolean) {
                     if (fromUser) showWxFrame(value)
@@ -261,16 +287,28 @@ class MainActivity : Activity() {
         // is doing to the map — judging it from a settings screen with no map
         // on it is guesswork.
         wxFade = SeekBar(this).apply {
+            // Floored at the same 10 the stored setting is floored at. It
+            // used to run to zero, so dragging the weather away entirely and
+            // coming back tomorrow found it faintly there again, with nothing
+            // on screen to explain the difference.
+            min = 10
             max = 100
             progress = weatherOpacity
             setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
                 override fun onProgressChanged(bar: SeekBar?, value: Int, fromUser: Boolean) {
-                    if (!fromUser) return
-                    weatherOpacity = value
-                    map.setWeatherOpacity(value)
+                    // The map follows the finger; the *setting* is written
+                    // once, when the finger comes off. A sweep is up to
+                    // ninety steps, and every one of them was a full
+                    // preferences rewrite whose backlog is drained
+                    // synchronously on the way out of the screen — so the
+                    // stall landed when he left the map, nowhere near the
+                    // drag that caused it.
+                    if (fromUser) map.setWeatherOpacity(value)
                 }
                 override fun onStartTrackingTouch(bar: SeekBar?) { }
-                override fun onStopTrackingTouch(bar: SeekBar?) { }
+                override fun onStopTrackingTouch(bar: SeekBar?) {
+                    weatherOpacity = bar?.progress ?: return
+                }
             })
         }
         val wxTopRow = LinearLayout(this).apply {
@@ -310,8 +348,14 @@ class MainActivity : Activity() {
             addView(wxBar, LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT,
             ))
+            // The weight is a shrink-only lever here: the stack wraps its
+            // height, so there is never spare room to grow into, only a
+            // shortfall to take off somebody. Without it the shortfall came
+            // off the last child — the ask bar, the thing he is typing into.
+            // With the scrubber, a reply and a keyboard all up at once on a
+            // short screen, the reply gives way instead.
             addView(replyPanel, LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, dp(210),
+                LinearLayout.LayoutParams.MATCH_PARENT, dp(210), 1f,
             ))
             addView(askBar, LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT,
@@ -446,9 +490,17 @@ class MainActivity : Activity() {
     }
 
     override fun onDestroy() {
+        alive = false
         voice.dispose()
         scope.cancel()
         super.onDestroy()
+    }
+
+    override fun onTrimMemory(level: Int) {
+        super.onTrimMemory(level)
+        // Two dozen decoded radar frames is real memory. The sky will still
+        // be there; they cost one re-fetch each.
+        if (level >= android.content.ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW) Radar.trim()
     }
 
     private fun toggleRecording() {
@@ -540,7 +592,8 @@ class MainActivity : Activity() {
         // The frame catalogue is a property of the sky, not of the viewport,
         // so it is asked for once here rather than on every pan.
         if (wantRadar) {
-            Radar.catalogue({ note -> sayBriefly(note) }) { frames ->
+            Radar.catalogue({ note -> if (alive) sayBriefly(note) }) { frames ->
+                if (!alive) return@catalogue
                 radarFrames = frames
                 rebuildWxFrames()
             }
@@ -558,7 +611,8 @@ class MainActivity : Activity() {
                 Traces.refresh(this, bounds, { note -> sayBriefly(note) }) { cells -> map.setTraces(cells) }
             }
             if (wantWeather) {
-                Weather.refresh(bounds, { note -> sayBriefly(note) }) { field ->
+                Weather.refresh(bounds, { note -> if (alive) sayBriefly(note) }) { field ->
+                    if (!alive) return@refresh
                     wxField = field
                     rebuildWxFrames()
                 }
@@ -632,15 +686,26 @@ class MainActivity : Activity() {
         val frame = wxFrames[wxIndex]
         // The catalogue can land before the map has been measured, and a
         // viewport of nothing asks for the wrong tiles. The label is still
-        // worth setting; the drawing waits for the layout pass, which calls
-        // straight back here.
+        // worth setting, and the drawing is booked for after the layout pass
+        // — nothing else was going to come back for it, so a cold start whose
+        // radar arrived first showed a timeline over an empty map until he
+        // happened to pan.
         if (map.width == 0 || map.height == 0) {
             wxLabel.text = frameLabel(frame)
+            map.post { if (alive && map.width > 0 && map.height > 0) showWxFrame(wxIndex) }
             return
         }
         val bounds = map.viewportBounds()
         if (radarEnabled) {
-            Radar.tiles(bounds, frame) { tiles -> map.setRadar(tiles) }
+            Radar.tiles(bounds, frame) { tiles ->
+                if (!alive) return@tiles
+                map.setRadar(tiles)
+                // A refusal only becomes known once a fetch has been tried,
+                // so the key is asked again on the way back: this is the one
+                // path that changes the effective scale without anything
+                // else on screen changing.
+                showLegend(frame, wxField != null && (wxField?.hourIndex(frame.timeMs) ?: -1) >= 0)
+            }
             val ahead = ArrayList<WxFrame>()
             for (d in intArrayOf(1, 2, -1, 3)) {
                 val j = wxIndex + d
@@ -667,33 +732,52 @@ class MainActivity : Activity() {
      * the real palette would be worse than none.
      */
     private fun showLegend(frame: WxFrame, haveField: Boolean) {
-        val key = when {
-            radarEnabled && frame.radarPath != null -> "radar${Radar.scheme}"
-            !haveField -> ""
-            radarEnabled && frame.radarPath == null -> "rain"
-            tempEnabled -> "temp"
-            cloudEnabled -> "cloud"
-            else -> ""
-        }
+        val wash = if (haveField) washKind(frame) else ""
+        // Radar and a wash can be on the map together — rain from RainViewer
+        // over a temperature field — so the key names both. It used to name
+        // only the radar, which left a blue-to-red field across his map with
+        // nothing anywhere saying what it meant.
+        val radar = if (radarEnabled && frame.radarPath != null) Radar.schemeNow() else 0
+        // The scale named is the one actually being fetched. If the server
+        // refused his choice, the tiles are the fallback's colours and a key
+        // still naming his preference is a key that describes nothing on the
+        // screen.
+        val key = "$radar/$wash"
         if (key == legendKey) return
         legendKey = key
         wxLegend.removeAllViews()
-        wxLegend.visibility = if (key.isEmpty()) View.GONE else View.VISIBLE
-        when {
-            key.startsWith("radar") -> wxLegend.addView(legendNote(RADAR_SCALES[Radar.scheme] ?: "RainViewer"))
-            key == "rain" -> {
+        wxLegend.visibility = if (radar == 0 && wash.isEmpty()) View.GONE else View.VISIBLE
+        if (radar != 0) wxLegend.addView(legendNote(RADAR_SCALES[radar] ?: "RainViewer"))
+        when (wash) {
+            "rain" -> {
                 wxLegend.addView(legendNote("Forecast rain"))
                 for ((mm, name) in RAIN_KEY) wxLegend.addView(legendChip(name, Ramp.rain(mm)))
             }
-            key == "temp" -> for (c in intArrayOf(0, 8, 15, 22, 28)) {
-                wxLegend.addView(legendChip("$c°", Ramp.temperature(c.toDouble())))
+            "temp" -> {
+                wxLegend.addView(legendNote("Temp"))
+                for (c in intArrayOf(0, 8, 15, 22, 28)) {
+                    wxLegend.addView(legendChip("$c°", Ramp.temperature(c.toDouble())))
+                }
             }
-            key == "cloud" -> {
+            "cloud" -> {
+                wxLegend.addView(legendNote("Cloud"))
                 wxLegend.addView(legendChip("clear", Ramp.cloud(0.0)))
                 wxLegend.addView(legendChip("half", Ramp.cloud(55.0)))
                 wxLegend.addView(legendChip("dull", Ramp.cloud(100.0)))
             }
         }
+    }
+
+    /**
+     * Which single wash this frame gets, decided once. Both the painting and
+     * the key read this, because the two disagreeing is how a colour ends up
+     * on the map with no words for it.
+     */
+    private fun washKind(frame: WxFrame): String = when {
+        radarEnabled && frame.radarPath == null -> "rain"
+        tempEnabled -> "temp"
+        cloudEnabled -> "cloud"
+        else -> ""
     }
 
     private fun legendNote(text: String): TextView = TextView(this).apply {
@@ -738,13 +822,10 @@ class MainActivity : Activity() {
             Weather.render(values, ramp),
             field.south, field.west, field.north, field.east,
         )
-        when {
-            radarEnabled && frame.radarPath == null ->
-                map.setField(tile(field.rain[hour]) { Ramp.rain(it) }, 255)
-            tempEnabled ->
-                map.setField(tile(field.temp[hour]) { Ramp.temperature(it) }, 125)
-            cloudEnabled ->
-                map.setField(tile(field.cloud[hour]) { Ramp.cloud(it) }, 255)
+        when (washKind(frame)) {
+            "rain" -> map.setField(tile(field.rain[hour]) { Ramp.rain(it) }, 255)
+            "temp" -> map.setField(tile(field.temp[hour]) { Ramp.temperature(it) }, 125)
+            "cloud" -> map.setField(tile(field.cloud[hour]) { Ramp.cloud(it) }, 255)
             else -> map.setField(null, 255)
         }
     }
