@@ -33,9 +33,11 @@ class WeatherFieldTest {
 
     @Test fun `a radar frame off the hour still lands on one`() {
         val f = field(0L, 6)
-        // Radar publishes on ten-minute marks, so every frame is within
-        // half an hour of an hour and must always resolve.
-        for (m in 0 until 6 * 60 step 10) {
+        // Radar publishes on ten-minute marks, and the forecast always
+        // spans well past the radar's own window, so every frame lands
+        // inside an hour and must always resolve. Walking past the last
+        // hour is the tolerance doing its job, not this case.
+        for (m in 0..5 * 60 step 10) {
             assertEquals(true, f.hourIndex(m * 60_000L) >= 0)
         }
     }
