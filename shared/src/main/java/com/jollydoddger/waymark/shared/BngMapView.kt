@@ -98,6 +98,27 @@ class BngMapView @JvmOverloads constructor(
     }
 
     /**
+     * Mark-points mode: while on, a tap picks the nearest point of the route
+     * instead of zooming. A mode rather than tap-proximity guessing — his
+     * design, and the better one: a mode you switched on cannot fire by
+     * accident, and it steals nothing from the zoom gestures when off.
+     */
+    var pickMode = false
+        set(v) { field = v; invalidate() }
+
+    /** Called with the snapped route point and its distance along the route
+     *  (from the route's stored start, ignoring direction). */
+    var onRoutePointPicked: ((En, Double) -> Unit)? = null
+
+    /** Numbered flags at his marked points. */
+    private var marks: List<Pair<En, Int>> = emptyList()
+
+    fun setMarks(list: List<Pair<En, Int>>) {
+        marks = list
+        invalidate()
+    }
+
+    /**
      * Public GPS traces (phone only): each cell is a flat [e0,n0,e1,n1,…]
      * array of dots, drawn under everything the app itself owns.
      */
@@ -328,6 +349,7 @@ class BngMapView @JvmOverloads constructor(
         drawTrail(canvas)
         drawPreview(canvas)
         drawPois(canvas)
+        drawMarks(canvas)
         drawStreamlines(canvas)
         drawWind(canvas)
         drawHere(canvas)
@@ -1010,6 +1032,54 @@ class BngMapView @JvmOverloads constructor(
 
     // --- touch --------------------------------------------------------------
 
+    /**
+     * Snap a tapped screen point to the nearest drawn route vertex within a
+     * generous thumb's reach. Nothing near enough is a no-op rather than a
+     * zoom: while the mode is on, a tap means "this point", or nothing.
+     */
+    private fun pickAt(x: Float, y: Float) {
+        if (routePts.isEmpty()) return
+        val m = mpp(zl)
+        val e = (x - width / 2f) * m + centreE
+        val n = centreN - (y - height / 2f) * m
+        var best = -1
+        var bestD = Double.MAX_VALUE
+        for (i in routePts.indices) {
+            val d = hypot(routePts[i].e - e, routePts[i].n - n)
+            if (d < bestD) { bestD = d; best = i }
+        }
+        // 28dp of screen, in metres at this zoom.
+        if (best < 0 || bestD > 28.0 * density * m) return
+        performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK)
+        onRoutePointPicked?.invoke(routePts[best], cumDist[best])
+    }
+
+    private val markFill = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.rgb(178, 44, 38) }
+    private val markRing = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE; color = Color.WHITE
+    }
+    private val markText = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.WHITE
+        textAlign = Paint.Align.CENTER
+        isFakeBoldText = true
+    }
+
+    private fun drawMarks(canvas: Canvas) {
+        if (marks.isEmpty()) return
+        val m = mpp(zl)
+        val r = 11f * density
+        markRing.strokeWidth = 2.5f * density
+        markText.textSize = 12f * density
+        for ((en, number) in marks) {
+            val x = sx(en.e, m)
+            val y = sy(en.n, m)
+            if (x < -r || y < -r || x > width + r || y > height + r) continue
+            canvas.drawCircle(x, y, r, markFill)
+            canvas.drawCircle(x, y, r, markRing)
+            canvas.drawText("$number", x, y + 4.2f * density, markText)
+        }
+    }
+
     private val gestures = GestureDetector(context, object : GestureDetector.SimpleOnGestureListener() {
         override fun onDown(e: MotionEvent) = true
         override fun onScroll(e1: MotionEvent?, e2: MotionEvent, dx: Float, dy: Float): Boolean {
@@ -1026,6 +1096,10 @@ class BngMapView @JvmOverloads constructor(
         // swipe-to-dismiss, so intercepting it for zoom would take away the
         // way out of the app. The screen is the honest place for it.
         override fun onSingleTapUp(e: MotionEvent): Boolean {
+            if (pickMode) {
+                pickAt(e.x, e.y)
+                return true
+            }
             zoomStep(e, +1.0)
             return true
         }

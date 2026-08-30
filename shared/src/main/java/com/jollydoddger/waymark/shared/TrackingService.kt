@@ -37,8 +37,9 @@ import com.jollydoddger.waymark.shared.Prefs.warmUntil
  * alive (which also keeps getLastKnownLocation fresh, so the locator's
  * seed on reopen is current rather than stale), records nothing, and stops
  * itself when [warmUntil] passes — a deadline the watch activity stamps
- * ninety minutes past every glance. The phone never sets the deadline, so
- * the phone never runs warm.
+ * ninety minutes past every glance — and the phone stamps it too when a
+ * marked-point buzz is armed without a recording running, since a buzz
+ * that needs the app open is a promise about missed turns nobody can keep.
  *
  * Deliberately NOT using ACCESS_BACKGROUND_LOCATION: the service is only ever
  * started from the visible activity, which is exactly the case Android allows
@@ -62,6 +63,9 @@ class TrackingService : Service() {
         const val BROADCAST_TRAIL = "waymark.trail.changed"
 
         private const val WARM_CHECK_MS = 60_000L
+
+        const val MARK_CHANNEL = "waymark_marks"
+        private const val MARK_NOTIFICATION_BASE = 4200
 
         /** Warm fixes are slow on purpose: enough to hold the lock, far
          *  lighter than the 1-second foreground locator. */
@@ -98,13 +102,52 @@ class TrackingService : Service() {
     private var tracking = false
 
     private val listener = LocationListener { loc: Location ->
-        // Warm mode records nothing: the fixes exist to keep the chipset
-        // lock and getLastKnownLocation fresh, never to grow the trail.
-        if (!tracking) return@LocationListener
         if (loc.hasAccuracy() && loc.accuracy > WORST_ACCURACY_M) return@LocationListener
-        if (TrailStore.add(this, Bng.fromWgs84(loc.latitude, loc.longitude))) {
+        val en = Bng.fromWgs84(loc.latitude, loc.longitude)
+        // The marked-point buzz fires in either mode: a hold that exists
+        // because he armed a mark must be able to deliver it.
+        Marks.arrivedAt(this, en)?.let { buzz(it) }
+        // Warm mode records nothing beyond that: the fixes exist to keep
+        // the chipset lock and getLastKnownLocation fresh, never the trail.
+        if (!tracking) return@LocationListener
+        if (TrailStore.add(this, en)) {
             sendBroadcast(Intent(BROADCAST_TRAIL).setPackage(packageName))
         }
+    }
+
+    /**
+     * The point he asked not to miss, arriving as a buzz he cannot. High
+     * importance with vibration — this is the one notification in the app
+     * that exists to interrupt — and the mark clears itself, so it fires
+     * once, not every four seconds while he stands on it.
+     */
+    private fun buzz(mark: Mark) {
+        Marks.removeAny(this, mark.number)
+        sendBroadcast(Intent(BROADCAST_TRAIL).setPackage(packageName))
+        val nm = getSystemService(NotificationManager::class.java)
+        if (nm.getNotificationChannel(MARK_CHANNEL) == null) {
+            nm.createNotificationChannel(
+                NotificationChannel(
+                    MARK_CHANNEL, "Marked point reached", NotificationManager.IMPORTANCE_HIGH,
+                ).apply {
+                    enableVibration(true)
+                    vibrationPattern = longArrayOf(0, 400, 200, 400, 200, 600)
+                },
+            )
+        }
+        val open = packageManager.getLaunchIntentForPackage(packageName)?.let {
+            PendingIntent.getActivity(this, 2, it, PendingIntent.FLAG_IMMUTABLE)
+        }
+        nm.notify(
+            MARK_NOTIFICATION_BASE + mark.number,
+            Notification.Builder(this, MARK_CHANNEL)
+                .setContentTitle("You're at mark ${mark.number}")
+                .setContentText("The point you flagged on the route is here.")
+                .setSmallIcon(android.R.drawable.ic_menu_mylocation)
+                .setContentIntent(open)
+                .setAutoCancel(true)
+                .build(),
+        )
     }
 
     /** The warm window's clock: past the deadline and not recording, stop.

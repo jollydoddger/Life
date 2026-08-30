@@ -66,6 +66,8 @@ import com.jollydoddger.waymark.shared.Sun
 import com.jollydoddger.waymark.shared.Sync
 import com.jollydoddger.waymark.shared.TileGrid
 import com.jollydoddger.waymark.shared.TrackingService
+import com.jollydoddger.waymark.shared.Marks
+import com.jollydoddger.waymark.shared.Prefs.warmUntil
 import com.jollydoddger.waymark.shared.TrailStore
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -161,6 +163,9 @@ class MainActivity : Activity() {
         override fun onReceive(context: Context?, intent: Intent?) {
             map.setTrail(TrailStore.points(this@MainActivity))
             paintRecordButton()
+            // The service clears a mark when its buzz fires; the flag on the
+            // map has to go with it.
+            refreshMarks()
         }
     }
 
@@ -660,6 +665,8 @@ class MainActivity : Activity() {
         }
         buildChips()
         bindOverlays()
+        map.onRoutePointPicked = { en, alongM -> pointPicked(en, alongM) }
+        refreshMarks()
         // Walks the assistant queued from the chat screen are waiting here
         // when he comes back to the map.
         maybeShowPicker()
@@ -803,6 +810,15 @@ class MainActivity : Activity() {
             radarEnabled || windEnabled || tempEnabled || cloudEnabled,
             weatherShown,
         ) { weatherShown = it },
+        // A mode, not an overlay, but the chip row is exactly the right
+        // switchboard: visible, one tap, learnable. Only offered when there
+        // is a route to mark.
+        Layer("Mark points", RouteStore.load(this) != null, map.pickMode) {
+            map.pickMode = it
+            if (it) {
+                sayBriefly("Tap a point on the route — a turn, a peak — to see how far and get a buzz there.")
+            }
+        },
         Layer("Paths used", tracesEnabled, tracesShown) { tracesShown = it },
         Layer("Rights of way", prowEnabled, prowShown) { prowShown = it },
         Layer("All paths", allPathsEnabled, allPathsShown) { allPathsShown = it },
@@ -1580,6 +1596,136 @@ class MainActivity : Activity() {
                 say("Couldn't set that walk: ${e.message ?: e.javaClass.simpleName}")
             }
         }
+    }
+
+    // --- marked points: tap a turn, get a buzz there -------------------------
+
+    private fun refreshMarks() {
+        val route = RouteStore.load(this) ?: run { map.setMarks(emptyList()); return }
+        map.setMarks(
+            Marks.load(this, RouteHeights.fingerprint(route)).map { it.en() to it.number },
+        )
+    }
+
+    /**
+     * A tapped route point becomes an answer: how far along the route, how
+     * long at *his* pace with the climb priced in, how much up and down —
+     * and an offer to buzz when he gets there.
+     */
+    private fun pointPicked(en: En, alongViewM: Double) {
+        val route = RouteStore.load(this) ?: return
+        val fingerprint = RouteHeights.fingerprint(route)
+
+        // Tapping an existing flag is how one is removed.
+        Marks.load(this, fingerprint)
+            .firstOrNull { kotlin.math.hypot(it.e - en.e, it.n - en.n) <= Marks.ARRIVE_M }
+            ?.let { existing ->
+                AlertDialog.Builder(this)
+                    .setMessage("Mark ${existing.number} — remove it?")
+                    .setPositiveButton("Remove") { _, _ ->
+                        Marks.remove(this, fingerprint, existing.number)
+                        refreshMarks()
+                    }
+                    .setNegativeButton("Keep", null)
+                    .show()
+                return
+            }
+
+        scope.launch {
+            // Everything measured against the full route line, not the
+            // decimated drawing copy the tap snapped to.
+            val cum = Eta.cumulative(route.points)
+            val targetIdx = Eta.nearestIndex(route.points, en)
+            val targetAlong = cum[targetIdx]
+            val here = lastFix
+            val hereAlong = here?.let { cum[Eta.nearestIndex(route.points, it)] }
+
+            // Positive means ahead in the direction he is walking the route.
+            val aheadM = when {
+                hereAlong == null -> targetAlong
+                routeReversed -> hereAlong - targetAlong
+                else -> targetAlong - hereAlong
+            }
+
+            val heights = withContext(Dispatchers.IO) {
+                RouteHeights.cached(this@MainActivity, route)
+                    ?: runCatching { RouteHeights.fetch(this@MainActivity, route) }.getOrNull()
+            }
+            val climb = heights?.let {
+                Eta.climbBetween(it.alongs, it.heights, hereAlong ?: 0.0, targetAlong)
+            }
+
+            val (pace, paceSource) = currentPace()
+            val mins = Eta.minutes(kotlin.math.abs(aheadM), climb?.first ?: 0.0, pace)
+            val arrive = java.text.SimpleDateFormat("HH:mm", java.util.Locale.UK)
+                .format(java.util.Date(System.currentTimeMillis() + (mins * 60_000).toLong()))
+
+            val sb = StringBuilder()
+            sb.append(
+                when {
+                    hereAlong == null -> "${fmtDist(kotlin.math.abs(aheadM))} from the route start"
+                    aheadM < -Marks.ARRIVE_M -> "${fmtDist(-aheadM)} behind you on the route"
+                    else -> "${fmtDist(aheadM)} ahead on the route"
+                },
+            )
+            sb.append("\nAbout ${fmtMins(mins)} ($paceSource) — there ~$arrive")
+            sb.append(
+                climb?.let { "\n${it.first.roundToInt()} m up, ${it.second.roundToInt()} m down" }
+                    ?: "\nNo height data yet — time is pace only",
+            )
+
+            AlertDialog.Builder(this@MainActivity)
+                .setTitle("This point on the route")
+                .setMessage(sb.toString())
+                .setPositiveButton("Buzz me there") { _, _ -> armMark(en, targetAlong, mins) }
+                .setNegativeButton("Close", null)
+                .show()
+        }
+    }
+
+    /**
+     * His pace, most personal source first: this walk while recording, the
+     * median of his saved walks, Naismith's book number last — and the card
+     * says which it used, because a time is only trustable when its basis is.
+     */
+    private fun currentPace(): Pair<Double, String> {
+        if (recording && recordingStartedAt > 0) {
+            val dist = Geom.length(TrailStore.points(this))
+            val mins = (System.currentTimeMillis() - recordingStartedAt) / 60_000.0
+            if (dist > 500 && mins > 10) {
+                val p = mins / (dist / 1000.0)
+                if (p in 6.0..40.0) return p to "your pace today"
+            }
+        }
+        Eta.paceFromWalks(
+            Walks.list(this).map { it.distanceM to (it.endedAt - it.startedAt) },
+        )?.let { return it to "your usual pace" }
+        return Eta.DEFAULT_PACE_MIN_PER_KM to "a book pace"
+    }
+
+    private fun armMark(en: En, alongM: Double, etaMins: Double) {
+        val route = RouteStore.load(this) ?: return
+        val mark = Marks.add(this, RouteHeights.fingerprint(route), en.e, en.n, alongM)
+        if (mark == null) {
+            say("Five marks is the lot — tap one to remove it first.")
+            return
+        }
+        refreshMarks()
+        // The buzz has to notice arrival with the phone in a pocket, which
+        // needs GPS flowing. Recording already provides it; otherwise the
+        // same quiet hold the watch uses, sized to the walk with slack, and
+        // visible as a notification for as long as it runs.
+        if (!recording) {
+            val holdMs = ((etaMins * 2).toLong() * 60_000L).coerceIn(2 * 3600_000L, 6 * 3600_000L)
+            warmUntil = System.currentTimeMillis() + holdMs
+            TrackingService.warm(this)
+        }
+        say("Mark ${mark.number} set — you'll get a buzz there.")
+    }
+
+    private fun fmtMins(mins: Double): String {
+        val m = mins.roundToInt()
+        return if (m >= 90) "${m / 60} h ${m % 60} min" else "$m min"
     }
 
     // --- the walk picker ----------------------------------------------------

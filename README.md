@@ -277,6 +277,27 @@ way, paths — then the trail you have actually walked on top of everything.
 
 ## Where the sun will be
 
+## Tap a point, get a buzz there
+
+Turn on the **Mark points** chip at the top of the map, then tap any point on
+the route line — the tricky turn, the summit, the lunch spot. A card answers
+with the distance ahead along the route, the climb between here and there
+(up and down separately, from the cached elevation profile), and how long it
+will take **at your pace**: your pace so far this walk if you're recording,
+otherwise the median of your saved walks, otherwise Naismith's book rate —
+and the card says which it used, plus a minute per ten metres of climb on
+top. **"Buzz me there"** arms it: up to five numbered flags, and a strong
+vibrating notification as you arrive at each, so the turn can't slip past
+while the phone is in a pocket.
+
+Arming a buzz without a recording running quietly starts the same kind of
+GPS hold the watch uses (visible as a notification, sized to the walk with
+slack), because a buzz that only works with the app open is a promise about
+missed turns nobody can keep. Tap an existing flag to remove it; a new route
+retires them all — a flag on a line you are no longer walking is a lie
+waiting for an alarm. While the mode is on, taps pick points instead of
+zooming; the chip switches it back.
+
 ## Finding a walk
 
 Ask the assistant for one — "find me a 4–6 mile walk south-east", "anything
