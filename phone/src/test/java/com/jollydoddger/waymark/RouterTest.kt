@@ -40,8 +40,8 @@ class RouterTest {
         }
         fun link(a: Int, b: Int) {
             val d = hypot(nodes[a].e - nodes[b].e, nodes[a].n - nodes[b].n)
-            edges[a].add(Router.Graph.Edge(b, d, d, "footway"))
-            edges[b].add(Router.Graph.Edge(a, d, d, "footway"))
+            edges[a].add(Router.Graph.Edge(b, d, d, "footway", false))
+            edges[b].add(Router.Graph.Edge(a, d, d, "footway", false))
         }
         for (y in 0 until side) for (x in 0 until side) add(En(x * step, y * step))
         fun id(x: Int, y: Int) = y * side + x
@@ -118,5 +118,100 @@ class RouterTest {
         assertEquals("path", Router.group("bridleway"))
         assertEquals("lane", Router.group("residential"))
         assertEquals("road", Router.group("primary"))
+    }
+
+    // --- the round that made planning answer rather than grind -------------
+
+    @Test
+    fun `the clock stops the search and hands back the best it found`() {
+        // The failure he reported: two minutes of searching ending in
+        // "couldn't close a loop". A deadline already past must still
+        // return whatever closed, not nothing.
+        val g = awkwardNetwork(3)
+        val full = Router.loop(g, centre(), 5_000.0)
+        assertNotNull("the control search should find something", full)
+
+        var progressed = false
+        val stopped = Router.loop(
+            g, centre(), 5_000.0,
+            deadlineMs = System.currentTimeMillis() + 1_200,
+        ) { progressed = true }
+        // Either it finished inside the second, or it was cut off — either
+        // way it must not come back empty-handed on a network this rich.
+        assertNotNull("a cut-off search must still answer", stopped)
+        assertTrue("a loop is still a loop under a deadline", stopped!!.metres > 0)
+    }
+
+    @Test
+    fun `pressing stop ends the search`() {
+        val g = awkwardNetwork(4)
+        val started = System.currentTimeMillis()
+        val out = Router.loop(g, centre(), 8_000.0, isCancelled = { true })
+        // Cancelled before the first candidate: nothing found, and quickly.
+        assertTrue("cancelling must not grind", System.currentTimeMillis() - started < 3_000)
+        assertTrue("a cancelled search returns nothing or something real", out == null || out.metres > 0)
+    }
+
+    @Test
+    fun `a short loop is offered rather than thrown away`() {
+        // A genuine circuit far under the asked distance used to be
+        // discarded by a quarter-of-target floor, so a search holding a real
+        // loop reported finding none at all.
+        val g = awkwardNetwork(2)
+        val out = Router.loop(g, centre(), 40_000.0)
+        assertNotNull("a network this small cannot make 40 km — say what it can", out)
+        assertTrue("and it must be a real walk, not noise", out!!.metres >= 300.0)
+        assertNoReversals(out.points)
+    }
+
+    @Test
+    fun `a corner is never planted out of reach`() {
+        // nearestJunction used to fall back to the nearest node of any
+        // degree, which put corners on dead ends and on disconnected
+        // fragments — an unreachable leg, discovered the slow way.
+        val g = awkwardNetwork(5)
+        val far = En(-50_000.0, -50_000.0)
+        assertEquals(null, g.nearestJunction(far, 500.0))
+        val near = g.nearestJunction(centre(), 900.0)
+        assertNotNull(near)
+        assertTrue("what comes back is a junction", g.edges[near!!].size >= 3)
+        assertTrue(
+            "and it is genuinely within reach",
+            hypot(g.nodes[near].e - centre().e, g.nodes[near].n - centre().n) <= 900.0,
+        )
+    }
+
+    @Test
+    fun `the grid index finds what a full scan would`() {
+        val g = awkwardNetwork(6)
+        val rnd = Random(11)
+        repeat(30) {
+            val p = En(rnd.nextDouble(-500.0, 3_000.0), rnd.nextDouble(-500.0, 3_000.0))
+            val indexed = g.nearest(p)!!
+            var best = -1
+            var bestD = Double.MAX_VALUE
+            for (i in g.nodes.indices) {
+                val d = hypot(g.nodes[i].e - p.e, g.nodes[i].n - p.n)
+                if (d < bestD) { bestD = d; best = i }
+            }
+            assertEquals(
+                "indexed nearest must match the honest scan",
+                bestD,
+                hypot(g.nodes[indexed].e - p.e, g.nodes[indexed].n - p.n),
+                0.001,
+            )
+        }
+    }
+
+    @Test
+    fun `retraced ground is measured on a plain point list too`() {
+        // The via-places path built a Planned without this and so always
+        // claimed a clean circuit, however much of itself it walked twice.
+        val outAndBack = listOf(En(0.0, 0.0), En(100.0, 0.0), En(200.0, 0.0), En(100.0, 0.0), En(0.0, 0.0))
+        assertEquals(0.5, Router.repeatFraction(outAndBack), 0.02)
+        val ring = listOf(
+            En(0.0, 0.0), En(100.0, 0.0), En(100.0, 100.0), En(0.0, 100.0), En(0.0, 0.0),
+        )
+        assertEquals(0.0, Router.repeatFraction(ring), 0.001)
     }
 }

@@ -266,14 +266,19 @@ class Assistant(private val ctx: Context, private val tools: GeoTools) {
             The one rule: never state a distance, direction, place, or route
             that did not come from a tool result in this conversation. Your
             tools are the app's own grid arithmetic and real databases —
-            OpenStreetMap, the Toilet Map, the FOSSGIS foot router, Open-Meteo.
+            OpenStreetMap, the Toilet Map, Open-Meteo, and the app's own
+            router working on an OpenStreetMap path network it downloads.
             If a tool fails or finds nothing, say so plainly; never fill the
             gap from general knowledge. Finding nothing in OSM is a fact about
             the database, not the ground — say that too, especially for bins.
 
-            plan_route replaces the current route on the map (the old one is
-            banked and restore_previous_route brings it back — mention that
-            when you replace a route). It routes on the app's own network, so
+            plan_route with a circular distance does NOT replace the route:
+            it puts candidates on the map's picker — real established walks
+            near him alongside the loop it works out, each labelled — and he
+            flicks through with the arrows and takes one. Say that, and read
+            out what it found. With via places it does set the route (the old
+            one is banked and restore_previous_route brings it back —
+            mention that when you replace a route). It routes on the app's own network, so
             you CAN hold a length and CAN refuse A and B roads; say what it
             actually achieved rather than what was asked for, and if a plan
             comes back too long, too short, or blocked, try again with

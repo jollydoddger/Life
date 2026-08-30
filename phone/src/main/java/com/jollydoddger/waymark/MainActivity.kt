@@ -173,6 +173,7 @@ class MainActivity : Activity() {
                 // him nothing about whether anything was still happening; it
                 // feeds the working strip now, beside a clock that moves.
                 { note -> runOnUiThread { askActivity(note) } },
+                { askCancelled },
             ),
         ).also { a -> a.onActivity = { note -> runOnUiThread { askActivity(note) } } }
     }
@@ -799,7 +800,11 @@ class MainActivity : Activity() {
         super.onTrimMemory(level)
         // Two dozen decoded radar frames is real memory. The sky will still
         // be there; they cost one re-fetch each.
-        if (level >= android.content.ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW) Radar.trim()
+        if (level >= android.content.ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW) {
+            Radar.trim()
+            // The cached path network is the biggest thing this app holds.
+            Router.trim()
+        }
     }
 
     private fun toggleRecording() {

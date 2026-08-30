@@ -3,7 +3,6 @@ package com.jollydoddger.waymark
 import com.jollydoddger.waymark.shared.Bng
 import com.jollydoddger.waymark.shared.En
 import org.json.JSONObject
-import java.util.PriorityQueue
 import kotlin.math.abs
 import kotlin.math.cos
 import kotlin.math.hypot
@@ -32,13 +31,30 @@ object Router {
         "steps" to 1.4, "pedestrian" to 1.0, "cycleway" to 1.15,
         "living_street" to 1.4, "residential" to 1.8, "unclassified" to 1.8,
         "service" to 1.9, "tertiary" to 4.0, "secondary" to 12.0, "primary" to 30.0,
+        // The link classes were named in ROADS and NEVER but never priced,
+        // and the builder drops anything COST has no entry for — so every
+        // slip road fell out of the graph even when roads were allowed,
+        // cutting lanes off from the roads they actually join.
+        "tertiary_link" to 4.0, "secondary_link" to 12.0, "primary_link" to 30.0,
     )
 
     /** Never routed on foot, whatever the setting: no pavement, no business. */
     private val NEVER = setOf("motorway", "motorway_link", "trunk", "trunk_link")
 
-    /** Excluded as well when he asks to avoid roads — the A and B classes. */
+    /**
+     * The A and B classes. "Avoid roads" used to drop these from the graph
+     * outright, which is why planning failed so often round here: an A road
+     * does not just make a walk unpleasant, it cuts the path network into
+     * islands, and a loop cannot be closed across an island's edge at any
+     * price. They are now priced instead — [ROAD_AVOID_PENALTY] makes one a
+     * last resort, so a route will cross an A road to reach the lanes
+     * beyond but will not stroll along it — and every plan reports the road
+     * metres it actually used, so the claim is checkable.
+     */
     private val ROADS = setOf("primary", "primary_link", "secondary", "secondary_link", "tertiary", "tertiary_link")
+
+    /** What a road edge costs when he asked to avoid roads. */
+    const val ROAD_AVOID_PENALTY = 25.0
 
     /** What a way counts as when the result is described back to him. */
     fun group(kind: String): String = when (kind) {
@@ -51,9 +67,71 @@ object Router {
         val nodes: ArrayList<En>,
         val edges: ArrayList<ArrayList<Edge>>,
     ) {
-        class Edge(val to: Int, val metres: Double, val cost: Double, val kind: String)
+        class Edge(
+            val to: Int,
+            val metres: Double,
+            val cost: Double,
+            val kind: String,
+            /** Precomputed: a set lookup per edge relaxation is the last
+             *  thing an inner loop run hundreds of thousands of times
+             *  needs. */
+            val road: Boolean,
+        )
+
+        // A uniform grid over the nodes. Finding the nearest node used to be
+        // a linear scan of every node in the graph, and a single plan does
+        // hundreds of them: on a 30,000-node network that is millions of
+        // square roots before any routing happens.
+        private val cell = 120.0
+        private val grid = HashMap<Long, MutableList<Int>>()
+
+        init {
+            for (i in nodes.indices) {
+                grid.getOrPut(cellKey(nodes[i])) { ArrayList() }.add(i)
+            }
+        }
+
+        private fun cellKey(p: En): Long =
+            (Math.floor(p.e / cell).toLong() shl 32) xor (Math.floor(p.n / cell).toLong() and 0xffffffffL)
+
+        private fun cellKey(cx: Long, cy: Long): Long = (cx shl 32) xor (cy and 0xffffffffL)
+
+        /**
+         * The nearest node satisfying [ok] within [withinM], or null. Rings
+         * of cells outward from the point, stopping as soon as the next ring
+         * cannot hold anything closer than the best already found.
+         */
+        fun nearestWhere(p: En, withinM: Double, ok: (Int) -> Boolean): Int? {
+            if (nodes.isEmpty()) return null
+            val cx = Math.floor(p.e / cell).toLong()
+            val cy = Math.floor(p.n / cell).toLong()
+            var best = -1
+            var bestD = Double.MAX_VALUE
+            val maxRing = (withinM / cell).toInt() + 2
+            var r = 0
+            while (r <= maxRing) {
+                for (dx in -r..r) {
+                    for (dy in -r..r) {
+                        if (maxOf(kotlin.math.abs(dx), kotlin.math.abs(dy)) != r) continue
+                        val bucket = grid[cellKey(cx + dx, cy + dy)] ?: continue
+                        for (i in bucket) {
+                            if (!ok(i)) continue
+                            val d = hypot(nodes[i].e - p.e, nodes[i].n - p.n)
+                            if (d < bestD) { bestD = d; best = i }
+                        }
+                    }
+                }
+                // A hit closer than this ring's inner edge cannot be beaten.
+                if (best >= 0 && bestD <= r * cell) break
+                r++
+            }
+            return if (best >= 0 && bestD <= withinM) best else null
+        }
 
         fun nearest(p: En): Int? {
+            nearestWhere(p, 5_000.0) { true }?.let { return it }
+            // Beyond the grid search: fall back to the honest scan rather
+            // than pretending an empty answer.
             var best = -1
             var bestD = Double.MAX_VALUE
             for (i in nodes.indices) {
@@ -62,6 +140,14 @@ object Router {
             }
             return if (best >= 0) best else null
         }
+
+        /** Junctions within [withinM], nearest first — the places a loop can
+         *  actually start or turn. */
+        fun junctionsNear(p: En, withinM: Double, limit: Int): List<Int> =
+            nodes.indices
+                .filter { edges[it].size >= 3 && hypot(nodes[it].e - p.e, nodes[it].n - p.n) <= withinM }
+                .sortedBy { hypot(nodes[it].e - p.e, nodes[it].n - p.n) }
+                .take(limit)
 
         /**
          * The nearest place a loop can actually turn a corner.
@@ -110,7 +196,37 @@ object Router {
      * [avoidRoads] leaves the A/B/C classes out entirely, so nothing
      * downstream can accidentally route onto one.
      */
-    fun build(centre: En, radiusM: Double, avoidRoads: Boolean): Graph {
+    private var cachedGraph: Graph? = null
+    private var cachedCentre: En? = null
+    private var cachedRadius = 0.0
+
+    /**
+     * The network round a point, reusing the last one when it covers the
+     * ask. Fetching and parsing several megabytes of Overpass JSON is the
+     * bulk of a plan, and re-planning a few hundred metres away used to pay
+     * it again from scratch.
+     */
+    fun buildCached(centre: En, radiusM: Double): Graph {
+        val c = cachedCentre
+        val g = cachedGraph
+        if (c != null && g != null) {
+            val moved = hypot(centre.e - c.e, centre.n - c.n)
+            if (moved + radiusM <= cachedRadius) return g
+        }
+        val fresh = build(centre, radiusM)
+        cachedGraph = fresh
+        cachedCentre = centre
+        cachedRadius = radiusM
+        return fresh
+    }
+
+    /** Let the network go when the system is short of memory. */
+    fun trim() {
+        cachedGraph = null
+        cachedCentre = null
+    }
+
+    fun build(centre: En, radiusM: Double): Graph {
         val (lat, lon) = Bng.toWgs84(centre)
         val at = "%.5f,%.5f".format(lat, lon)
         val kinds = COST.keys.joinToString("|")
@@ -145,8 +261,11 @@ object Router {
             val el = elements.getJSONObject(i)
             val kind = el.optJSONObject("tags")?.optString("highway").orEmpty()
             if (kind in NEVER) continue
-            if (avoidRoads && kind in ROADS) continue
+            // Roads stay in the graph whatever the preference; the search
+            // prices them. Dropping them here is what left the path network
+            // in islands an A road wide.
             val cost = COST[kind] ?: continue
+            val isRoad = kind in ROADS
             val geom = el.optJSONArray("geometry") ?: continue
 
             var prev = -1
@@ -159,8 +278,8 @@ object Router {
                     val d = hypot(en.e - prevEn!!.e, en.n - prevEn.n)
                     if (d > 0) {
                         // Walking has no one-way streets.
-                        edges[prev].add(Graph.Edge(idx, d, d * cost, kind))
-                        edges[idx].add(Graph.Edge(prev, d, d * cost, kind))
+                        edges[prev].add(Graph.Edge(idx, d, d * cost, kind, isRoad))
+                        edges[idx].add(Graph.Edge(prev, d, d * cost, kind, isRoad))
                     }
                 }
                 prev = idx
@@ -175,7 +294,13 @@ object Router {
      * this route; re-using one is allowed but expensive, which is what makes
      * a loop come home a different way instead of doubling back.
      */
-    fun path(g: Graph, from: Int, to: Int, penalise: Set<Long> = emptySet()): List<Int>? {
+    fun path(
+        g: Graph,
+        from: Int,
+        to: Int,
+        penalise: Set<Long> = emptySet(),
+        roadPenalty: Double = 1.0,
+    ): List<Int>? {
         val n = g.nodes.size
         if (from >= n || to >= n) return null
         val best = DoubleArray(n) { Double.MAX_VALUE }
@@ -184,24 +309,24 @@ object Router {
         val target = g.nodes[to]
         fun heuristic(i: Int) = hypot(g.nodes[i].e - target.e, g.nodes[i].n - target.n)
 
-        val queue = PriorityQueue<DoubleArray>(compareBy { it[0] })
+        val queue = Heap()
         best[from] = 0.0
-        queue.add(doubleArrayOf(heuristic(from), from.toDouble()))
+        queue.push(from, heuristic(from))
         while (queue.isNotEmpty()) {
-            val top = queue.poll()
-            val u = top[1].toInt()
+            val u = queue.pop()
             if (done[u]) continue
             done[u] = true
             if (u == to) break
             for (e in g.edges[u]) {
                 if (done[e.to]) continue
                 val key = edgeKey(u, e.to)
-                val step = if (key in penalise) e.cost * REUSE_PENALTY else e.cost
+                var step = if (e.road) e.cost * roadPenalty else e.cost
+                if (key in penalise) step *= REUSE_PENALTY
                 val alt = best[u] + step
                 if (alt < best[e.to]) {
                     best[e.to] = alt
                     cameFrom[e.to] = u
-                    queue.add(doubleArrayOf(alt + heuristic(e.to), e.to.toDouble()))
+                    queue.push(e.to, alt + heuristic(e.to))
                 }
             }
         }
@@ -212,8 +337,91 @@ object Router {
         return out.reversed()
     }
 
+    /**
+     * A binary heap over primitive arrays. The old open set was a
+     * PriorityQueue of boxed DoubleArrays compared through `compareBy` —
+     * two allocations and a boxed comparison for every node ever relaxed,
+     * across hundreds of searches per plan. This is the inner loop of the
+     * whole planner.
+     */
+    private class Heap {
+        private var ids = IntArray(1024)
+        private var keys = DoubleArray(1024)
+        private var size = 0
+
+        fun isNotEmpty() = size > 0
+
+        fun push(id: Int, key: Double) {
+            if (size == ids.size) {
+                ids = ids.copyOf(size * 2)
+                keys = keys.copyOf(size * 2)
+            }
+            var i = size++
+            ids[i] = id
+            keys[i] = key
+            while (i > 0) {
+                val parent = (i - 1) / 2
+                if (keys[parent] <= keys[i]) break
+                swap(i, parent)
+                i = parent
+            }
+        }
+
+        fun pop(): Int {
+            val top = ids[0]
+            size--
+            if (size > 0) {
+                ids[0] = ids[size]
+                keys[0] = keys[size]
+                var i = 0
+                while (true) {
+                    val l = 2 * i + 1
+                    val r = l + 1
+                    var small = i
+                    if (l < size && keys[l] < keys[small]) small = l
+                    if (r < size && keys[r] < keys[small]) small = r
+                    if (small == i) break
+                    swap(i, small)
+                    i = small
+                }
+            }
+            return top
+        }
+
+        private fun swap(a: Int, b: Int) {
+            val i = ids[a]; ids[a] = ids[b]; ids[b] = i
+            val k = keys[a]; keys[a] = keys[b]; keys[b] = k
+        }
+    }
+
     private fun edgeKey(a: Int, b: Int): Long =
         (minOf(a, b).toLong() shl 32) or maxOf(a, b).toLong()
+
+    /**
+     * How much of a finished point list is ground covered twice, judged on
+     * the geometry rather than on graph edges — the via-places path builds
+     * its route by concatenating legs and has no node walk to measure.
+     * Segments are matched on their rounded endpoints, so a leg retracing
+     * another leg is counted however the two were produced.
+     */
+    fun repeatFraction(points: List<En>): Double {
+        if (points.size < 2) return 0.0
+        var total = 0.0
+        var repeated = 0.0
+        val seen = HashSet<Long>()
+        for (i in 1 until points.size) {
+            val a = points[i - 1]
+            val b = points[i]
+            val d = hypot(b.e - a.e, b.n - a.n)
+            if (d <= 0) continue
+            total += d
+            val ka = (Math.round(a.e / 5.0) shl 22) xor Math.round(a.n / 5.0)
+            val kb = (Math.round(b.e / 5.0) shl 22) xor Math.round(b.n / 5.0)
+            val key = (minOf(ka, kb) shl 20) xor maxOf(ka, kb)
+            if (!seen.add(key)) repeated += d
+        }
+        return if (total > 0) repeated / total else 0.0
+    }
 
     /** Turn a node walk into points, per-kind distances and repeated ground. */
     private fun measure(g: Graph, walk: List<Int>): Planned {
@@ -282,91 +490,129 @@ object Router {
         g: Graph,
         start: En,
         targetM: Double,
+        deadlineMs: Long = Long.MAX_VALUE,
+        avoidRoads: Boolean = true,
+        isCancelled: () -> Boolean = { false },
         onProgress: (String) -> Unit = {},
     ): Planned? {
-        val startNode = g.nearest(start) ?: return null
+        val roadPenalty = if (avoidRoads) ROAD_AVOID_PENALTY else 1.0
+        // Where a loop may begin. He said his start "can be anywhere within
+        // 500 m", which is a licence worth spending: a junction a street
+        // away often closes a circuit his exact doorstep cannot.
+        val startNodes = ArrayList<Int>()
+        g.nearest(start)?.let { startNodes.add(it) }
+        for (j in g.junctionsNear(start, START_SLACK_M, 3)) {
+            if (j !in startNodes) startNodes.add(j)
+        }
+        if (startNodes.isEmpty()) return null
+
         var base = targetM / (2 * Math.PI)
         var best: Planned? = null
         var bestScore = Double.MAX_VALUE
+        var tried = 0
+        var closed = 0
 
-        repeat(3) { attempt ->
+        fun outOfTime() = System.currentTimeMillis() > deadlineMs || isCancelled()
+
+        for (attempt in 0 until 3) {
+            if (outOfTime()) break
             val spin = Math.random() * 2 * Math.PI
             var round: Planned? = null
             var roundScore = Double.MAX_VALUE
             var enough = false
 
-            for (mult in doubleArrayOf(1.0, 0.72, 1.35)) {
-                if (enough) break
-                val radius = base * mult
-                for (seed in 0 until 2) {
-                    if (enough) break
-                    for (corners in intArrayOf(4, 3)) {
-                        if (enough) break
-                        for (direction in intArrayOf(1, -1)) {
-                            val bearing0 = spin + seed * (Math.PI / corners)
-                            val walk = ArrayList<Int>()
-                            val used = HashSet<Long>()
-                            var cursor = startNode
-                            for (k in 0 until corners) {
-                                val b = bearing0 + direction * k * 2 * Math.PI / corners
-                                val ideal = En(start.e + radius * sin(b), start.n + radius * cos(b))
-                                val wp = g.nearestJunction(ideal, radius * 0.6) ?: continue
-                                if (wp == cursor) continue
-                                // A corner in another piece of the network is
-                                // a corner missed, not a loop lost: three
-                                // sides of a square still comes home.
-                                val leg = path(g, cursor, wp, used) ?: continue
-                                for (i in 1 until leg.size) used.add(edgeKey(leg[i - 1], leg[i]))
-                                if (walk.isEmpty()) walk.addAll(leg) else walk.addAll(leg.drop(1))
-                                cursor = wp
-                            }
-                            if (walk.isEmpty()) continue
-                            val home = path(g, cursor, startNode, used) ?: continue
-                            walk.addAll(home.drop(1))
-
-                            // Pruning cannot open a closed walk — the first
-                            // and last nodes are the two it never removes —
-                            // so what survives is either a circuit or
-                            // nothing. Nothing means the shape was a pure
-                            // out-and-back, which is not a circular walk
-                            // whatever its length, so it is dropped rather
-                            // than offered.
-                            val circuit = prune(walk)
-                            if (circuit.size < 4) continue
-                            val planned = measure(g, circuit)
-                            if (planned.metres < targetM * 0.25) continue
-                            val err = abs(planned.metres - targetM) / targetM
-                            val score = err + planned.repeatFraction * 1.5
-                            if (score < roundScore) { roundScore = score; round = planned }
-                            if (err < GOOD_ERROR && planned.repeatFraction < GOOD_REPEAT) {
-                                enough = true
-                                break
+            for (startNode in startNodes) {
+                if (enough || outOfTime()) break
+                val from = g.nodes[startNode]
+                for (mult in doubleArrayOf(1.0, 0.72, 1.35)) {
+                    if (enough || outOfTime()) break
+                    val radius = base * mult
+                    for (seed in 0 until 2) {
+                        if (enough || outOfTime()) break
+                        for (corners in intArrayOf(4, 3)) {
+                            if (enough || outOfTime()) break
+                            for (direction in intArrayOf(1, -1)) {
+                                // Checked per candidate: this is what makes
+                                // the budget and the stop button real, and
+                                // what stops a plan grinding for minutes
+                                // with nothing to show for it.
+                                if (outOfTime()) break
+                                tried++
+                                val bearing0 = spin + seed * (Math.PI / corners)
+                                val walk = ArrayList<Int>()
+                                val used = HashSet<Long>()
+                                var cursor = startNode
+                                for (k in 0 until corners) {
+                                    val b = bearing0 + direction * k * 2 * Math.PI / corners
+                                    val ideal = En(from.e + radius * sin(b), from.n + radius * cos(b))
+                                    val wp = g.nearestJunction(ideal, radius * 0.6) ?: continue
+                                    if (wp == cursor) continue
+                                    val leg = path(g, cursor, wp, used, roadPenalty) ?: continue
+                                    for (i in 1 until leg.size) used.add(edgeKey(leg[i - 1], leg[i]))
+                                    if (walk.isEmpty()) walk.add(leg.first())
+                                    walk.addAll(leg.drop(1))
+                                    cursor = wp
+                                }
+                                if (walk.isEmpty()) continue
+                                val home = path(g, cursor, startNode, used, roadPenalty) ?: continue
+                                walk.addAll(home.drop(1))
+                                val circuit = prune(walk)
+                                if (circuit.size < 4) continue
+                                val planned = measure(g, circuit)
+                                // Anything that closed is a candidate now.
+                                // The old floor threw away a real 1.8 km
+                                // circuit against a 7 km ask and then
+                                // reported finding nothing at all — a worse
+                                // answer than the loop it was holding.
+                                if (planned.metres < MIN_LOOP_M) continue
+                                closed++
+                                val err = kotlin.math.abs(planned.metres - targetM) / targetM
+                                val score = err + planned.repeatFraction * 1.5
+                                if (score < roundScore) { roundScore = score; round = planned }
+                                if (score < bestScore) { bestScore = score; best = planned }
+                                if (err < GOOD_ERROR && planned.repeatFraction < GOOD_REPEAT) {
+                                    enough = true
+                                    break
+                                }
                             }
                         }
                     }
                 }
             }
-
-            val r = round ?: return@repeat
-            if (roundScore < bestScore) { bestScore = roundScore; best = r }
-            val err = abs(r.metres - targetM) / targetM
+            val r = round
+            if (r == null) {
+                onProgress("Round ${attempt + 1}: nothing closed yet, trying a different shape…")
+                base *= 0.8
+                continue
+            }
+            val err = kotlin.math.abs(r.metres - targetM) / targetM
             onProgress(
-                "Loop ${attempt + 1}: ${"%.1f".format(r.metres / 1000)} km" +
+                "Round ${attempt + 1}: ${"%.1f".format(r.metres / 1000)} km" +
                     (if (r.repeatFraction > 0.12) ", still doubling back…" else "…"),
             )
             if (err < GOOD_ERROR && r.repeatFraction < GOOD_REPEAT) return best
-            // Too long or too short: pull the circle in or push it out and go
-            // again. This is the lever the old planner did not have.
             base *= (targetM / r.metres).coerceIn(0.55, 1.8)
         }
+        if (best == null && tried > 0) {
+            onProgress("Tried $tried shapes; none of them came home.")
+        }
+        // Best seen, always — a loop of the wrong length, stated honestly,
+        // beats two minutes ending in "couldn't".
         return best
     }
 
+    /** Loops shorter than this are noise, not walks. */
+    private const val MIN_LOOP_M = 300.0
+
+    /** How far from him a loop may start — his own licence. */
+    const val START_SLACK_M = 500.0
+
     /** Point-to-point on the same graph, so the same rules apply. */
-    fun between(g: Graph, from: En, to: En): Planned? {
+    fun between(g: Graph, from: En, to: En, avoidRoads: Boolean = true): Planned? {
         val a = g.nearest(from) ?: return null
         val b = g.nearest(to) ?: return null
-        val walk = path(g, a, b) ?: return null
+        val walk = path(g, a, b, emptySet(), if (avoidRoads) ROAD_AVOID_PENALTY else 1.0) ?: return null
         return measure(g, walk)
     }
+
 }

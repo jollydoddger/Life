@@ -34,6 +34,12 @@ class GeoTools(
     private val fixAgeMs: () -> Long = { 0L },
     /** Progress for the slow ones — planning is several calls, not one. */
     private val progress: (String) -> Unit = {},
+    /**
+     * Whether he has pressed stop. The assistant's own cancellation lands
+     * between tools; a plan is the one tool that can run for a minute and a
+     * half, so it has to be able to hear the button itself.
+     */
+    private val cancelled: () -> Boolean = { false },
 ) {
 
     private fun route(): Route? = RouteStore.load(ctx)
@@ -335,7 +341,7 @@ class GeoTools(
                 )
             }
             progress("Reading the paths and lanes round here…")
-            val graph = Router.build(here, span + 2_000, avoidRoads)
+            val graph = Router.buildCached(here, span + 2_000)
             if (graph.nodes.size < 20) return noNetwork(avoidRoads)
             val points = ArrayList<En>()
             var metres = 0.0
@@ -343,7 +349,7 @@ class GeoTools(
             var cursor = here
             for ((i, t) in targets.withIndex()) {
                 progress("Leg ${i + 1} of ${targets.size}…")
-                val leg = Router.between(graph, cursor, t)
+                val leg = Router.between(graph, cursor, t, avoidRoads)
                     ?: return "No walkable way to \"${placeNames[i]}\" that keeps to the rules — " +
                         "try again with avoid_roads false, or a nearer place."
                 if (points.isEmpty()) points.addAll(leg.points) else points.addAll(leg.points.drop(1))
@@ -352,31 +358,116 @@ class GeoTools(
                 cursor = t
             }
             if (circularKm > 0) {
-                Router.between(graph, cursor, here)?.let { back ->
+                Router.between(graph, cursor, here, avoidRoads)?.let { back ->
                     points.addAll(back.points.drop(1))
                     metres += back.metres
                     back.byGroup.forEach { (k, v) -> byGroup[k] = (byGroup[k] ?: 0.0) + v }
                 }
             }
-            val planned = Router.Planned(points, metres, byGroup)
+            // repeatFraction was left at its default here, so a
+            // via-places route always claimed a clean circuit however much
+            // of itself it retraced. Measured now, like the loops.
+            val planned = Router.Planned(points, metres, byGroup, Router.repeatFraction(points))
             return adopt(planned.points to planned.metres, "Planned walk", describe(planned, null, avoidRoads))
         }
 
         if (circularKm <= 0) return "Failed: give either place names or a circular distance."
 
         val target = circularKm * 1000
+
+        // Real walks first — established, named, actually walked — gathered
+        // while the network downloads costs nothing extra and answers the
+        // question better than an invented loop can.
+        val real = runCatching {
+            RouteFinder.find(ctx, here, 12_000.0).walks
+        }.getOrDefault(emptyList()).let { found ->
+            WalkFilter.filter(found, here, null, target * 0.65, target * 1.35)
+        }.take(6)
+
         progress("Reading the paths and lanes round here…")
-        val graph = Router.build(here, target / (2 * PI) * 1.9 + 900, avoidRoads)
-        if (graph.nodes.size < 20) return noNetwork(avoidRoads)
+        val graph = runCatching {
+            Router.buildCached(here, target / (2 * PI) * 1.9 + 900)
+        }.getOrElse {
+            return offer(real, emptyList(), target,
+                "Couldn't reach OpenStreetMap's servers to read the paths (${it.message ?: "no connection"}).")
+        }
+        if (graph.nodes.size < 20) {
+            return offer(real, emptyList(), target, noNetwork(avoidRoads))
+        }
 
         progress("Building a loop…")
-        val loop = Router.loop(graph, here, target) { note -> progress(note) }
-            ?: return "Couldn't close a loop from here on " +
-                (if (avoidRoads) "paths and quiet lanes alone. Ask again with avoid_roads " +
-                    "false and I'll allow the bigger roads." else "the walkable network round here.") +
-                " A different distance may also work."
-        return adopt(loop.points to loop.metres, "Planned ${km(loop.metres)} circular",
-            describe(loop, target, avoidRoads))
+        val deadline = System.currentTimeMillis() + PLAN_BUDGET_MS
+        val loop = Router.loop(
+            graph, here, target, deadline, avoidRoads, cancelled,
+        ) { note -> progress(note) }
+
+        val planned = listOfNotNull(loop)
+        if (planned.isEmpty() && real.isEmpty()) {
+            return "Couldn't close a loop from here on " +
+                (if (avoidRoads) "paths and quiet lanes" else "the walkable network round here") +
+                ", and no established walk of about ${km(target)} passes nearby either. " +
+                "A different distance, or a start a mile or two away, may work."
+        }
+        return offer(real, planned, target, null)
+    }
+
+    /** How long a plan may search before it must answer with its best. */
+    private val PLAN_BUDGET_MS = 90_000L
+
+    /**
+     * Both kinds of answer on the one picker: walks that exist and a loop we
+     * worked out, each labelled for what it is, so he chooses rather than
+     * being handed a guess. Nothing replaces the route on the map — the
+     * picker's Use and Start walk do that, with a preview in front of them.
+     */
+    private fun offer(
+        real: List<RouteFinder.FoundWalk>,
+        planned: List<Router.Planned>,
+        target: Double,
+        note: String?,
+    ): String {
+        val here = fix()
+        val candidates = ArrayList<RouteFinder.FoundWalk>()
+        planned.forEachIndexed { i, p ->
+            candidates.add(
+                RouteFinder.FoundWalk(
+                    name = "Planned ${km(p.metres)} circular" + if (i > 0) " (${i + 1})" else "",
+                    source = "Planned",
+                    lines = listOf(p.points),
+                    closestM = 0.0,
+                    lengthM = p.metres,
+                ),
+            )
+        }
+        candidates.addAll(real)
+        if (candidates.isEmpty()) return note ?: "Nothing to offer for that."
+        WalkPicks.replace(ctx, candidates)
+
+        val lines = StringBuilder()
+        planned.forEach { p ->
+            lines.append("\n- Planned ${km(p.metres)} circular (asked ${km(target)})")
+            if (p.repeatFraction > 0.05) {
+                lines.append(", retraces ${(p.repeatFraction * 100).roundToInt()}%")
+            }
+            val road = p.roadMetres()
+            if (road > 50) lines.append(", ${road.roundToInt()} m of it on roads")
+        }
+        real.forEach { w ->
+            val shape = if (isCircular(w)) "circular" else "linear"
+            lines.append("\n- ${w.name}: ${km(w.lengthM)} $shape, line ${km(w.closestM)} away (${w.source})")
+        }
+        return (note?.plus(" ") ?: "") +
+            "${candidates.size} to choose from, on the map's picker — " +
+            "\u2039 \u203a to flick through, Use or Start walk to take one:" + lines
+    }
+
+    /** Does the walk come back to where it started? A coastal-path fragment
+     *  can match on distance and still be a line, and saying which is free. */
+    private fun isCircular(w: RouteFinder.FoundWalk): Boolean {
+        val pts = w.routePoints()
+        if (pts.size < 3 || w.lengthM <= 0) return false
+        val gap = hypot(pts.last().e - pts.first().e, pts.last().n - pts.first().n)
+        return gap < w.lengthM * 0.2
     }
 
     private fun noNetwork(avoidRoads: Boolean): String =

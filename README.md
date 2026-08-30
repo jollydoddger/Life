@@ -308,6 +308,30 @@ way, paths — then the trail you have actually walked on top of everything.
 
 ## Where the sun will be
 
+## Asking for a circular
+
+Ask for a circular walk and the app answers with **candidates on the
+picker**, not a fait accompli: established walks near you (OpenStreetMap
+routes, your library, your downloads) filtered to roughly the distance you
+asked for, **alongside** a loop worked out on the path network — each
+labelled for what it is, and real ones marked circular or linear, since a
+coastal-path fragment can match on distance and still be a line.
+
+The planner searches for at most **90 seconds** and then hands back the best
+circuit it found, stating its true length and how much of itself it retraces.
+It used to search a fixed 72 candidates with no clock and report finding
+nothing at all if none met its thresholds — while holding perfectly good
+loops it had discarded for being shorter than a quarter of the ask. Stop
+works during a plan too, and gives you the best so far.
+
+"Avoid roads" now prices A and B roads at twenty-five times a lane rather
+than deleting them from the map. Deleting them was the deeper problem: an A
+road does not merely make a walk unpleasant, it cuts the path network into
+islands, and no loop can be closed across an island's edge at any price. A
+route will now cross an A road to reach the lanes beyond but will not walk
+along one — and every plan reports the road metres it actually used, so the
+claim is checkable rather than merely made.
+
 ## Tap a point, get a buzz there
 
 Turn on the **Mark points** chip at the top of the map, then tap any point on

@@ -60,6 +60,7 @@ class ChatActivity : Activity() {
                 // line under the conversation carries what it is doing,
                 // beside a clock that moves.
                 { msg -> runOnUiThread { doingNote = msg } },
+                { cancelled },
             ),
         ).also { a ->
             a.onActivity = { n -> runOnUiThread { doingNote = n } }
