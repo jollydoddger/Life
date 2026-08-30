@@ -107,7 +107,14 @@ object RouteStore {
     fun load(ctx: Context): Route? {
         val f = file(ctx)
         if (!f.exists()) return null
-        return try { fromJson(f.readText()) } catch (e: Exception) { null }
+        // takeIf: a route.json holding fewer than two points (a truncated
+        // write, an old bug) must load as "no route", never as a landmine
+        // for the first caller that asks for points.first().
+        return try {
+            fromJson(f.readText()).takeIf { it.points.size >= 2 }
+        } catch (e: Exception) {
+            null
+        }
     }
 
     /** Swap the current route for the one it replaced. Null if there is none. */

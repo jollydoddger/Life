@@ -26,6 +26,7 @@
     </queries>
 
     <application
+        android:name=".WaymarkApp"
         android:label="@string/app_name"
         android:icon="@mipmap/ic_launcher"
         android:theme="@android:style/Theme.Material.Light.NoActionBar">

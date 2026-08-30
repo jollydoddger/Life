@@ -576,6 +576,19 @@ class MainActivity : Activity() {
         }
         setContentView(root)
 
+        // If the last run died, its stack is the one fact worth having:
+        // shown whole, then cleared, so "it won't open" can become a line
+        // number in a screenshot.
+        java.io.File(filesDir, WaymarkApp.CRASH_FILE).takeIf { it.exists() }?.let { f ->
+            val trace = runCatching { f.readText() }.getOrDefault("(unreadable)")
+            f.delete()
+            AlertDialog.Builder(this)
+                .setTitle("Waymark crashed last time")
+                .setMessage(trace.take(4000))
+                .setPositiveButton("Close", null)
+                .show()
+        }
+
         // From targetSdk 35 Android draws every app edge-to-edge, so anything
         // pinned to the bottom sits *under* the navigation bar unless it is
         // told otherwise — which is exactly where the ask box went. Pad the

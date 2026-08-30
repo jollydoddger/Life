@@ -28,8 +28,10 @@ object RouteHeights {
     private fun file(c: Context) = File(c.filesDir, "heights.json")
 
     /** Something stable enough to notice the route changing under the cache. */
-    fun fingerprint(r: Route): String =
-        "${r.name}/${r.points.size}/${r.points.first().e.toInt()}/${r.points.last().n.toInt()}"
+    fun fingerprint(r: Route): String {
+        if (r.points.isEmpty()) return "${r.name}/empty"
+        return "${r.name}/${r.points.size}/${r.points.first().e.toInt()}/${r.points.last().n.toInt()}"
+    }
 
     fun cached(c: Context, r: Route): Heights? {
         val f = file(c)

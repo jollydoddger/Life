@@ -105,8 +105,11 @@ class TrackingService : Service() {
         if (loc.hasAccuracy() && loc.accuracy > WORST_ACCURACY_M) return@LocationListener
         val en = Bng.fromWgs84(loc.latitude, loc.longitude)
         // The marked-point buzz fires in either mode: a hold that exists
-        // because he armed a mark must be able to deliver it.
-        Marks.arrivedAt(this, en)?.let { buzz(it) }
+        // because he armed a mark must be able to deliver it. Wrapped
+        // because this runs every few seconds for hours in a foreground
+        // service: whatever goes wrong in here, a missed buzz beats a
+        // crash-looping app.
+        runCatching { Marks.arrivedAt(this, en)?.let { buzz(it) } }
         // Warm mode records nothing beyond that: the fixes exist to keep
         // the chipset lock and getLastKnownLocation fresh, never the trail.
         if (!tracking) return@LocationListener
