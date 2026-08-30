@@ -41,6 +41,20 @@ class GeoTools(
     /** A downloaded GPX bigger than this is not a walking route. */
     private val MAX_GPX_BYTES = 5 * 1024 * 1024
 
+    /** The .gpx links a walk page holds, resolved against the page's own
+     *  URL, deduplicated, capped — enough to choose from, never a sitemap. */
+    private fun gpxLinks(html: String, pageUrl: String): List<String> {
+        val re = Regex("""href\s*=\s*["']([^"']*\.gpx[^"']*)["']""", RegexOption.IGNORE_CASE)
+        val base = java.net.URL(pageUrl)
+        return re.findAll(html)
+            .mapNotNull { m ->
+                runCatching { java.net.URL(base, m.groupValues[1]).toString() }.getOrNull()
+            }
+            .distinct()
+            .take(6)
+            .toList()
+    }
+
 
     private fun km(m: Double) = "%.1f km".format(m / 1000)
 
@@ -485,38 +499,61 @@ class GeoTools(
      * description — their terms are not this app's to spend.
      */
     fun downloadGpx(url: String): String {
-        val lower = url.lowercase()
-        if (!lower.startsWith("http://") && !lower.startsWith("https://")) {
-            return "Failed: only a direct http(s) link to a .gpx file."
-        }
-        for (banned in listOf("alltrails", "komoot", "osmaps", "ordnancesurvey")) {
-            if (banned in lower) return "Failed: $banned links are off-limits (their terms)."
-        }
-        progress("Downloading GPX…")
-        val bytes = try {
-            Net.stream(url, timeoutMs = 20_000) { input ->
-                val out = java.io.ByteArrayOutputStream()
-                val buf = ByteArray(8 * 1024)
-                while (true) {
-                    val n = input.read(buf)
-                    if (n < 0) break
-                    out.write(buf, 0, n)
-                    if (out.size() > MAX_GPX_BYTES) {
-                        throw RuntimeException("bigger than ${MAX_GPX_BYTES / 1_000_000} MB")
-                    }
-                }
-                out.toByteArray()
+        var target = url
+        var bytes: ByteArray? = null
+        // Two passes: the second exists because a link that promised a route
+        // very often serves the web page *around* the download. Rather than
+        // bouncing that back as a failure, the page is read for the .gpx
+        // links it holds — one link is followed, several are handed back to
+        // choose from. One hop only; a page behind a page is a maze, not a
+        // route.
+        for (hop in 0 until 2) {
+            val lower = target.lowercase()
+            if (!lower.startsWith("http://") && !lower.startsWith("https://")) {
+                return "Failed: only an http(s) link."
             }
-        } catch (e: Exception) {
-            return "Failed: couldn't download it (${e.message ?: "no connection"})."
+            for (banned in listOf("alltrails", "komoot", "osmaps", "ordnancesurvey")) {
+                if (banned in lower) return "Failed: $banned links are off-limits (their terms)."
+            }
+            progress(if (hop == 0) "Downloading…" else "Following the GPX link on that page…")
+            val got = try {
+                Net.stream(target, timeoutMs = 20_000) { input ->
+                    val out = java.io.ByteArrayOutputStream()
+                    val buf = ByteArray(8 * 1024)
+                    while (true) {
+                        val n = input.read(buf)
+                        if (n < 0) break
+                        out.write(buf, 0, n)
+                        if (out.size() > MAX_GPX_BYTES) {
+                            throw RuntimeException("bigger than ${MAX_GPX_BYTES / 1_000_000} MB")
+                        }
+                    }
+                    out.toByteArray()
+                }
+            } catch (e: Exception) {
+                return "Failed: couldn't download it (${e.message ?: "no connection"})."
+            }
+            val head = String(got, 0, minOf(got.size, 512), Charsets.UTF_8)
+            if (Gpx.looksLikeGpx(head)) {
+                bytes = got
+                break
+            }
+            if (hop == 1) {
+                return "Failed: that page's GPX link served another page rather than the file."
+            }
+            val links = gpxLinks(String(got, Charsets.UTF_8), target)
+            when {
+                links.isEmpty() -> return "Failed: that isn't a GPX file and the page holds " +
+                    "no .gpx links. The walk's own page usually carries a download link — " +
+                    "try that page's URL."
+                links.size == 1 -> target = links.first()
+                else -> return "That page holds ${links.size} GPX links — call download_gpx " +
+                    "with the right one:\n" + links.joinToString("\n") { "- $it" }
+            }
         }
-        val head = String(bytes, 0, minOf(bytes.size, 512), Charsets.UTF_8)
-        if (!Gpx.looksLikeGpx(head)) {
-            return "Failed: that isn't a GPX file — likely a web page around the real " +
-                "download link. A direct link ends in .gpx or serves the file itself."
-        }
+        val data = bytes ?: return "Failed: nothing downloaded."
         val route = try {
-            Gpx.parse(java.io.ByteArrayInputStream(bytes))
+            Gpx.parse(java.io.ByteArrayInputStream(data))
         } catch (e: Exception) {
             return "Failed: the GPX wouldn't parse (${e.message ?: "malformed"})."
         }

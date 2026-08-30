@@ -542,6 +542,9 @@ class MainActivity : Activity() {
         }
         val topBar = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
+            addView(status, LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT,
+            ).apply { bottomMargin = dp(6) })
             addView(readouts, LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT,
             ).apply { bottomMargin = dp(6) })
@@ -556,14 +559,16 @@ class MainActivity : Activity() {
                 FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT,
                 Gravity.END or Gravity.CENTER_VERTICAL,
             ).apply { rightMargin = dp(10) })
-            addView(status, FrameLayout.LayoutParams(
-                FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT,
-                Gravity.TOP,
-            ).apply { leftMargin = dp(10); rightMargin = dp(10) })
+            // One column: the status line, then the readouts, then the
+            // chips. They used to be two separately-positioned children with
+            // a guessed margin between them, and a note like "Mark 3 set"
+            // rendered squarely behind the chip row. Stacked, nothing can
+            // cover anything, and the chips just shift down while a note is
+            // showing.
             addView(topBar, FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT,
                 Gravity.TOP,
-            ).apply { leftMargin = dp(10); rightMargin = dp(56); topMargin = dp(44) })
+            ).apply { leftMargin = dp(10); rightMargin = dp(10) })
             addView(bottomStack, FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT,
                 Gravity.BOTTOM,
@@ -1509,7 +1514,10 @@ class MainActivity : Activity() {
             say("No GPS fix yet — the search is centred on where you are.")
             return
         }
-        val options = listOf("500 m" to 500.0, "1 km" to 1_000.0, "2 km" to 2_000.0, "5 km" to 5_000.0)
+        val options = listOf(
+            "500 m" to 500.0, "2 km" to 2_000.0, "5 km" to 5_000.0,
+            "10 km" to 10_000.0, "25 km (a short drive)" to 25_000.0,
+        )
         AlertDialog.Builder(this)
             .setTitle("Walks whose line comes within…")
             .setItems(options.map { it.first }.toTypedArray()) { _, i ->
@@ -1518,6 +1526,12 @@ class MainActivity : Activity() {
             .show()
     }
 
+    /**
+     * Everything found lands on the same ‹ › picker the assistant's results
+     * use — one flick-through for walks from any source, which is what he
+     * asked for once he had both: a list dialog you read and a carousel you
+     * *see* are not the same answer.
+     */
     private fun findWalks(here: En, radiusM: Double) {
         say("Searching walking routes within ${fmtDist(radiusM)}…")
         scope.launch {
@@ -1535,42 +1549,17 @@ class MainActivity : Activity() {
                     "nothing in OpenStreetMap's route relations$libNote. Try a bigger radius.")
                 return@launch
             }
-            showWalkList(result.walks)
-        }
-    }
-
-    private fun showWalkList(walks: List<RouteFinder.FoundWalk>) {
-        val rows = walks.map {
-            "${it.name} — line ${fmtDist(it.closestM)} away · ${fmtDist(it.lengthM)} · ${it.source}"
-        }
-        AlertDialog.Builder(this)
-            .setTitle("Walks near you")
-            .setItems(rows.toTypedArray()) { _, i -> previewWalk(walks, i) }
-            .setNegativeButton("Cancel", null)
-            .show()
-    }
-
-    private fun previewWalk(walks: List<RouteFinder.FoundWalk>, i: Int) {
-        val walk = walks[i]
-        map.setPreview(walk.lines)
-        map.fitTo(walk.routePoints())
-        val note = if (walk.source == "OSM") {
-            "\n\nAn OSM route is stitched from its mapped sections, so the line can " +
-                "have gaps or run out of order — the shape is right, the join-up isn't guaranteed."
-        } else ""
-        AlertDialog.Builder(this)
-            .setTitle(walk.name)
-            .setMessage(
-                "Line ${fmtDist(walk.closestM)} from you · ${fmtDist(walk.lengthM)} of path · " +
-                    "from ${if (walk.source == "OSM") "OpenStreetMap" else "your library"}$note",
-            )
-            .setPositiveButton("Use it") { _, _ -> adoptFound(walk) }
-            .setNegativeButton("Back") { _, _ ->
-                map.setPreview(emptyList())
-                showWalkList(walks)
+            WalkPicks.replace(this@MainActivity, result.walks)
+            if (pickerShowing) {
+                // A fresh search while the picker is already up replaces its
+                // contents in place rather than being swallowed by the
+                // "already showing" guard.
+                picks = WalkPicks.pending(this@MainActivity)
+                showPick(0)
+            } else {
+                maybeShowPicker()
             }
-            .setOnCancelListener { map.setPreview(emptyList()) }
-            .show()
+        }
     }
 
     private fun adoptFound(walk: RouteFinder.FoundWalk) {

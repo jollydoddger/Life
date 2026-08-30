@@ -254,6 +254,18 @@ class Assistant(private val ctx: Context, private val tools: GeoTools) {
             servers refuse, that is the database being busy — say so and
             offer to try again, never report it as "no paths here".
 
+            When he wants an established, walked-and-written-up route rather
+            than a planned one, chain web_search with download_gpx: search the
+            free walking sites (gps-routes.co.uk, walkingclub.org.uk,
+            walkingbritain.co.uk, and council or national-park walk pages all
+            offer free GPX downloads), then hand download_gpx the walk's own
+            page — it digs the GPX link out itself. Several candidates beat
+            one: download the plausible ones and they all land on the map's
+            picker for him to flick through. Never AllTrails, komoot or OS
+            Maps. find_walks (OpenStreetMap + his own library, up to 25 km)
+            is the offline-data half of the same question — often worth
+            running as well.
+
             You are expected to plan properly rather than one-shot it: chain
             the tools. A good answer to "plan me a walk for this afternoon"
             is plan_route, then walk_brief on the result, then say in one
@@ -424,13 +436,13 @@ class Assistant(private val ctx: Context, private val tools: GeoTools) {
             ),
             tool(
                 "download_gpx",
-                "Download one GPX file from a DIRECT link (the URL of the .gpx file " +
-                    "itself, usually found with web search) and queue it on the map's " +
-                    "picker for him to preview and take — never loaded straight onto " +
-                    "the route. Free-download sites are fine; NEVER AllTrails, komoot " +
-                    "or OS Maps links — their terms forbid it and the tool refuses " +
-                    "them. If it fails with a page instead of a file, find the direct " +
-                    ".gpx link on that page's site and try that.",
+                "Download a GPX route and queue it on the map's picker for him to " +
+                    "flick through, preview and take — never loaded straight onto the " +
+                    "route. Give it either the .gpx file's own URL or the WALK'S PAGE " +
+                    "from a walking website: a page is read for its .gpx links, one is " +
+                    "followed automatically, several are returned for you to pick from. " +
+                    "Free-download sites are fine; NEVER AllTrails, komoot or OS Maps " +
+                    "links — their terms forbid it and the tool refuses them.",
                 schema(
                     mapOf(
                         "url" to property(

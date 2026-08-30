@@ -120,6 +120,15 @@ the start"** — Google Maps navigation to the nearest mapped car park within
 
 ## Walks near me
 
+Everything found — by the menu below or by the assistant — lands on the same
+‹ › picker over the live map: flick through the candidates, each previewed as
+a dashed line, and take one with Use or Start walk. The assistant can also be
+handed a walk's *page* from a free walking website (gps-routes.co.uk,
+walkingclub.org.uk and friends): `download_gpx` digs the GPX link out of the
+page itself, so "find me a written-up circular near X" goes from web search
+to routes on the map without copying links about. AllTrails, komoot and OS
+Maps stay refused — their terms.
+
 Community route apps show a pin where a walk *starts*; a walk that passes 400 m
 from your door can start two villages away. The GPX button's **Walks near me**
 answers the better question: which walks' *lines* come within 500 m / 1 km /
