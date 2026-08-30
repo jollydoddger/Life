@@ -139,6 +139,18 @@ the point: planning tomorrow's walk happens at a kitchen table as often as at
 a trailhead. A wide licence is *spread* across the region rather than spent
 on three junctions huddled in the middle of it.
 
+The planner uses the real trails rather than ignoring them. Any named,
+waymarked route near your start — a slate trail, a coast path, a local
+walking network — is laid onto the path network and its ground made cheap to
+walk, so an invented loop runs along waymarked paths where they go your way
+and finds its own way home where they don't. It says how much of the walk
+ended up on one, counted off the paths actually used. It is a discount, never
+a magnet: a trail that adds a kilometre is still a kilometre.
+
+(This works because a route relation is made of the same OpenStreetMap ways
+the router already has. Map tiles cannot be used for it — a tile is a
+picture, and there is nothing in a picture to route along.)
+
 If nothing published starts inside the licence you gave — which is most days,
 around a house — it looks once more at driving distance and says outright
 that those are a drive rather than a walk from the door. The widening is
@@ -163,6 +175,16 @@ turning round at. That second shape is one no circuit-finder can produce: the
 best turning points are dead ends, and a loop search refuses dead ends by
 design. It gets ninety seconds and answers with the best it found, while the
 real walks are already on the picker to flick through.
+
+If nothing matches the shape *and* length — Snowdonia's route relations are
+mostly national trails, forty kilometres and straight — you get what is
+actually there instead, each renamed with what it really is ("Cambrian Way
+(one way)"). An empty picker reads as "there is nothing here", and in
+Snowdonia that would be a lie.
+
+"Anywhere on this map" refuses when the map isn't a map of anywhere: framed
+on the whole country it says so and asks you to zoom in, rather than quietly
+planning a 25 km circle round the middle of the screen.
 
 ### The brief
 

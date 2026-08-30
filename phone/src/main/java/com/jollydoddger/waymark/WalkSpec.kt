@@ -280,4 +280,25 @@ object Specifier {
         }
         return out.sortedBy { it.closestM }.take(limit)
     }
+
+    /**
+     * What to offer when nothing matched: the walks that are actually
+     * there, each renamed with what it really is.
+     *
+     * An empty picker is read as "there is nothing here", and around
+     * Snowdonia that is a lie — the area is full of walking, and the reason
+     * nothing matched "circular, 5–10 km" is that OpenStreetMap's route
+     * relations there are national trails: forty kilometres, and straight.
+     * Saying so beats saying nothing, and the name carries the truth so
+     * that flicking past one takes no thought.
+     *
+     * The lengths are deliberately not adjusted. What comes back from a
+     * relation is the part of it near him, and dressing that up as a walk
+     * of the right size would be inventing a route nobody surveyed.
+     */
+    fun nearMisses(found: List<RouteFinder.FoundWalk>, limit: Int = 6): List<RouteFinder.FoundWalk> =
+        found.sortedBy { it.closestM }.take(limit).map { w ->
+            val form = describe(formOf(w))
+            if (w.name.endsWith(")")) w else w.copy(name = "${w.name} ($form)")
+        }
 }

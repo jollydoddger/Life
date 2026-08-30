@@ -247,6 +247,103 @@ class RouterTest {
         }
     }
 
+    // --- planning along a real, waymarked trail --------------------------
+
+    @Test
+    fun `a trail marks the ways under it and nothing else`() {
+        val g = awkwardNetwork(3)
+        // A line straight along the bottom row of the grid.
+        val trail = (0 until side).map { En(it * step, 0.0) }
+        g.markTrails(listOf(trail))
+        var onRow = 0
+        var offRow = 0
+        for (u in g.nodes.indices) {
+            for (e in g.edges[u]) {
+                val midN = (g.nodes[u].n + g.nodes[e.to].n) / 2
+                if (e.onTrail) { if (midN < 50) onRow++ else offRow++ }
+            }
+        }
+        assertTrue("the ways under the trail must be marked", onRow > 0)
+        assertEquals("and nothing away from it", 0, offRow)
+    }
+
+    @Test
+    fun `marking again forgets the trail before it`() {
+        // The graph is cached across plans; last search's trail must not
+        // still be discounting this search's walk.
+        val g = awkwardNetwork(3)
+        g.markTrails(listOf((0 until side).map { En(it * step, 0.0) }))
+        assertTrue(g.edges.any { list -> list.any { it.onTrail } })
+        g.markTrails(emptyList())
+        assertTrue(
+            "a cleared graph carries no trail",
+            g.edges.none { list -> list.any { it.onTrail } },
+        )
+    }
+
+    @Test
+    fun `a walk prefers waymarked ground when it goes the same way`() {
+        // Two ways from A to B of identical length. Marking one as a trail
+        // must be enough to choose it — and choosing it must be a
+        // preference, so the plain graph is free to pick either.
+        val nodes = ArrayList<En>()
+        val edges = ArrayList<ArrayList<Router.Graph.Edge>>()
+        fun add(p: En): Int { nodes.add(p); edges.add(ArrayList()); return nodes.size - 1 }
+        fun link(a: Int, b: Int) {
+            val d = hypot(nodes[a].e - nodes[b].e, nodes[a].n - nodes[b].n)
+            edges[a].add(Router.Graph.Edge(b, d, d, "path", false))
+            edges[b].add(Router.Graph.Edge(a, d, d, "path", false))
+        }
+        val start = add(En(0.0, 0.0))
+        val endAt = add(En(1_000.0, 0.0))
+        val viaNorth = add(En(500.0, 300.0))
+        val viaSouth = add(En(500.0, -300.0))
+        link(start, viaNorth); link(viaNorth, endAt)
+        link(start, viaSouth); link(viaSouth, endAt)
+        val g = Router.Graph(nodes, edges)
+
+        g.markTrails(listOf(listOf(En(0.0, 0.0), En(500.0, 300.0), En(1_000.0, 0.0))))
+        val walk = Router.path(g, start, endAt)!!
+        assertTrue("the waymarked way north should win", viaNorth in walk)
+        assertTrue("and the other one lose", viaSouth !in walk)
+    }
+
+    @Test
+    fun `a trail going the wrong way is not followed`() {
+        // The bonus is a discount, never a magnet: a trail that adds a
+        // kilometre to a walk is still a kilometre, and dragging a route
+        // out of shape to touch one would be the road penalty's old mistake
+        // in reverse.
+        val nodes = ArrayList<En>()
+        val edges = ArrayList<ArrayList<Router.Graph.Edge>>()
+        fun add(p: En): Int { nodes.add(p); edges.add(ArrayList()); return nodes.size - 1 }
+        fun link(a: Int, b: Int) {
+            val d = hypot(nodes[a].e - nodes[b].e, nodes[a].n - nodes[b].n)
+            edges[a].add(Router.Graph.Edge(b, d, d, "path", false))
+            edges[b].add(Router.Graph.Edge(a, d, d, "path", false))
+        }
+        val start = add(En(0.0, 0.0))
+        val endAt = add(En(1_000.0, 0.0))
+        val direct = add(En(500.0, 0.0))
+        val detour = add(En(500.0, 5_000.0))
+        link(start, direct); link(direct, endAt)
+        link(start, detour); link(detour, endAt)
+        val g = Router.Graph(nodes, edges)
+        g.markTrails(listOf(listOf(En(0.0, 0.0), En(500.0, 5_000.0), En(1_000.0, 0.0))))
+        val walk = Router.path(g, start, endAt)!!
+        assertTrue("a ten-kilometre detour is not worth a discount", direct in walk)
+    }
+
+    @Test
+    fun `the metres on a trail are counted off the walk, not guessed`() {
+        val g = awkwardNetwork(3)
+        g.markTrails(listOf((0 until side).map { En(it * step, 0.0) }))
+        val loop = Router.loop(g, En(step, step), 4_000.0)
+        assertNotNull(loop)
+        assertTrue("trail metres cannot exceed the walk", loop!!.trailM <= loop.metres + 1)
+        assertTrue("and are never negative", loop.trailM >= 0)
+    }
+
     @Test
     fun `the grid index finds what a full scan would`() {
         val g = awkwardNetwork(6)

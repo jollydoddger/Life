@@ -148,6 +148,28 @@ class WalkSpecTest {
     }
 
     @Test
+    fun `nothing matching still offers what is really there, labelled`() {
+        // Snowdonia's route relations are national trails: forty kilometres
+        // and straight, so a "circular, 5-10 km" ask matches none of them
+        // and the picker came back empty — which reads as "there is nothing
+        // here", in one of the busiest walking areas in Britain.
+        val found = listOf(
+            walk("Snowdonia Slate Trail", line(43_000.0), closest = 900.0),
+            walk("Cambrian Way", line(38_000.0), closest = 2_400.0),
+        )
+        assertTrue(
+            "none of them match the ask, which is why this exists",
+            Specifier.shortlist(found, WalkSpec(shape = Shape.CIRCULAR), 5_000.0, 10_000.0).isEmpty(),
+        )
+        val out = Specifier.nearMisses(found)
+        assertEquals(2, out.size)
+        assertEquals("nearest first", "Snowdonia Slate Trail (one way)", out.first().name)
+        // The length is left alone: dressing 43 km up as an 8 km walk would
+        // be inventing a route nobody surveyed.
+        assertEquals(43_000.0, out.first().lengthM, 100.0)
+    }
+
+    @Test
     fun `where it starts from is remembered too`() {
         // The field the first version of the form forgot. A spec written
         // before it existed must still load, as "where I am".

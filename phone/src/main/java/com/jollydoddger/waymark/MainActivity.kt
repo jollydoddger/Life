@@ -1891,6 +1891,10 @@ class MainActivity : Activity() {
      *  licence turns up nothing: driving distance, said out loud as such. */
     private val widerSearchM = 12_000.0
 
+    /** The widest "anywhere on this map" may honestly mean, as a radius.
+     *  A 50 km view is a region; the whole country is not. */
+    private val mapOriginMaxM = 25_000.0
+
     /**
      * Resolve where the walk may start, then search.
      *
@@ -1917,11 +1921,21 @@ class MainActivity : Activity() {
                 val b = map.viewportBounds()
                 val centre = En((b[0] + b[2]) / 2, (b[1] + b[3]) / 2)
                 // Half the diagonal is the honest radius of what he can see.
-                // Capped, because a map zoomed out to the whole of Wales is
-                // not a licence to plan a walk starting in Cardiff.
-                val slack = (kotlin.math.hypot(b[2] - b[0], b[3] - b[1]) / 2)
-                    .coerceIn(500.0, 12_000.0)
-                runSpec(spec, centre, slack, b)
+                val reach = kotlin.math.hypot(b[2] - b[0], b[3] - b[1]) / 2
+                // Beyond this the words stop being true. The cap used to
+                // clamp silently, so a map framed on the whole of Britain
+                // became a 12 km circle round the middle of the screen —
+                // which was somewhere near Shrewsbury while he was asking
+                // about Snowdonia, with nothing anywhere saying so.
+                if (reach > mapOriginMaxM) {
+                    say(
+                        "\u201CAnywhere on this map\u201D is currently about " +
+                            "${Brief.fmtKm(reach * 2)} across \u2014 most of the country. " +
+                            "Zoom in to the area you actually mean and ask again.",
+                    )
+                    return
+                }
+                runSpec(spec, centre, reach.coerceAtLeast(500.0), b)
             }
         }
     }
@@ -1976,6 +1990,11 @@ class MainActivity : Activity() {
             val found = withContext(Dispatchers.IO) {
                 runCatching { RouteFinder.find(this@MainActivity, here, searchM) }.getOrNull()
             }
+            // OpenStreetMap *failing* and OpenStreetMap being *empty* are
+            // different answers, and telling them apart is the whole
+            // difference between "your signal is bad" and "Snowdonia has no
+            // walks in it". He was shown the second when it was the first.
+            val osmFailed = found == null || found.note != null
             fun narrow(r: RouteFinder.Result?) = Specifier.shortlist(
                 r?.walks?.filter { w ->
                     bounds == null || w.lines.any { line ->
@@ -1985,40 +2004,80 @@ class MainActivity : Activity() {
                 spec, minM, maxM,
             )
             var real = narrow(found)
+            // Every named route near him, whatever its shape or length —
+            // kept even when it is far too long to offer, because a
+            // forty-kilometre trail he cannot walk today is still ground the
+            // planner should route along where it goes his way.
+            var trails = found?.walks.orEmpty()
             // A 500 m licence around a house in Anglesey contains no
             // published walking route at all, most days. Rather than an
             // empty picker, look once more at driving distance and say
             // outright that these are further out than he asked — the
-            // widening is offered, never slipped in.
+            // widening is offered, never slipped in. Pointless when the
+            // servers are down: the same servers answer the wider question.
             var widened = 0.0
-            if (real.isEmpty() && bounds == null && searchM < widerSearchM) {
+            if (real.isEmpty() && !osmFailed && bounds == null && searchM < widerSearchM) {
                 widened = widerSearchM
-                real = narrow(
-                    withContext(Dispatchers.IO) {
-                        runCatching {
-                            RouteFinder.find(this@MainActivity, here, widerSearchM)
-                        }.getOrNull()
-                    },
-                )
+                val wider = withContext(Dispatchers.IO) {
+                    runCatching {
+                        RouteFinder.find(this@MainActivity, here, widerSearchM)
+                    }.getOrNull()
+                }
+                real = narrow(wider)
+                if (wider != null && wider.note == null) trails = wider.walks
             }
+
+            // Nothing was fetched, so nothing can be planned either — the
+            // paths and the routes come from the same servers. Say that once,
+            // plainly, and don't spend ninety seconds proving it again.
+            if (osmFailed) {
+                if (real.isNotEmpty()) {
+                    WalkPicks.replace(this@MainActivity, real)
+                    showSpecPicks()
+                } else {
+                    pickDayOffset = 0
+                }
+                picksFromSpec = real.isNotEmpty()
+                say(
+                    (found?.note ?: "No route data could be fetched.") +
+                        " Nothing can be planned either \u2014 the paths come from the same " +
+                        "place. That is a connection problem, not an empty area.",
+                )
+                return@launch
+            }
+
+            // Walks were found, but none of the right shape or length. An
+            // empty picker reads as "there is nothing here", which around
+            // Snowdonia is a lie: a national trail is real walking ground
+            // and is only unmatched because it is forty kilometres and
+            // straight. Offer them with what they actually are stated.
+            var nearMiss = false
+            if (real.isEmpty() && trails.isNotEmpty()) {
+                real = Specifier.nearMisses(trails)
+                nearMiss = real.isNotEmpty()
+            }
+
             if (real.isNotEmpty()) {
                 WalkPicks.replace(this@MainActivity, real)
                 showSpecPicks()
                 say(
-                    if (widened > 0) {
-                        "Nothing published starts within ${Brief.fmtKm(searchM)} of there. " +
-                            "${real.size} within ${Brief.fmtKm(widened)} \u2014 a drive, not a " +
-                            "walk from the door. Working out one of our own alongside\u2026"
-                    } else {
-                        "${real.size} real walk${if (real.size == 1) "" else "s"} matching " +
-                            "\u2014 working out one of our own alongside\u2026"
+                    when {
+                        nearMiss ->
+                            "Nothing of that shape and length. ${real.size} near there, each " +
+                                "labelled with what it actually is \u2014 working out one of " +
+                                "our own alongside\u2026"
+                        widened > 0 ->
+                            "Nothing published starts within ${Brief.fmtKm(searchM)} of there. " +
+                                "${real.size} within ${Brief.fmtKm(widened)} \u2014 a drive, " +
+                                "not a walk from the door. Working out one of our own " +
+                                "alongside\u2026"
+                        else ->
+                            "${real.size} real walk${if (real.size == 1) "" else "s"} matching " +
+                                "\u2014 working out one of our own alongside\u2026"
                     },
                 )
             } else {
-                say(
-                    (found?.note?.plus(" ") ?: "") +
-                        "No established walk matches that. Working one out\u2026",
-                )
+                say("No established walk near there at all. Working one out\u2026")
             }
 
             // The invented one. Its shape follows the ask: nobody wants a
@@ -2033,6 +2092,14 @@ class MainActivity : Activity() {
                         here, target / (2 * Math.PI) * 1.9 + 900 + slackM,
                     )
                     if (graph.nodes.size < 20) return@runCatching null
+                    // His idea: use the confirmed path and work out the rest.
+                    // The named routes already fetched above are laid onto
+                    // the graph, and the ways under them become cheap to
+                    // walk — so a loop runs along waymarked ground where
+                    // that goes his way, and finds its own way home where it
+                    // doesn't. No extra request: this is the same geometry
+                    // the real-walk search just downloaded.
+                    graph.markTrails(trails.flatMap { it.lines })
                     val deadline = System.currentTimeMillis() + specBudgetMs
                     if (spec.shape == Shape.OUT_AND_BACK) {
                         Router.outAndBack(
@@ -2065,8 +2132,17 @@ class MainActivity : Activity() {
                 return@launch
             }
             val shapeWord = if (spec.shape == Shape.OUT_AND_BACK) "there and back" else "circular"
+            // Named for the ground it actually used, and only when it used
+            // enough of it to be worth saying. One trail near here can be
+            // named; several and it would be a guess which one it ran along,
+            // so it says what it can stand behind.
+            val onTrail = if (planned.trailM >= 400) {
+                if (trails.size == 1) " via ${trails.first().name}" else " on waymarked paths"
+            } else {
+                ""
+            }
             val invented = RouteFinder.FoundWalk(
-                name = "Planned ${Brief.fmtKm(planned.metres)} $shapeWord",
+                name = "Planned ${Brief.fmtKm(planned.metres)} $shapeWord$onTrail",
                 source = "Planned",
                 lines = listOf(planned.points),
                 closestM = 0.0,
@@ -2084,8 +2160,13 @@ class MainActivity : Activity() {
             pickDayOffset = spec.dayOffset
             showSpecPicks()
             val roads = planned.roadSummary()
+            val trailNote = if (planned.trailM >= 400) {
+                ", ${Brief.fmtKm(planned.trailM)} of it on waymarked routes"
+            } else {
+                ""
+            }
             say(
-                "Planned a ${Brief.fmtKm(planned.metres)} $shapeWord from here" +
+                "Planned a ${Brief.fmtKm(planned.metres)} $shapeWord from here" + trailNote +
                     (roads?.let { ", including $it" } ?: ", off the roads") +
                     ". ${picks.size} to choose from \u2014 \u2039 \u203a to flick through, " +
                     "Brief for the day\u2019s plan.",

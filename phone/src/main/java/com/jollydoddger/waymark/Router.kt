@@ -69,6 +69,18 @@ object Router {
      */
     const val ROAD_AVOID_FACTOR = 2.5
 
+    /**
+     * What a metre of waymarked, named route costs against a metre of
+     * ordinary path — the mirror image of [ROAD_AVOID_FACTOR], and read the
+     * same way: he would walk ten metres of anonymous field-edge path to get
+     * three metres of the Slate Trail.
+     *
+     * A discount rather than a rule. A trail that goes the wrong way is
+     * still the wrong way, and a loop must never be dragged half a mile out
+     * of shape to touch one — which is what a stronger number does.
+     */
+    const val TRAIL_BONUS = 0.7
+
     /** What a way counts as when the result is described back to him. */
     fun group(kind: String): String = when (kind) {
         "path", "footway", "bridleway", "track", "steps", "pedestrian" -> "path"
@@ -92,7 +104,16 @@ object Router {
             /** The same edge priced for someone avoiding roads. Computed
              *  once at build rather than multiplied per relaxation. */
             val avoidCost: Double = cost,
-        )
+        ) {
+            /**
+             * Whether this edge carries a named, waymarked route — the Slate
+             * Trail, a coast path, a local walking network. Set by
+             * [Graph.markTrails] rather than at build time, because which
+             * trails matter depends on where he is planning, and the graph
+             * itself is cached across plans.
+             */
+            var onTrail: Boolean = false
+        }
 
         // A uniform grid over the nodes. Finding the nearest node used to be
         // a linear scan of every node in the graph, and a single plan does
@@ -182,6 +203,88 @@ object Router {
          */
         fun nearestJunction(p: En, withinM: Double): Int? =
             nearestWhere(p, withinM) { edges[it].size >= 3 }
+
+        /**
+         * Mark the edges that lie under a real, named walking route.
+         *
+         * His idea, and the better half of it: rather than offering him a
+         * forty-kilometre national trail that can never match "circular,
+         * eight kilometres", *use* the trail — walk its waymarked ground
+         * where it goes his way, and let the router work out the rest.
+         *
+         * It works because a route relation is not a picture: it is built
+         * from the very same OpenStreetMap ways this graph is built from, so
+         * the trail and the network are the same lines and can be matched
+         * geometrically. (A map tile genuinely is a picture, and nothing in
+         * one can be routed on — that part of the idea cannot be done at
+         * any price.)
+         *
+         * Cleared first, because the graph is cached across plans and last
+         * search's trails are not this one's.
+         */
+        fun markTrails(lines: List<List<En>>, withinM: Double = 15.0) {
+            for (list in edges) for (e in list) e.onTrail = false
+            if (lines.isEmpty()) return
+            // A grid over the trail segments. Testing every edge against
+            // every trail point is tens of millions of distance tests on a
+            // real network; this makes it a handful per edge.
+            val cell = 50.0
+            fun key(e: Double, n: Double): Long =
+                (Math.floor(e / cell).toLong() shl 32) xor (Math.floor(n / cell).toLong() and 0xffffffffL)
+            val index = HashMap<Long, MutableList<Pair<En, En>>>()
+            for (line in lines) {
+                for (i in 1 until line.size) {
+                    val a = line[i - 1]
+                    val b = line[i]
+                    val seg = a to b
+                    // Every cell the segment's own box touches, so a long
+                    // segment is findable from anywhere along it.
+                    var ce = Math.floor(minOf(a.e, b.e) / cell).toLong()
+                    val toE = Math.floor(maxOf(a.e, b.e) / cell).toLong()
+                    while (ce <= toE) {
+                        var cn = Math.floor(minOf(a.n, b.n) / cell).toLong()
+                        val toN = Math.floor(maxOf(a.n, b.n) / cell).toLong()
+                        while (cn <= toN) {
+                            index.getOrPut((ce shl 32) xor (cn and 0xffffffffL)) { ArrayList() }
+                                .add(seg)
+                            cn++
+                        }
+                        ce++
+                    }
+                }
+            }
+            for (u in nodes.indices) {
+                for (e in edges[u]) {
+                    // The midpoint, not an end: two ways meeting a trail at a
+                    // junction share that node, and testing ends alone would
+                    // mark every side lane hanging off it.
+                    val mid = En(
+                        (nodes[u].e + nodes[e.to].e) / 2,
+                        (nodes[u].n + nodes[e.to].n) / 2,
+                    )
+                    var near = false
+                    var dx = -1
+                    while (dx <= 1 && !near) {
+                        var dy = -1
+                        while (dy <= 1 && !near) {
+                            val bucket = index[key(mid.e + dx * cell, mid.n + dy * cell)]
+                            if (bucket != null) {
+                                for ((a, b) in bucket) {
+                                    val q = Geom.nearestOnSegment(mid, a, b)
+                                    if (hypot(q.e - mid.e, q.n - mid.n) <= withinM) {
+                                        near = true
+                                        break
+                                    }
+                                }
+                            }
+                            dy++
+                        }
+                        dx++
+                    }
+                    if (near) e.onTrail = true
+                }
+            }
+        }
     }
 
     data class Planned(
@@ -199,6 +302,10 @@ object Router {
         /** Metres on each actual highway class, so a route that used roads
          *  can say which ones rather than lumping them together. */
         val byKind: Map<String, Double> = emptyMap(),
+        /** Metres of it running along a named, waymarked route — counted
+         *  off the edges actually walked, never estimated, so "3.1 km of it
+         *  is on the Slate Trail" is a checkable claim and not a flourish. */
+        val trailM: Double = 0.0,
     ) {
 
         /** "180 m on a B road, 40 m on an A road", or null if it kept off
@@ -243,7 +350,14 @@ object Router {
         val g = cachedGraph
         if (c != null && g != null) {
             val moved = hypot(centre.e - c.e, centre.n - c.n)
-            if (moved + radiusM <= cachedRadius) return g
+            if (moved + radiusM <= cachedRadius) {
+                // Last plan's trails are not this plan's, and a cached graph
+                // outlives both. Handing one back still carrying yesterday's
+                // discounts would quietly bend a walk toward a trail nobody
+                // fetched — and the walk would then claim metres on it.
+                g.markTrails(emptyList())
+                return g
+            }
         }
         val fresh = build(centre, radiusM)
         cachedGraph = fresh
@@ -355,6 +469,7 @@ object Router {
                 if (done[e.to]) continue
                 val key = edgeKey(u, e.to)
                 var step = if (avoidRoads) e.avoidCost else e.cost
+                if (e.onTrail) step *= TRAIL_BONUS
                 if (key in penalise) step *= REUSE_PENALTY
                 val alt = best[u] + step
                 if (alt < best[e.to]) {
@@ -465,15 +580,19 @@ object Router {
         val byGroup = HashMap<String, Double>()
         val byKind = HashMap<String, Double>()
         val seen = HashMap<Long, Double>()
+        var trail = 0.0
         for (i in 1 until walk.size) {
             val e = g.edges[walk[i - 1]].firstOrNull { it.to == walk[i] } ?: continue
             total += e.metres
             byGroup[group(e.kind)] = (byGroup[group(e.kind)] ?: 0.0) + e.metres
             byKind[e.kind] = (byKind[e.kind] ?: 0.0) + e.metres
+            if (e.onTrail) trail += e.metres
             val key = edgeKey(walk[i - 1], walk[i])
             if (seen.put(key, e.metres) != null) repeated += e.metres
         }
-        return Planned(pts, total, byGroup, if (total > 0) repeated / total else 0.0, byKind)
+        return Planned(
+            pts, total, byGroup, if (total > 0) repeated / total else 0.0, byKind, trail,
+        )
     }
 
     /**
@@ -757,6 +876,7 @@ object Router {
         byGroup = out.byGroup.mapValues { it.value * 2 },
         repeatFraction = 1.0,
         byKind = out.byKind.mapValues { it.value * 2 },
+        trailM = out.trailM * 2,
     )
 
     /** Point-to-point on the same graph, so the same rules apply. */
