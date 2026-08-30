@@ -58,6 +58,11 @@ update, from any computer on the same Wi-Fi as the watch:
 ## Using it
 
 **Zoom, on both devices: tap the map to zoom in, press and hold to zoom out.**
+The route wears its ends: a green play-triangle disc where it starts —
+honouring the reverse-arrows switch — and a dark squared disc where it
+finishes; on a circular walk the start draws on top, being the one that
+matters.
+
 Pinch works on the phone too. The watch's physical bottom button is left alone
 on purpose — on Wear OS it is the same navigation path as swipe-to-dismiss, so
 an app that steals it for zoom is an app you cannot reliably get out of.
@@ -260,7 +265,14 @@ every part currently painted. On the map they share a single **Weather**
 chip; the path overlays keep a chip each.
 
 **The timeline.** A scrubber along the bottom, five hours back and five
-forward. Drag it and watch a shower travel — which is the one thing a radar
+forward, with a ▶ that runs the whole span as a loop — a frame and a half a
+second — until a finger on the bar or the ⏸ takes over. The past and the
+future genuinely look different, on purpose: behind you is *measured radar*
+(sharp cells, RainViewer's palette); past the ~30-minute nowcast no radar
+exists yet, so the map switches to the *forecast* — a smooth wash on a grid
+kilometres wide, in this app's own colours. Dressing the model up in the
+measurement's clothes would be a lie about which kind of claim is on
+screen, and the label under the scrubber always names which you are on. Drag it and watch a shower travel — which is the one thing a radar
 tells you that a forecast cannot: not whether it will rain, but whether it is
 coming for you. Frames are held in memory and the next few warmed as you
 drag, so it animates rather than blinks, and panning the map keeps the moment
@@ -303,10 +315,11 @@ top. **"Buzz me there"** arms it: up to five numbered flags, and a strong
 vibrating notification as you arrive at each, so the turn can't slip past
 while the phone is in a pocket.
 
-Arming a buzz without a recording running quietly starts the same kind of
-GPS hold the watch uses (visible as a notification, sized to the walk with
-slack), because a buzz that only works with the app open is a promise about
-missed turns nobody can keep. Tap a flag to see the live numbers to it —
+The buzz rides the recording service when one runs, and the open map's own
+fixes otherwise — the phone never holds GPS on its own account (he saw the
+"Holding GPS ready" notification outside a walk and called it: the hold
+belongs to tracking), and the arming message says plainly where the buzz
+lives. Tap a flag to see the live numbers to it —
 distance left, time at your pace, climb remaining — or remove it; a new route
 retires them all — a flag on a line you are no longer walking is a lie
 waiting for an alarm. While the mode is on, taps pick points instead of

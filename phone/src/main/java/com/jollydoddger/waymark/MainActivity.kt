@@ -110,6 +110,8 @@ class MainActivity : Activity() {
     private lateinit var wxSeek: SeekBar
     private lateinit var wxFade: SeekBar
     private lateinit var wxLegend: LinearLayout
+    private lateinit var wxPlay: TextView
+    private var wxPlaying = false
     private var legendKey = ""
 
     /** The row of layer toggles across the top of the map, and the reading
@@ -337,6 +339,8 @@ class MainActivity : Activity() {
         }
         wxSeek = SeekBar(this).apply {
             setPadding(dp(14), dp(2), dp(14), dp(6))
+            // handled below: a finger on the bar stops the player — two
+            // drivers on one scrubber fight, and the finger wins.
             // At the far left the thumb sits about 25dp in, low down the
             // screen — squarely in the back-swipe strip on a phone with
             // gesture navigation. Grabbing the oldest frame should not throw
@@ -350,7 +354,7 @@ class MainActivity : Activity() {
                 override fun onProgressChanged(bar: SeekBar?, value: Int, fromUser: Boolean) {
                     if (fromUser) showWxFrame(value)
                 }
-                override fun onStartTrackingTouch(bar: SeekBar?) { }
+                override fun onStartTrackingTouch(bar: SeekBar?) { stopWxPlay() }
                 override fun onStopTrackingTouch(bar: SeekBar?) { }
             })
         }
@@ -382,8 +386,22 @@ class MainActivity : Activity() {
                 }
             })
         }
+        // Play runs the ten hours as a loop — the whole point of a radar is
+        // watching which way the shower travels, and a thumb on a scrubber
+        // is a poor animator.
+        wxPlay = TextView(this).apply {
+            text = "▶"
+            textSize = 18f
+            gravity = Gravity.CENTER
+            setTextColor(Color.WHITE)
+            setPadding(dp(10), dp(2), dp(10), dp(2))
+            setOnClickListener { if (wxPlaying) stopWxPlay() else startWxPlay() }
+        }
         val wxTopRow = LinearLayout(this).apply {
             gravity = Gravity.CENTER_VERTICAL
+            addView(wxPlay, LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT,
+            ))
             addView(wxLabel, LinearLayout.LayoutParams(
                 0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f,
             ))
@@ -690,6 +708,13 @@ class MainActivity : Activity() {
         bindOverlays()
         map.onRoutePointPicked = { en, alongM -> pointPicked(en, alongM) }
         refreshMarks()
+        // The phone never holds GPS outside a recording any more; a hold
+        // left running by the earlier design dies here rather than at its
+        // old deadline.
+        if (!recording && !wantRecording && warmUntil > 0) {
+            warmUntil = 0
+            TrackingService.stop(this)
+        }
         // Walks the assistant queued from the chat screen are waiting here
         // when he comes back to the map.
         maybeShowPicker()
@@ -698,6 +723,16 @@ class MainActivity : Activity() {
                 lastFix = en
                 if (!stale) lastFixAt = System.currentTimeMillis()
                 map.setFix(en.e, en.n, stale)
+                // With the map open and no recording running, these fixes
+                // are the only ones anybody has — the buzz watches them.
+                if (!stale && !recording) {
+                    runCatching {
+                        Marks.arrivedAt(this, en)?.let {
+                            Marks.buzz(this, it)
+                            refreshMarks()
+                        }
+                    }
+                }
                 // Opening the app should answer "where am I" without a tap.
                 // Once only: after that the map is his to move.
                 if (!centredThisOpen) {
@@ -709,6 +744,7 @@ class MainActivity : Activity() {
     }
 
     override fun onPause() {
+        stopWxPlay()
         timerChip.removeCallbacks(timerTick)
         try { unregisterReceiver(trailWatcher) } catch (e: IllegalArgumentException) { }
         locator?.stop()
@@ -916,6 +952,7 @@ class MainActivity : Activity() {
         if (!wantCloud) map.setSky(null)
         if (!wantTemp) tempChip.visibility = View.GONE
         if (!wantWeather) {
+            stopWxPlay()
             wxFrames = emptyList()
             radarFrames = emptyList()
             wxField = null
@@ -1006,6 +1043,7 @@ class MainActivity : Activity() {
     private fun setWxFrames(frames: List<WxFrame>, keep: Long? = null) {
         wxFrames = frames
         if (frames.isEmpty()) {
+            stopWxPlay()
             wxBar.visibility = View.GONE
             return
         }
@@ -1014,6 +1052,36 @@ class MainActivity : Activity() {
         val i = Timeline.indexOfNow(frames, keep ?: System.currentTimeMillis())
         wxSeek.progress = i
         showWxFrame(i)
+    }
+
+    /**
+     * The scrubber, driven: about a frame and a half a second around the
+     * whole ten hours, looping, until his finger or the ⏸ takes over. The
+     * prefetch showWxFrame already does keeps the loop a beat ahead of the
+     * downloads after the first lap.
+     */
+    private val wxPlayTick = object : Runnable {
+        override fun run() {
+            if (!wxPlaying || wxFrames.isEmpty() || !alive) return
+            val next = (wxIndex + 1) % wxFrames.size
+            wxSeek.progress = next
+            showWxFrame(next)
+            wxPlay.postDelayed(this, 700L)
+        }
+    }
+
+    private fun startWxPlay() {
+        if (wxFrames.isEmpty()) return
+        wxPlaying = true
+        wxPlay.text = "⏸"
+        wxPlay.removeCallbacks(wxPlayTick)
+        wxPlay.post(wxPlayTick)
+    }
+
+    private fun stopWxPlay() {
+        wxPlaying = false
+        wxPlay.text = "▶"
+        wxPlay.removeCallbacks(wxPlayTick)
     }
 
     /**
@@ -1718,16 +1786,16 @@ class MainActivity : Activity() {
             return
         }
         refreshMarks()
-        // The buzz has to notice arrival with the phone in a pocket, which
-        // needs GPS flowing. Recording already provides it; otherwise the
-        // same quiet hold the watch uses, sized to the walk with slack, and
-        // visible as a notification for as long as it runs.
-        if (!recording) {
-            val holdMs = ((etaMins * 2).toLong() * 60_000L).coerceIn(2 * 3600_000L, 6 * 3600_000L)
-            warmUntil = System.currentTimeMillis() + holdMs
-            TrackingService.warm(this)
-        }
-        say("Mark ${mark.number} set — you'll get a buzz there.")
+        // No standalone GPS hold on the phone — he saw the "Holding GPS
+        // ready" notification and called it: the hold belongs to tracking.
+        // The buzz rides the recording service when one runs, and the open
+        // map's own fixes otherwise, and the message says exactly that
+        // rather than promising a pocket-buzz nothing is listening for.
+        say(
+            if (recording) "Mark ${mark.number} set — you'll get a buzz there."
+            else "Mark ${mark.number} set — the buzz fires while recording, " +
+                "or with the map open.",
+        )
     }
 
     private fun fmtMins(mins: Double): String {

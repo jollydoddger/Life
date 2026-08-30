@@ -1,5 +1,9 @@
 package com.jollydoddger.waymark.shared
 
+import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
 import android.content.Context
 import org.json.JSONArray
 import org.json.JSONObject
@@ -79,6 +83,45 @@ object Marks {
     /** The armed mark the fix has arrived at, if any. */
     fun arrivedAt(c: Context, fix: En): Mark? =
         loadAny(c).firstOrNull { hypot(it.e - fix.e, it.n - fix.n) <= ARRIVE_M }
+
+    const val CHANNEL = "waymark_marks"
+    private const val NOTIFICATION_BASE = 4200
+
+    /**
+     * The point he asked not to miss, arriving as a buzz he cannot. High
+     * importance with vibration — the one notification in the app that
+     * exists to interrupt — and the mark clears itself, so it fires once,
+     * not again every fix while he stands on it. Shared between the
+     * recording service and the open map, because the buzz has to work from
+     * whichever of them is watching the fixes.
+     */
+    fun buzz(ctx: Context, mark: Mark) {
+        removeAny(ctx, mark.number)
+        val nm = ctx.getSystemService(NotificationManager::class.java)
+        if (nm.getNotificationChannel(CHANNEL) == null) {
+            nm.createNotificationChannel(
+                NotificationChannel(
+                    CHANNEL, "Marked point reached", NotificationManager.IMPORTANCE_HIGH,
+                ).apply {
+                    enableVibration(true)
+                    vibrationPattern = longArrayOf(0, 400, 200, 400, 200, 600)
+                },
+            )
+        }
+        val open = ctx.packageManager.getLaunchIntentForPackage(ctx.packageName)?.let {
+            PendingIntent.getActivity(ctx, 2, it, PendingIntent.FLAG_IMMUTABLE)
+        }
+        nm.notify(
+            NOTIFICATION_BASE + mark.number,
+            Notification.Builder(ctx, CHANNEL)
+                .setContentTitle("You're at mark ${mark.number}")
+                .setContentText("The point you flagged on the route is here.")
+                .setSmallIcon(android.R.drawable.ic_menu_mylocation)
+                .setContentIntent(open)
+                .setAutoCancel(true)
+                .build(),
+        )
+    }
 
     /** Drop one mark by number, whatever route it was bound to — the
      *  service's cleanup after a buzz. */

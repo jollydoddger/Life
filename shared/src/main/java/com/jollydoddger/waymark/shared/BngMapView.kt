@@ -349,6 +349,7 @@ class BngMapView @JvmOverloads constructor(
         drawTrail(canvas)
         drawPreview(canvas)
         drawPois(canvas)
+        drawRouteEnds(canvas)
         drawMarks(canvas)
         drawStreamlines(canvas)
         drawWind(canvas)
@@ -1062,6 +1063,53 @@ class BngMapView @JvmOverloads constructor(
         color = Color.WHITE
         textAlign = Paint.Align.CENTER
         isFakeBoldText = true
+    }
+
+    private val startFill = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.rgb(24, 138, 62) }
+    private val endFill = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.rgb(40, 44, 48) }
+    private val endRing = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE; color = Color.WHITE
+    }
+    private val endGlyph = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.WHITE }
+
+    /**
+     * Where the route begins and ends — the beginning most of all, since
+     * "where do I actually start this thing" is the first question a loaded
+     * GPX gets asked and the line alone never answers it. A green disc with
+     * a play-triangle for the start, a dark disc with a square for the end;
+     * both honour the reverse-arrows switch, and on a circular walk they sit
+     * on top of each other with the start drawn last, because the start is
+     * the one that matters.
+     */
+    private fun drawRouteEnds(canvas: Canvas) {
+        if (routePts.size < 2) return
+        val m = mpp(zl)
+        val start = if (routeReversed) routePts.last() else routePts.first()
+        val end = if (routeReversed) routePts.first() else routePts.last()
+        val r = 10f * density
+        endRing.strokeWidth = 2.5f * density
+
+        val ex = sx(end.e, m)
+        val ey = sy(end.n, m)
+        if (ex > -r && ey > -r && ex < width + r && ey < height + r) {
+            canvas.drawCircle(ex, ey, r * 0.9f, endFill)
+            canvas.drawCircle(ex, ey, r * 0.9f, endRing)
+            val q = r * 0.36f
+            canvas.drawRect(ex - q, ey - q, ex + q, ey + q, endGlyph)
+        }
+
+        val sxp = sx(start.e, m)
+        val syp = sy(start.n, m)
+        if (sxp > -r && syp > -r && sxp < width + r && syp < height + r) {
+            canvas.drawCircle(sxp, syp, r, startFill)
+            canvas.drawCircle(sxp, syp, r, endRing)
+            path.rewind()
+            path.moveTo(sxp - r * 0.32f, syp - r * 0.5f)
+            path.lineTo(sxp - r * 0.32f, syp + r * 0.5f)
+            path.lineTo(sxp + r * 0.55f, syp)
+            path.close()
+            canvas.drawPath(path, endGlyph)
+        }
     }
 
     private fun drawMarks(canvas: Canvas) {

@@ -64,8 +64,6 @@ class TrackingService : Service() {
 
         private const val WARM_CHECK_MS = 60_000L
 
-        const val MARK_CHANNEL = "waymark_marks"
-        private const val MARK_NOTIFICATION_BASE = 4200
 
         /** Warm fixes are slow on purpose: enough to hold the lock, far
          *  lighter than the 1-second foreground locator. */
@@ -109,7 +107,12 @@ class TrackingService : Service() {
         // because this runs every few seconds for hours in a foreground
         // service: whatever goes wrong in here, a missed buzz beats a
         // crash-looping app.
-        runCatching { Marks.arrivedAt(this, en)?.let { buzz(it) } }
+        runCatching {
+            Marks.arrivedAt(this, en)?.let {
+                Marks.buzz(this, it)
+                sendBroadcast(Intent(BROADCAST_TRAIL).setPackage(packageName))
+            }
+        }
         // Warm mode records nothing beyond that: the fixes exist to keep
         // the chipset lock and getLastKnownLocation fresh, never the trail.
         if (!tracking) return@LocationListener
@@ -118,40 +121,6 @@ class TrackingService : Service() {
         }
     }
 
-    /**
-     * The point he asked not to miss, arriving as a buzz he cannot. High
-     * importance with vibration — this is the one notification in the app
-     * that exists to interrupt — and the mark clears itself, so it fires
-     * once, not every four seconds while he stands on it.
-     */
-    private fun buzz(mark: Mark) {
-        Marks.removeAny(this, mark.number)
-        sendBroadcast(Intent(BROADCAST_TRAIL).setPackage(packageName))
-        val nm = getSystemService(NotificationManager::class.java)
-        if (nm.getNotificationChannel(MARK_CHANNEL) == null) {
-            nm.createNotificationChannel(
-                NotificationChannel(
-                    MARK_CHANNEL, "Marked point reached", NotificationManager.IMPORTANCE_HIGH,
-                ).apply {
-                    enableVibration(true)
-                    vibrationPattern = longArrayOf(0, 400, 200, 400, 200, 600)
-                },
-            )
-        }
-        val open = packageManager.getLaunchIntentForPackage(packageName)?.let {
-            PendingIntent.getActivity(this, 2, it, PendingIntent.FLAG_IMMUTABLE)
-        }
-        nm.notify(
-            MARK_NOTIFICATION_BASE + mark.number,
-            Notification.Builder(this, MARK_CHANNEL)
-                .setContentTitle("You're at mark ${mark.number}")
-                .setContentText("The point you flagged on the route is here.")
-                .setSmallIcon(android.R.drawable.ic_menu_mylocation)
-                .setContentIntent(open)
-                .setAutoCancel(true)
-                .build(),
-        )
-    }
 
     /** The warm window's clock: past the deadline and not recording, stop.
      *  Checking a stored deadline is what ends the hold with no background
