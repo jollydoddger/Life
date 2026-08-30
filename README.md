@@ -260,6 +260,29 @@ way, paths — then the trail you have actually walked on top of everything.
 
 ## Where the sun will be
 
+## Finding a walk
+
+Ask the assistant for one — "find me a 4–6 mile walk south-east", "anything
+circular near Newborough?" — and it searches OpenStreetMap's named
+walking-route relations up to 25 km out (roughly a 20-minute drive), plus
+your own indexed GPX library, filtered by direction and length when you give
+them. It can also fetch a GPX from a **direct link** a web search turns up —
+free-download sites only; AllTrails, komoot and OS Maps are refused by name,
+because their terms are not this app's to spend. A downloaded file is
+sniffed as actual GPX and size-capped before it is parsed.
+
+Everything found lands on a **picker over the live map**: each candidate
+previews as a dashed line, ‹ and › cycle through them, and the map fits to
+each. **Use** adopts one as the route (the previous route is banked, as
+ever). **Start walk** adopts it *and* starts recording in the same tap, with
+an elapsed-time clock beside the temperature readout — the clock starts
+before the offline tiles fetch, because the timer is for the walk, not the
+download. **Parking** finds the nearest OSM-mapped car park within 500 m of
+the route start (or the start itself, and says so) and opens it in Google
+Maps driving navigation. Candidates expire after half an hour: a picker
+popping up over the map an hour after the question was asked is a haunting,
+not a feature.
+
 The ☀ button holds today's solar arc over the camera: point the phone at the
 hills and see where the sun is now, where it goes down, and roughly when it
 stops being useful light. Sunset, golden hour and dusk are marked on the arc

@@ -150,7 +150,22 @@ class Assistant(private val ctx: Context, private val tools: GeoTools) {
                 if (result.startsWith("Restored")) actions += Action(result.substringBefore('.'))
                 result
             }
-            "find_walks" -> tools.findWalks(num("radius_km"))
+            "find_walks" -> {
+                val result = tools.findWalks(
+                    num("radius_km"), str("bearing"), num("min_km"), num("max_km"),
+                )
+                if ("queued on the map" in result) {
+                    actions += Action("Queued walks on the map's picker")
+                }
+                result
+            }
+            "download_gpx" -> {
+                val result = tools.downloadGpx(str("url"))
+                if (!result.startsWith("Failed")) {
+                    actions += Action(result.substringBefore(':') + " — on the map's picker")
+                }
+                result
+            }
             "walk_brief" -> tools.walkBrief(num("depart_in_minutes"))
             "measure_to" -> tools.measureTo(str("place"))
             "weather" -> tools.weather()
@@ -376,18 +391,54 @@ class Assistant(private val ctx: Context, private val tools: GeoTools) {
             ),
             tool(
                 "find_walks",
-                "List existing walking routes whose LINE passes within a radius of his " +
+                "Find existing walking routes whose LINE passes within a radius of his " +
                     "position — OpenStreetMap's named walking/hiking routes plus his own " +
-                    "indexed GPX library, ranked by closest approach. Listing only: he " +
-                    "loads one himself via the GPX button's \"Walks near me\".",
+                    "indexed GPX library, ranked by closest approach. Matches are queued " +
+                    "on the map's picker, where he previews each and takes one; nothing " +
+                    "is loaded onto the route by this tool. Use the filters when he " +
+                    "gives a direction or a length — \"south east, 4-6 miles\" is " +
+                    "bearing SE with min/max converted to km.",
                 schema(
                     mapOf(
                         "radius_km" to property(
                             "number",
-                            "Search radius in KILOMETRES (0.5–5; convert miles first).",
+                            "Search radius in KILOMETRES (0.5–25; convert miles first; " +
+                                "25 is roughly a 20-minute drive).",
+                        ),
+                        "bearing" to property(
+                            "string",
+                            "Optional compass direction from him (N, NE, \"south east\"…): " +
+                                "only walks roughly that way. Omit for any direction.",
+                        ),
+                        "min_km" to property(
+                            "number",
+                            "Optional minimum route length in km; 0 for no minimum.",
+                        ),
+                        "max_km" to property(
+                            "number",
+                            "Optional maximum route length in km; 0 for no maximum.",
                         ),
                     ),
                     listOf("radius_km"),
+                ),
+            ),
+            tool(
+                "download_gpx",
+                "Download one GPX file from a DIRECT link (the URL of the .gpx file " +
+                    "itself, usually found with web search) and queue it on the map's " +
+                    "picker for him to preview and take — never loaded straight onto " +
+                    "the route. Free-download sites are fine; NEVER AllTrails, komoot " +
+                    "or OS Maps links — their terms forbid it and the tool refuses " +
+                    "them. If it fails with a page instead of a file, find the direct " +
+                    ".gpx link on that page's site and try that.",
+                schema(
+                    mapOf(
+                        "url" to property(
+                            "string",
+                            "Direct http(s) URL of the .gpx file.",
+                        ),
+                    ),
+                    listOf("url"),
                 ),
             ),
             tool(

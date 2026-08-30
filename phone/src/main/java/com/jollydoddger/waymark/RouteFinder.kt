@@ -74,8 +74,12 @@ object RouteFinder {
      */
     private fun fromOsm(near: En, radiusM: Double): List<FoundWalk> {
         val (lat, lon) = Bng.toWgs84(near)
-        val (south, west) = Bng.toWgs84(En(near.e - CLIP_M, near.n - CLIP_M))
-        val (north, east) = Bng.toWgs84(En(near.e + CLIP_M, near.n + CLIP_M))
+        // The clip box must grow with the search radius: a fixed ±20 km box
+        // under a 25 km radius clips a 22-km-away walk to no geometry at
+        // all, and the closest-distance guard below then drops it silently.
+        val clipM = maxOf(CLIP_M, radiusM + 5_000.0)
+        val (south, west) = Bng.toWgs84(En(near.e - clipM, near.n - clipM))
+        val (north, east) = Bng.toWgs84(En(near.e + clipM, near.n + clipM))
         // One literal with templates (a .format() over concatenated literals
         // binds only to the last), and ${'$'} for the regex end.
         val at = "%.5f,%.5f".format(lat, lon)

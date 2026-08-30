@@ -7,6 +7,7 @@ import com.jollydoddger.waymark.shared.Poi
 import com.jollydoddger.waymark.shared.PoiStore
 import com.jollydoddger.waymark.shared.Route
 import com.jollydoddger.waymark.shared.RouteStore
+import com.jollydoddger.waymark.shared.Gpx
 import com.jollydoddger.waymark.shared.Sun
 import org.json.JSONArray
 import org.json.JSONObject
@@ -36,6 +37,10 @@ class GeoTools(
 ) {
 
     private fun route(): Route? = RouteStore.load(ctx)
+
+    /** A downloaded GPX bigger than this is not a walking route. */
+    private val MAX_GPX_BYTES = 5 * 1024 * 1024
+
 
     private fun km(m: Double) = "%.1f km".format(m / 1000)
 
@@ -438,26 +443,94 @@ class GeoTools(
 
     /**
      * The same search as the GPX button's "Walks near me" — OSM walking-route
-     * relations plus his indexed GPX library, ranked by how close each line
-     * comes. A listing, not an adoption: choosing and loading one stays a
-     * deliberate act in the UI, where the preview is.
+     * relations plus his indexed GPX library — but reaching a drive away, and
+     * narrowable by direction and length, because "a walk south-east, four to
+     * six miles" is how the question actually arrives. Survivors are queued
+     * on the map's picker, where choosing stays a deliberate act with a
+     * preview in front of it.
      */
-    fun findWalks(radiusKm: Double): String {
+    fun findWalks(radiusKm: Double, bearing: String, minKm: Double, maxKm: Double): String {
         val here = fix() ?: return "No GPS fix yet — the search is centred on his position."
-        val radius = (if (radiusKm <= 0) 1.0 else radiusKm).coerceAtMost(5.0) * 1000
+        val radius = (if (radiusKm <= 0) 5.0 else radiusKm).coerceAtMost(25.0) * 1000
+        progress("Searching walking routes within ${km(radius)}…")
         val result = RouteFinder.find(ctx, here, radius)
+        val filtered = WalkFilter.filter(
+            result.walks, here, bearing.ifBlank { null }, minKm * 1000, maxKm * 1000,
+        )
         val prefix = result.note?.plus("\n").orEmpty()
-        if (result.walks.isEmpty()) {
-            return prefix + "No walking route's line comes within ${km(radius)} of him — " +
-                "neither OpenStreetMap's route relations nor his GPX library " +
-                "(${Library.count(ctx)} routes indexed). A bigger radius may."
+        if (filtered.isEmpty()) {
+            val narrowed = if (result.walks.isEmpty()) "" else {
+                " ${result.walks.size} were found before the direction/length filter — " +
+                    "loosening it may help."
+            }
+            return prefix + "No walking route matches within ${km(radius)} — neither " +
+                "OpenStreetMap's route relations nor his GPX library " +
+                "(${Library.count(ctx)} routes indexed).$narrowed"
         }
-        val listing = result.walks.take(10).joinToString("\n") { w ->
-            "- ${w.name}: line ${w.closestM.roundToInt()} m away, ${km(w.lengthM)} of path (${w.source})"
+        WalkPicks.replace(ctx, filtered)
+        val listing = filtered.take(10).joinToString("\n") { w ->
+            val towards = Sun.compass(WalkFilter.bearingDeg(here, WalkFilter.nearestPoint(here, w.lines)))
+            "- ${w.name}: ${km(w.lengthM)} of path, line ${km(w.closestM)} $towards (${w.source})"
         }
-        return prefix + "Walks whose line passes within ${km(radius)} (closest first):\n" +
-            listing + "\nThese are listed, not loaded — he adopts one from the GPX " +
-            "button's \"Walks near me\", where a preview is drawn first."
+        return prefix + "Walks matching, closest first:\n" + listing +
+            "\nThey are queued on the map — Prev/Next previews each, " +
+            "Use takes one, Start walk takes it and starts recording."
+    }
+
+    /**
+     * A GPX file from a direct link, into the map's picker — never straight
+     * onto the route. The guards are the whole tool: only http(s), only
+     * content that actually parses as GPX, only a sane size. AllTrails,
+     * komoot and OS Maps are refused by host as well as by the tool
+     * description — their terms are not this app's to spend.
+     */
+    fun downloadGpx(url: String): String {
+        val lower = url.lowercase()
+        if (!lower.startsWith("http://") && !lower.startsWith("https://")) {
+            return "Failed: only a direct http(s) link to a .gpx file."
+        }
+        for (banned in listOf("alltrails", "komoot", "osmaps", "ordnancesurvey")) {
+            if (banned in lower) return "Failed: $banned links are off-limits (their terms)."
+        }
+        progress("Downloading GPX…")
+        val bytes = try {
+            Net.stream(url, timeoutMs = 20_000) { input ->
+                val out = java.io.ByteArrayOutputStream()
+                val buf = ByteArray(8 * 1024)
+                while (true) {
+                    val n = input.read(buf)
+                    if (n < 0) break
+                    out.write(buf, 0, n)
+                    if (out.size() > MAX_GPX_BYTES) {
+                        throw RuntimeException("bigger than ${MAX_GPX_BYTES / 1_000_000} MB")
+                    }
+                }
+                out.toByteArray()
+            }
+        } catch (e: Exception) {
+            return "Failed: couldn't download it (${e.message ?: "no connection"})."
+        }
+        val head = String(bytes, 0, minOf(bytes.size, 512), Charsets.UTF_8)
+        if (!Gpx.looksLikeGpx(head)) {
+            return "Failed: that isn't a GPX file — likely a web page around the real " +
+                "download link. A direct link ends in .gpx or serves the file itself."
+        }
+        val route = try {
+            Gpx.parse(java.io.ByteArrayInputStream(bytes))
+        } catch (e: Exception) {
+            return "Failed: the GPX wouldn't parse (${e.message ?: "malformed"})."
+        }
+        val walk = RouteFinder.FoundWalk(
+            name = route.name.ifBlank { "Downloaded route" },
+            source = "Web",
+            lines = listOf(route.points),
+            closestM = fix()?.let { Geom.closestApproach(it, route.points) } ?: 0.0,
+            lengthM = Geom.length(route.points),
+        )
+        WalkPicks.append(ctx, walk)
+        return "\u201C${walk.name}\u201D downloaded: ${km(walk.lengthM)}" +
+            (fix()?.let { ", line ${km(walk.closestM)} from him" } ?: "") +
+            ". Queued on the map picker — he previews and takes it there."
     }
 
     /**

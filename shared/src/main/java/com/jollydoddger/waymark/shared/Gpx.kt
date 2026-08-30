@@ -18,6 +18,14 @@ object Gpx {
      * if the file has no track, every `rtept`. Coordinates convert to BNG at
      * the door — nothing downstream ever sees latitude again.
      */
+    /**
+     * Whether the head of a download is plausibly a GPX file at all. A URL
+     * that promised a route often serves the web page around the download
+     * link instead, and feeding HTML to the parser gives a worse error than
+     * saying what actually arrived.
+     */
+    fun looksLikeGpx(head: String): Boolean = head.contains("<gpx", ignoreCase = true)
+
     fun parse(input: InputStream): Route {
         val parser = XmlPullParserFactory.newInstance().apply { isNamespaceAware = false }.newPullParser()
         parser.setInput(input, null)

@@ -115,6 +115,15 @@ class MainActivity : Activity() {
     private lateinit var chipRow: LinearLayout
     private lateinit var chipScroll: HorizontalScrollView
     private lateinit var tempChip: TextView
+    private lateinit var timerChip: TextView
+
+    // The walk picker: candidates the assistant queued, cycled over the map.
+    private lateinit var pickerBar: LinearLayout
+    private lateinit var pickerTitle: TextView
+    private lateinit var pickerCount: TextView
+    private var picks: List<RouteFinder.FoundWalk> = emptyList()
+    private var pickIndex = 0
+    private var pickerShowing = false
 
     /**
      * Whether this screen is still the one on the phone. Radar and Weather
@@ -400,8 +409,72 @@ class MainActivity : Activity() {
         // system bars — and of the keyboard. The stack itself is always
         // present now: the weather timeline has to work with the assistant
         // switched off, which is how the app ships.
+        // --- the walk picker: what the assistant found, one at a time ---
+        pickerTitle = TextView(this).apply {
+            setTextColor(Color.WHITE)
+            textSize = 14f
+            setSingleLine(true)
+            ellipsize = android.text.TextUtils.TruncateAt.MIDDLE
+            setPadding(dp(14), dp(8), dp(6), dp(2))
+        }
+        pickerCount = TextView(this).apply {
+            setTextColor(Color.argb(220, 200, 206, 200))
+            textSize = 13f
+            setPadding(dp(4), dp(8), dp(6), dp(2))
+        }
+        fun pickerButton(label: String, wide: Boolean = false, onTap: () -> Unit) =
+            TextView(this).apply {
+                text = label
+                textSize = if (wide) 14f else 19f
+                gravity = Gravity.CENTER
+                setTextColor(Color.WHITE)
+                setBackgroundColor(Color.argb(255, 44, 52, 48))
+                setPadding(dp(if (wide) 14 else 16), dp(8), dp(if (wide) 14 else 16), dp(8))
+                setOnClickListener { onTap() }
+            }
+        val pickerClose = TextView(this).apply {
+            text = "✕"
+            textSize = 17f
+            setTextColor(Color.argb(230, 220, 226, 220))
+            setPadding(dp(10), dp(8), dp(14), dp(2))
+            setOnClickListener { dismissPicker() }
+        }
+        val pickerTop = LinearLayout(this).apply {
+            gravity = Gravity.CENTER_VERTICAL
+            addView(pickerTitle, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+            addView(pickerCount)
+            addView(pickerClose)
+        }
+        val pickerRow = LinearLayout(this).apply {
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(10), dp(6), dp(10), dp(10))
+            fun space() = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT,
+            ).apply { rightMargin = dp(8) }
+            addView(pickerButton("‹") { showPick(pickIndex - 1) }, space())
+            addView(pickerButton("›") { showPick(pickIndex + 1) }, space())
+            addView(View(this@MainActivity), LinearLayout.LayoutParams(0, 1, 1f))
+            addView(pickerButton("Use", wide = true) { usePick() }, space())
+            addView(pickerButton("Start walk", wide = true) { startWalkFromPick() }, space())
+            addView(pickerButton("Parking", wide = true) { openParking() })
+        }
+        pickerBar = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundColor(Color.argb(230, 22, 26, 24))
+            visibility = View.GONE
+            addView(pickerTop, LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT,
+            ))
+            addView(pickerRow, LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT,
+            ))
+        }
+
         bottomStack = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
+            addView(pickerBar, LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT,
+            ))
             addView(wxBar, LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT,
             ))
@@ -437,6 +510,14 @@ class MainActivity : Activity() {
             setPadding(dp(12), dp(4), dp(12), dp(4))
             visibility = View.GONE
         }
+        timerChip = TextView(this).apply {
+            textSize = 26f
+            setTypeface(typeface, android.graphics.Typeface.BOLD)
+            setTextColor(Color.WHITE)
+            setBackgroundColor(Color.argb(205, 30, 34, 32))
+            setPadding(dp(12), dp(4), dp(12), dp(4))
+            visibility = View.GONE
+        }
         chipRow = LinearLayout(this).apply {
             gravity = Gravity.CENTER_VERTICAL
             setPadding(dp(2), 0, dp(2), 0)
@@ -446,9 +527,17 @@ class MainActivity : Activity() {
             visibility = View.GONE
             addView(chipRow)
         }
+        val readouts = LinearLayout(this).apply {
+            addView(tempChip, LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT,
+            ))
+            addView(timerChip, LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT,
+            ).apply { leftMargin = dp(8) })
+        }
         val topBar = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            addView(tempChip, LinearLayout.LayoutParams(
+            addView(readouts, LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT,
             ).apply { bottomMargin = dp(6) })
             addView(chipScroll, LinearLayout.LayoutParams(
@@ -552,7 +641,12 @@ class MainActivity : Activity() {
         map.setPois(PoiStore.load(this))
         map.setColours(routeColour, arrowColour, trailColour)
         // A Start pressed on the watch while this app was closed waits here.
-        if (wantRecording && !recording) TrackingService.start(this)
+        // The timestamp too: this path never set one, so a watch-started
+        // walk showed hours-old elapsed time and saved with a wrong duration.
+        if (wantRecording && !recording) {
+            recordingStartedAt = System.currentTimeMillis()
+            TrackingService.start(this)
+        }
         paintRecordButton()
         val filter = IntentFilter(TrackingService.BROADCAST_TRAIL)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -566,6 +660,9 @@ class MainActivity : Activity() {
         }
         buildChips()
         bindOverlays()
+        // Walks the assistant queued from the chat screen are waiting here
+        // when he comes back to the map.
+        maybeShowPicker()
         if (checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
             locator = Locator(this, { en, stale ->
                 lastFix = en
@@ -582,6 +679,7 @@ class MainActivity : Activity() {
     }
 
     override fun onPause() {
+        timerChip.removeCallbacks(timerTick)
         try { unregisterReceiver(trailWatcher) } catch (e: IllegalArgumentException) { }
         locator?.stop()
         locator = null
@@ -636,6 +734,33 @@ class MainActivity : Activity() {
 
     private fun paintRecordButton() {
         recordIcon.active = recording
+        updateTimer()
+    }
+
+    /**
+     * The walk clock, ticking beside the temperature while recording. The
+     * tick stops itself the moment recording does — paintRecordButton runs
+     * on toggle, on resume and on every trail broadcast, so the pill dies
+     * within a second of the service stopping, from either wrist or phone.
+     */
+    private val timerTick = object : Runnable {
+        override fun run() {
+            if (!alive || !recording || recordingStartedAt == 0L) {
+                timerChip.visibility = View.GONE
+                return
+            }
+            val s = (System.currentTimeMillis() - recordingStartedAt) / 1000
+            timerChip.text =
+                if (s >= 3600) "%d:%02d:%02d".format(s / 3600, (s % 3600) / 60, s % 60)
+                else "%d:%02d".format(s / 60, s % 60)
+            timerChip.visibility = View.VISIBLE
+            timerChip.postDelayed(this, 1_000)
+        }
+    }
+
+    private fun updateTimer() {
+        timerChip.removeCallbacks(timerTick)
+        timerTick.run()
     }
 
     private fun say(msg: String) {
@@ -845,7 +970,7 @@ class MainActivity : Activity() {
             wxBar.visibility = View.GONE
             return
         }
-        wxBar.visibility = View.VISIBLE
+        if (!pickerShowing) wxBar.visibility = View.VISIBLE
         wxSeek.max = frames.size - 1
         val i = Timeline.indexOfNow(frames, keep ?: System.currentTimeMillis())
         wxSeek.progress = i
@@ -1450,6 +1575,147 @@ class MainActivity : Activity() {
         }
     }
 
+    // --- the walk picker ----------------------------------------------------
+
+    /**
+     * Open the picker if the assistant has queued walks. Called on resume —
+     * candidates found in the chat screen are waiting when he comes back to
+     * the map — and after the map's own ask bar answers, which triggers no
+     * resume. The store's TTL means a stale batch never haunts the map.
+     */
+    private fun maybeShowPicker() {
+        if (pickerShowing) return
+        val pending = WalkPicks.pending(this)
+        if (pending.isEmpty()) return
+        picks = pending
+        pickIndex = 0
+        pickerShowing = true
+        pickerBar.visibility = View.VISIBLE
+        // One bar at a time down there: the scrubber comes back when the
+        // picking is done.
+        wxBar.visibility = View.GONE
+        showPick(0)
+    }
+
+    private fun showPick(i: Int) {
+        if (picks.isEmpty()) return
+        pickIndex = ((i % picks.size) + picks.size) % picks.size
+        val walk = picks[pickIndex]
+        val here = lastFix
+        val towards = here?.let {
+            " · " + fmtDist(walk.closestM) + " " +
+                Sun.compass(WalkFilter.bearingDeg(it, WalkFilter.nearestPoint(it, walk.lines)))
+        }.orEmpty()
+        pickerTitle.text = "${walk.name} — ${fmtDist(walk.lengthM)}$towards · ${walk.source}"
+        pickerCount.text = "${pickIndex + 1}/${picks.size}"
+        map.setPreview(walk.lines)
+        map.fitTo(walk.routePoints())
+    }
+
+    /** The one way out: every exit path — Use, Start, ✕ — comes through
+     *  here, so the dashed preview can never be left leaked on the map. */
+    private fun dismissPicker() {
+        pickerShowing = false
+        pickerBar.visibility = View.GONE
+        map.setPreview(emptyList())
+        WalkPicks.consume(this)
+        picks = emptyList()
+        if (wxFrames.isNotEmpty()) wxBar.visibility = View.VISIBLE
+    }
+
+    private fun usePick() {
+        val walk = picks.getOrNull(pickIndex) ?: return
+        dismissPicker()
+        adoptFound(walk)
+    }
+
+    /**
+     * Take the route and start the walk in one tap: adopt, record, timer.
+     * Recording starts before the tile prefetch on purpose — publishRoute
+     * takes a minute over a corridor, and the timer must clock the walk,
+     * not the download.
+     */
+    private fun startWalkFromPick() {
+        val walk = picks.getOrNull(pickIndex) ?: return
+        dismissPicker()
+        importJob?.cancel()
+        importJob = scope.launch {
+            try {
+                val route = withContext(Dispatchers.IO) {
+                    val full = walk.uri?.let { u ->
+                        runCatching {
+                            contentResolver.openInputStream(Uri.parse(u))!!.use { Gpx.parse(it) }
+                        }.getOrNull()
+                    }
+                    (full?.copy(name = walk.name) ?: Route(walk.name, walk.routePoints()))
+                        .also { RouteStore.save(this@MainActivity, it) } // banks the old route
+                }
+                if (!recording) toggleRecording()
+                say("“${walk.name}” set and recording — fetching offline tiles…")
+                publishRoute(route)
+            } catch (e: Exception) {
+                say("Couldn't start that walk: ${e.message ?: e.javaClass.simpleName}")
+            }
+        }
+    }
+
+    /**
+     * Navigation to where the walk starts — the nearest mapped car park
+     * within 500 m of the route start if OSM knows one, else the start
+     * itself, said plainly. Fetched on the tap, never while he is flicking
+     * through candidates: Overpass is slow and gated.
+     */
+    private fun openParking() {
+        val walk = picks.getOrNull(pickIndex) ?: return
+        val start = walk.routePoints().firstOrNull() ?: return
+        sayBriefly("Finding parking near the start…")
+        scope.launch {
+            val target = withContext(Dispatchers.IO) {
+                runCatching { nearestParking(start) }.getOrNull()
+            }
+            val en = target ?: start
+            if (target == null) {
+                say("No mapped car park within 500 m — navigating to the route start.")
+            }
+            val (lat, lon) = Bng.toWgs84(en)
+            val q = "%.6f,%.6f".format(java.util.Locale.UK, lat, lon)
+            // Driving directions by default: he is driving to the car park.
+            val nav = Intent(Intent.ACTION_VIEW, Uri.parse("google.navigation:q=$q"))
+            try {
+                startActivity(nav)
+            } catch (e: android.content.ActivityNotFoundException) {
+                try {
+                    startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("geo:$q?q=$q(Walk%20parking)")))
+                } catch (e2: android.content.ActivityNotFoundException) {
+                    say("Nothing on this phone opens map navigation.")
+                }
+            }
+        }
+    }
+
+    /** The nearest OSM-mapped car park to a point, or null. */
+    private fun nearestParking(start: En): En? {
+        val (lat, lon) = Bng.toWgs84(start)
+        val at = "%.6f,%.6f".format(java.util.Locale.UK, lat, lon)
+        // nwr + out center covers car parks mapped as nodes, ways and
+        // relations in one query shape.
+        val json = Net.overpass("[out:json][timeout:15];nwr[\"amenity\"=\"parking\"](around:500,$at);out center 8;")
+        val elements = org.json.JSONObject(json).getJSONArray("elements")
+        var best: En? = null
+        var bestD = Double.MAX_VALUE
+        for (i in 0 until elements.length()) {
+            val el = elements.getJSONObject(i)
+            val centre = el.optJSONObject("center")
+            val la = centre?.optDouble("lat") ?: el.optDouble("lat", Double.NaN)
+            val lo = centre?.optDouble("lon") ?: el.optDouble("lon", Double.NaN)
+            if (la.isNaN() || lo.isNaN()) continue
+            val en = Bng.fromWgs84(la, lo)
+            val d = kotlin.math.hypot(en.e - start.e, en.n - start.n)
+            if (d < bestD) { bestD = d; best = en }
+        }
+        return best
+    }
+
     private fun libraryDialog() {
         val b = AlertDialog.Builder(this)
             .setTitle("GPX library")
@@ -1605,6 +1871,7 @@ class MainActivity : Activity() {
                 map.setRoute(if (routeHidden) null else routeNow)
             }
             askBusy = false
+            maybeShowPicker()
         }
     }
 
