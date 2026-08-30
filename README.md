@@ -106,16 +106,17 @@ normally", which is also the kindest to the battery, since the watch then really
 sleeps instead of being held awake. For darker sooner, lower the watch's own
 Settings → Display → Screen timeout.
 
-**The GPS stays warm between looks.** The map screen itself only asks for GPS
-while it is in front of you, so a screen sleep used to release the fix
-entirely and the next glance cost twenty seconds of grey arrow — on the
-device whose whole point is a quick look without getting the phone out. Now a
-quiet background hold keeps the fix for **90 minutes after you last look**,
-and every glance restarts the clock: instant all walk long, nothing draining
-overnight. The price is watch battery while the hold runs, and a small
-"Holding GPS ready" notification so it can always be seen; switch the whole
-behaviour off in the phone's Settings if the trade isn't worth it to you.
-Recording is unaffected either way — it holds its own GPS, as it always has.
+**GPS runs when you are tracking, and not otherwise.** Recording a walk
+holds GPS for as long as the walk lasts, so glances during a walk are
+instant. Outside a walk the watch waits for a fix like any other app — the
+first look after the screen has slept costs about twenty seconds of grey
+arrow, which is the honest price of not holding the receiver open all day.
+
+There is a switch in the phone's Settings that keeps the fix warm for 90
+minutes after each look, and it is **off by default**: every glance and every
+touch pushes that deadline out again, so in ordinary use it never expires and
+the watch holds GPS permanently. That was the default for exactly one day
+before being reported, correctly, as always-on.
 
 **Recentring keeps your zoom.** The ◉ button re-follows the fix at whatever
 zoom the map is already at. (It used to zoom right in as well; that turned

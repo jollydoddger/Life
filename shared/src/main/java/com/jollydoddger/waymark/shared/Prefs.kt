@@ -227,14 +227,19 @@ object Prefs {
      * the phone and synced, because the watch has no room for settings.
      */
     /**
-     * Hold the watch's GPS warm between quick looks. The map screen's own
-     * locator is foreground-only, so without this every screen sleep
-     * releases the GPS engine and the next glance costs twenty seconds of
-     * grey arrow — on the device whose whole point is the quick look.
-     * Synced from the phone's Settings; battery is the honest price.
+     * Hold the watch's GPS warm between quick looks — **off**, and it takes
+     * a deliberate act to turn on.
+     *
+     * It was on by default for a day and he was right to object: every
+     * glance and every touch pushed the ninety-minute deadline out again,
+     * so with ordinary use it never expired and the watch simply held GPS
+     * all day. A background hold nobody asked for, with its own permanent
+     * notification, is not the quick-look feature — it is a battery leak
+     * wearing one's clothes. Tracking holds GPS because tracking needs it;
+     * everything else waits for a fix like any other app.
      */
     var Context.watchGpsWarm: Boolean
-        get() = p(this).getBoolean("watchGpsWarm", true)
+        get() = p(this).getBoolean("watchGpsWarm", false)
         set(v) = p(this).edit().putBoolean("watchGpsWarm", v).apply()
 
     /**

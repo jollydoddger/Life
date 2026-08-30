@@ -561,13 +561,15 @@ class SettingsActivity : Activity() {
             })
             addView(TextView(this@SettingsActivity).apply {
                 textSize = 13f
-                text = "The watch's map only asks for GPS while it is on screen, so every " +
-                    "screen sleep used to release the fix and the next glance cost twenty " +
-                    "seconds of grey arrow. With this on, a quiet background hold keeps the " +
-                    "fix for 90 minutes after you last look — every glance restarts the " +
-                    "clock, so it is instant all walk long and costs nothing overnight. " +
-                    "The price is watch battery while it is held, and a small \u201CHolding " +
-                    "GPS ready\u201D notification so it can always be seen and stopped."
+                text = "Off, and worth leaving off. Recording a walk holds GPS anyway, so " +
+                    "glances during a walk are already instant — this is only about the " +
+                    "first look after the watch has slept, which otherwise costs about " +
+                    "twenty seconds of grey arrow.\n\n" +
+                    "With it on, a background hold keeps the fix for 90 minutes after you " +
+                    "last look, and every glance and every touch pushes that out again — " +
+                    "so in ordinary use it never expires and the watch holds GPS all day. " +
+                    "That is the battery cost, stated plainly, and it is why this is not " +
+                    "the default."
             })
 
             addView(heading("Waymark holds the watch screen on for"))

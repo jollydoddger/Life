@@ -234,7 +234,17 @@ class MainActivity : Activity(), DataClient.OnDataChangedListener {
     private var lastWarmStamp = 0L
 
     private fun keepGpsWarm() {
-        if (!watchGpsWarm) return
+        if (!watchGpsWarm) {
+            // Switched off — and a hold started before it was switched off
+            // must die here rather than linger to its old deadline. Never
+            // while a walk is being recorded: that service is holding GPS
+            // because the walk needs it.
+            if (warmUntil != 0L) {
+                warmUntil = 0L
+                if (!recording && !wantRecording) TrackingService.stop(this)
+            }
+            return
+        }
         if (checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) return
         // Touches arrive in bursts; one re-stamp a minute is plenty, and the
         // service start is idempotent while it is already holding.
