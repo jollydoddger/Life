@@ -66,6 +66,7 @@ import com.jollydoddger.waymark.shared.Sun
 import com.jollydoddger.waymark.shared.Sync
 import com.jollydoddger.waymark.shared.TileGrid
 import com.jollydoddger.waymark.shared.TrackingService
+import com.jollydoddger.waymark.shared.Mark
 import com.jollydoddger.waymark.shared.Marks
 import com.jollydoddger.waymark.shared.Prefs.warmUntil
 import com.jollydoddger.waymark.shared.TrailStore
