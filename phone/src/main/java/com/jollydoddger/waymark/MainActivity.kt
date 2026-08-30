@@ -609,8 +609,13 @@ class MainActivity : Activity() {
                 bottom = insets.systemWindowInsetBottom
             }
             bottomStack.setPadding(0, 0, 0, bottom)
-            (status.layoutParams as FrameLayout.LayoutParams).topMargin = top + dp(8)
-            status.requestLayout()
+            // The whole top column clears the system status bar. This margin
+            // used to be set on the status line directly, from when it was
+            // the frame's own child — after it moved into the column, the
+            // cast to FrameLayout params was the crash that stopped the app
+            // opening at all, on the very first layout pass.
+            (topBar.layoutParams as FrameLayout.LayoutParams).topMargin = top + dp(8)
+            topBar.requestLayout()
             insets
         }
 
