@@ -120,6 +120,15 @@ class MainActivity : Activity() {
     private lateinit var chipScroll: HorizontalScrollView
     private lateinit var tempChip: TextView
     private lateinit var timerChip: TextView
+    private lateinit var markChip: TextView
+
+    // Caches behind the live mark readout: recomputing cumulative distance
+    // over a ten-thousand-point route on every one-second fix would be the
+    // battery paying for arithmetic that never changes between routes.
+    private var cumCache: Pair<String, DoubleArray>? = null
+    private var heightsCache: Pair<String, Heights?>? = null
+    private var paceCache: Triple<Double, String, Long>? = null
+    private var markReadoutAt = 0L
 
     // The walk picker: candidates the assistant queued, cycled over the map.
     private lateinit var pickerBar: LinearLayout
@@ -558,12 +567,26 @@ class MainActivity : Activity() {
                 LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT,
             ).apply { leftMargin = dp(8) })
         }
+        // The next armed mark, counting itself down as fixes arrive. Its own
+        // line: beside the temperature and the walk clock it would crowd a
+        // narrow screen off the edge.
+        markChip = TextView(this).apply {
+            textSize = 16f
+            setTypeface(typeface, android.graphics.Typeface.BOLD)
+            setTextColor(Color.WHITE)
+            setBackgroundColor(Color.argb(205, 30, 34, 32))
+            setPadding(dp(12), dp(4), dp(12), dp(4))
+            visibility = View.GONE
+        }
         val topBar = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             addView(status, LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT,
             ).apply { bottomMargin = dp(6) })
             addView(readouts, LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT,
+            ).apply { bottomMargin = dp(6) })
+            addView(markChip, LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT,
             ).apply { bottomMargin = dp(6) })
             addView(chipScroll, LinearLayout.LayoutParams(
@@ -733,6 +756,7 @@ class MainActivity : Activity() {
                         }
                     }
                 }
+                if (!stale) runCatching { updateMarkReadout(en) }
                 // Opening the app should answer "where am I" without a tap.
                 // Once only: after that the map is his to move.
                 if (!centredThisOpen) {
@@ -1715,8 +1739,61 @@ class MainActivity : Activity() {
 
     // --- marked points: tap a turn, get a buzz there -------------------------
 
+    /**
+     * The next armed mark, counting itself down live — distance along the
+     * route, minutes at his pace, climb — refreshed as fixes arrive. The
+     * card a tap opens is the full answer at a moment; this is the walking
+     * version of it, and it is honest about staleness by simply vanishing
+     * when there are no marks or no route.
+     */
+    private fun updateMarkReadout(fix: En) {
+        val now = System.currentTimeMillis()
+        if (now - markReadoutAt < 2_000) return
+        markReadoutAt = now
+        val route = RouteStore.load(this) ?: run { markChip.visibility = View.GONE; return }
+        val fingerprint = RouteHeights.fingerprint(route)
+        val marks = Marks.load(this, fingerprint)
+        if (marks.isEmpty()) { markChip.visibility = View.GONE; return }
+
+        val cum = cumCache?.takeIf { it.first == fingerprint }?.second
+            ?: Eta.cumulative(route.points).also { cumCache = fingerprint to it }
+        val hereAlong = cum[Eta.nearestIndex(route.points, fix)]
+
+        fun ahead(m: Mark) = if (routeReversed) hereAlong - m.alongM else m.alongM - hereAlong
+        // The next one in the walking direction; with none ahead, the
+        // nearest behind, said as behind.
+        val next = marks.filter { ahead(it) > -Marks.ARRIVE_M }.minByOrNull { ahead(it) }
+            ?: marks.minByOrNull { -ahead(it) } ?: return
+        val aheadM = ahead(next)
+
+        val heights = heightsCache?.takeIf { it.first == fingerprint }?.second
+            ?: RouteHeights.cached(this, route).also { heightsCache = fingerprint to it }
+        val up = heights?.let {
+            Eta.climbBetween(it.alongs, it.heights, hereAlong, next.alongM).first
+        }
+
+        val pace = paceCache?.takeIf { now - it.third < 5 * 60_000L }
+            ?: currentPace().let { (p, src) -> Triple(p, src, now).also { t -> paceCache = t } }
+        val mins = Eta.minutes(kotlin.math.abs(aheadM), up ?: 0.0, pace.first)
+
+        val sb = StringBuilder("➤${next.number}  ")
+        sb.append(fmtDist(kotlin.math.abs(aheadM)))
+        if (aheadM < -Marks.ARRIVE_M) sb.append(" back")
+        sb.append(" · ").append(fmtMins(mins))
+        up?.let { if (it >= 5) sb.append(" · ↑${it.roundToInt()} m") }
+        markChip.text = sb.toString()
+        markChip.visibility = View.VISIBLE
+        markChip.setOnClickListener { pointPicked(next.en(), next.alongM) }
+    }
+
     private fun refreshMarks() {
-        val route = RouteStore.load(this) ?: run { map.setMarks(emptyList()); return }
+        markReadoutAt = 0L
+        lastFix?.let { runCatching { updateMarkReadout(it) } }
+        val route = RouteStore.load(this) ?: run {
+            map.setMarks(emptyList())
+            markChip.visibility = View.GONE
+            return
+        }
         map.setMarks(
             Marks.load(this, RouteHeights.fingerprint(route)).map { it.en() to it.number },
         )

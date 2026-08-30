@@ -321,8 +321,10 @@ top. **"Buzz me there"** arms it: up to five numbered flags, and a strong
 vibrating notification as you arrive at each, so the turn can't slip past
 while the phone is in a pocket.
 
-The buzz rides the recording service when one runs, and the open map's own
-fixes otherwise — the phone never holds GPS on its own account (he saw the
+While marks are armed, the next one ahead counts itself down live at the top
+of the map — "➤2  1.2 km · 21 min · ↑60 m" — refreshed as fixes arrive, and
+tapping it opens that mark's full card. The buzz rides the recording service
+when one runs, and the open map's own fixes otherwise — the phone never holds GPS on its own account (he saw the
 "Holding GPS ready" notification outside a walk and called it: the hold
 belongs to tracking), and the arming message says plainly where the buzz
 lives. Tap a flag to see the live numbers to it —
