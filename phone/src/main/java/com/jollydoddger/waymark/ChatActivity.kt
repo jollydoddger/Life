@@ -56,21 +56,33 @@ class ChatActivity : Activity() {
                     if (fixAgeAtOpen == Long.MAX_VALUE) Long.MAX_VALUE
                     else fixAgeAtOpen + (System.currentTimeMillis() - openedAt)
                 },
-                // Planning a walk is half a minute of several calls; say
-                // what it is doing rather than leaving a dead screen.
-                { msg ->
-                    runOnUiThread {
-                        column.addView(note(msg))
-                        scroll.post { scroll.fullScroll(View.FOCUS_DOWN) }
-                    }
-                },
+                // Planning a walk is minutes of several calls; the working
+                // line under the conversation carries what it is doing,
+                // beside a clock that moves.
+                { msg -> runOnUiThread { doingNote = msg } },
             ),
-        )
+        ).also { a ->
+            a.onActivity = { n -> runOnUiThread { doingNote = n } }
+        }
     }
     private lateinit var column: LinearLayout
     private lateinit var scroll: ScrollView
     private lateinit var box: EditText
     private var busy = false
+    @Volatile private var cancelled = false
+    private var startedAt = 0L
+    private var doingNote = ""
+    private var working: TextView? = null
+
+    private val tick = object : Runnable {
+        override fun run() {
+            val w = working ?: return
+            if (!busy) return
+            val secs = (System.currentTimeMillis() - startedAt) / 1000
+            w.text = "Working %d:%02d · %s — tap to stop".format(secs / 60, secs % 60, doingNote)
+            w.postDelayed(this, 1_000)
+        }
+    }
 
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
 
@@ -220,19 +232,39 @@ class ChatActivity : Activity() {
             return
         }
         busy = true
+        cancelled = false
+        startedAt = System.currentTimeMillis()
+        doingNote = "thinking…"
         box.setText("")
         Talk.add(this, Said(true, question))
         redraw()
-        column.addView(note("…"))
+        working = note("…").also { w ->
+            // The working line is also the stop button: cooperative, so a
+            // call in flight finishes and the loop stands down having
+            // changed nothing further.
+            w.setOnClickListener { cancelled = true; doingNote = "stopping after the current call…" }
+            column.addView(w)
+            tick.run()
+        }
+        scroll.post { scroll.fullScroll(View.FOCUS_DOWN) }
 
         scope.launch {
-            val reply = withContext(Dispatchers.IO) { assistant.ask(question) }
-            Talk.add(
-                this@ChatActivity,
-                Said(false, reply.text, reply.actions.map { it.summary }),
-            )
-            redraw()
-            busy = false
+            try {
+                val reply = withContext(Dispatchers.IO) { assistant.ask(question) { cancelled } }
+                Talk.add(
+                    this@ChatActivity,
+                    Said(false, reply.text, reply.actions.map { it.summary }),
+                )
+            } catch (e: Exception) {
+                // Anything escaping here used to leave the busy flag stuck
+                // and every later send silently ignored.
+                Talk.add(this@ChatActivity, Said(false, "That went wrong: ${e.message ?: e.javaClass.simpleName} — send again to retry."))
+            } finally {
+                busy = false
+                working?.removeCallbacks(tick)
+                working = null
+                redraw()
+            }
         }
     }
 }

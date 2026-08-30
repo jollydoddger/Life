@@ -157,6 +157,10 @@ class MainActivity : Activity() {
     private var radarFrames: List<WxFrame> = emptyList()
     private var wxField: Weather.Field? = null
     private var askBusy = false
+    private var askJob: kotlinx.coroutines.Job? = null
+    @Volatile private var askCancelled = false
+    private var askStartedAt = 0L
+    private var askNote = ""
     private val assistant by lazy {
         Assistant(
             this,
@@ -164,11 +168,13 @@ class MainActivity : Activity() {
                 this,
                 { lastFix },
                 { if (lastFixAt == 0L) Long.MAX_VALUE else System.currentTimeMillis() - lastFixAt },
-                // Planning is several calls to free servers; say what it is
-                // doing rather than leaving a blank screen for half a minute.
-                { note -> runOnUiThread { say(note) } },
+                // Planning is several calls to free servers. Progress used to
+                // park in the status line, where it outlived the run and told
+                // him nothing about whether anything was still happening; it
+                // feeds the working strip now, beside a clock that moves.
+                { note -> runOnUiThread { askActivity(note) } },
             ),
-        )
+        ).also { a -> a.onActivity = { note -> runOnUiThread { askActivity(note) } } }
     }
 
     private val trailWatcher = object : BroadcastReceiver() {
@@ -314,7 +320,9 @@ class MainActivity : Activity() {
             textSize = 17f
             setTextColor(Color.argb(230, 220, 226, 220))
             setPadding(dp(8), dp(10), dp(12), dp(10))
-            setOnClickListener { replyPanel.visibility = View.GONE }
+            setOnClickListener {
+                if (askBusy) stopAsk() else replyPanel.visibility = View.GONE
+            }
         }
         val replyRow = LinearLayout(this).apply {
             gravity = Gravity.TOP
@@ -728,6 +736,8 @@ class MainActivity : Activity() {
         if (osApiKey.isEmpty()) {
             say("No map without a key — tap here to enter your OS Maps API key")
         }
+        // A run that outlived a trip to another screen gets its clock back.
+        if (askBusy) { replyText.removeCallbacks(askTick); askTick.run() }
         buildChips()
         bindOverlays()
         map.onRoutePointPicked = { en, alongM -> pointPicked(en, alongM) }
@@ -769,6 +779,7 @@ class MainActivity : Activity() {
     }
 
     override fun onPause() {
+        replyText.removeCallbacks(askTick)
         stopWxPlay()
         timerChip.removeCallbacks(timerTick)
         try { unregisterReceiver(trailWatcher) } catch (e: IllegalArgumentException) { }
@@ -2185,46 +2196,89 @@ class MainActivity : Activity() {
         startActivity(i)
     }
 
+    /** The working strip's ticking line: a clock that moves is the whole
+     *  difference between a five-minute plan and a dead call. */
+    private val askTick = object : Runnable {
+        override fun run() {
+            if (!askBusy || !alive) return
+            val secs = (System.currentTimeMillis() - askStartedAt) / 1000
+            replyText.text = "Working %d:%02d · %s".format(secs / 60, secs % 60, askNote)
+            replyText.postDelayed(this, 1_000)
+        }
+    }
+
+    private fun askActivity(note: String) {
+        if (!askBusy) return
+        askNote = note
+    }
+
+    /** The strip's ✕ while a run is going: stop it. Cooperative — a call
+     *  already in flight finishes, then the loop stands down having changed
+     *  nothing further, and says so. */
+    private fun stopAsk() {
+        askCancelled = true
+        askNote = "stopping after the current call…"
+    }
+
     private fun sendAsk() {
         val question = askBox.text.toString().trim()
         if (question.isEmpty() || askBusy) return
         askBusy = true
+        askCancelled = false
+        askStartedAt = System.currentTimeMillis()
+        askNote = "thinking…"
         askBox.setText("")
         Talk.add(this, Said(true, question))
-        replyText.text = "…"
         replyPanel.visibility = View.VISIBLE
+        replyText.removeCallbacks(askTick)
+        askTick.run()
 
         // Remember what the tools might change, so changes can be published.
         val routeBefore = RouteStore.load(this)?.let { it.name to it.points.size }
 
-        scope.launch {
-            val reply = withContext(Dispatchers.IO) { assistant.ask(question) }
+        askJob = scope.launch {
+            try {
+                val reply = withContext(Dispatchers.IO) {
+                    assistant.ask(question) { askCancelled }
+                }
 
-            Talk.add(
-                this@MainActivity,
-                Said(false, reply.text, reply.actions.map { it.summary }),
-            )
-            val sb = StringBuilder(reply.text)
-            if (reply.actions.isNotEmpty()) {
-                sb.append("\n")
-                reply.actions.forEach { sb.append("\n✓ ").append(it.summary) }
-            }
-            replyText.text = sb.toString()
-            replyPanel.visibility = View.VISIBLE
+                Talk.add(
+                    this@MainActivity,
+                    Said(false, reply.text, reply.actions.map { it.summary }),
+                )
+                askBusy = false
+                replyText.removeCallbacks(askTick)
+                val sb = StringBuilder(reply.text)
+                if (reply.actions.isNotEmpty()) {
+                    sb.append("\n")
+                    reply.actions.forEach { sb.append("\n✓ ").append(it.summary) }
+                }
+                replyText.text = sb.toString()
+                replyPanel.visibility = View.VISIBLE
 
-            // Show what the tools did: markers, and possibly a new route.
-            map.setPois(PoiStore.load(this@MainActivity))
-            launch {
-                try { Sync.sendPois(this@MainActivity, PoiStore.load(this@MainActivity)) } catch (e: Exception) { }
+                // Show what the tools did: markers, and possibly a new route.
+                map.setPois(PoiStore.load(this@MainActivity))
+                launch {
+                    try { Sync.sendPois(this@MainActivity, PoiStore.load(this@MainActivity)) } catch (e: Exception) { }
+                }
+                val routeNow = RouteStore.load(this@MainActivity)
+                if (routeNow != null && (routeNow.name to routeNow.points.size) != routeBefore) {
+                    publishRoute(routeNow)
+                } else {
+                    map.setRoute(if (routeHidden) null else routeNow)
+                }
+                refreshMarks()
+                maybeShowPicker()
+            } catch (e: Exception) {
+                // The stuck-busy bug in person: anything escaping here used
+                // to leave askBusy true for ever, and every later send was
+                // silently ignored — "hangs and doesn't do it", exactly.
+                Talk.add(this@MainActivity, Said(false, "That went wrong: ${e.message ?: e.javaClass.simpleName}"))
+                replyText.text = "The assistant call failed: ${e.message ?: e.javaClass.simpleName} — send again to retry."
+            } finally {
+                askBusy = false
+                replyText.removeCallbacks(askTick)
             }
-            val routeNow = RouteStore.load(this@MainActivity)
-            if (routeNow != null && (routeNow.name to routeNow.points.size) != routeBefore) {
-                publishRoute(routeNow)
-            } else {
-                map.setRoute(if (routeHidden) null else routeNow)
-            }
-            askBusy = false
-            maybeShowPicker()
         }
     }
 

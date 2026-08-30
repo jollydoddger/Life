@@ -34,13 +34,33 @@ data class Reply(val text: String, val actions: List<Action>)
  */
 class Assistant(private val ctx: Context, private val tools: GeoTools) {
 
+    /**
+     * What the assistant is doing right now, in words, as it does it. The
+     * screen this feeds is the difference between a five-minute route plan
+     * and a dead call — which are indistinguishable from the outside, and
+     * were. Callers post to the main thread themselves.
+     */
+    var onActivity: (String) -> Unit = {}
+
+    /** The tool names as the working strip should say them. */
+    private fun doing(tool: String): String = when (tool) {
+        "plan_route" -> "planning a route on the path network…"
+        "find_walks" -> "searching walking routes…"
+        "download_gpx" -> "downloading a GPX…"
+        "walk_brief" -> "putting the walk brief together…"
+        "weather" -> "reading the weather…"
+        "find_places" -> "searching the map for places…"
+        "route_profile" -> "measuring the route's climb…"
+        else -> "working: ${tool.replace('_', ' ')}…"
+    }
+
     private sealed interface Wire {
         data class Said(val text: String) : Wire
         data class Answered(val blocks: List<ContentBlockParam>) : Wire
         data class Returned(val blocks: List<ContentBlockParam>) : Wire
     }
 
-    fun ask(question: String): Reply {
+    fun ask(question: String, isCancelled: () -> Boolean = { false }): Reply {
         val key = ctx.anthropicKey
         if (key.isEmpty()) {
             return Reply("No Anthropic key yet — add one in ⚙ and the assistant wakes up.", emptyList())
@@ -63,7 +83,16 @@ class Assistant(private val ctx: Context, private val tools: GeoTools) {
         wire += Wire.Said(question)
 
         val actions = mutableListOf<Action>()
+        // Cancellation is cooperative: checked between rounds and tools, so
+        // a blocking call in flight finishes first — the stop button says
+        // "stopped", never "aborted mid-write", and means it.
+        fun stopped(): Reply {
+            ChatStore.append(ctx, question, "Stopped — nothing further was changed.")
+            return Reply("Stopped — nothing further was changed.", actions)
+        }
         repeat(MAX_STEPS) {
+            if (isCancelled()) return stopped()
+            onActivity("thinking…")
             val response = runCatching { client.messages().create(params(wire)) }
                 .onFailure { Log.e(TAG, "assistant call failed", it) }
                 .getOrElse { failure ->
@@ -82,6 +111,7 @@ class Assistant(private val ctx: Context, private val tools: GeoTools) {
                         (use._input().convert(Map::class.java) as Map<*, *>)["query"] as? String
                     }.getOrNull()
                     actions += Action("Searched the web" + (query?.let { ": \"$it\"" }.orEmpty()))
+                    onActivity("searching the web" + (query?.let { ": $it" }.orEmpty()) + "…")
                 }
             }
 
@@ -104,6 +134,8 @@ class Assistant(private val ctx: Context, private val tools: GeoTools) {
             echo()
             wire += Wire.Returned(
                 calls.map { call ->
+                    if (isCancelled()) return stopped()
+                    onActivity(doing(call.name()))
                     val outcome = runCatching { run(call, actions) }
                         .getOrElse { "Failed: ${it.message ?: "unknown error"}" }
                     ContentBlockParam.ofToolResult(

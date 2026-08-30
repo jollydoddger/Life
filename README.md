@@ -383,6 +383,16 @@ same arc is drawn on a plain sky — the information is the point.
 
 ## Ask it things (optional, off by default)
 
+While the assistant works, the reply strip over the map (and the working
+line in the chat) shows a **ticking clock and what it is doing right now**
+— "Working 1:47 · reading the paths and lanes round here…" — because a
+five-minute route plan and a dead call look identical without one. The ✕
+on the strip (or a tap on the chat's working line) **stops the run**:
+cooperatively, so a call already in flight finishes and the loop stands
+down having changed nothing further, and says so. A failed call says why
+and invites a retry — it can no longer wedge the ask bar silently.
+
+
 Waymark's job is a map, an arrow and a line, and out of the box that is all it
 is. **Switch on "Ask bar" in ⚙** and a question box appears at the bottom of
 the phone's map, talking to Claude (hold 🎤 to speak — release to send — or
