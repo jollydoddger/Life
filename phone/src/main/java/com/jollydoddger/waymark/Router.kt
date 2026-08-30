@@ -171,21 +171,17 @@ object Router {
          * A dead end has one way in and the same way out, so hanging a
          * waypoint on one guarantees an out-and-back spur — which is exactly
          * what a "circular walk" is not. Three ways out means the route can
-         * arrive and leave differently. Falls back to [nearest] if there is
-         * no junction within reach: better a corner in roughly the right
-         * place than no corner at all, and the spur it causes gets pruned
-         * out of the finished walk anyway.
+         * arrive and leave differently.
+         *
+         * Nothing within reach means **null**, and the caller skips that
+         * corner. It used to fall back to the nearest node of any degree,
+         * which planted corners on dead ends and — worse — on whatever
+         * disconnected fragment happened to be closest, guaranteeing both an
+         * unreachable leg and a full-graph search to discover it. A corner
+         * we cannot honour is not a corner.
          */
-        fun nearestJunction(p: En, withinM: Double): Int? {
-            var best = -1
-            var bestD = Double.MAX_VALUE
-            for (i in nodes.indices) {
-                if (edges[i].size < 3) continue
-                val d = hypot(nodes[i].e - p.e, nodes[i].n - p.n)
-                if (d < bestD) { bestD = d; best = i }
-            }
-            return if (best >= 0 && bestD <= withinM) best else nearest(p)
-        }
+        fun nearestJunction(p: En, withinM: Double): Int? =
+            nearestWhere(p, withinM) { edges[it].size >= 3 }
     }
 
     data class Planned(
