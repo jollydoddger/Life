@@ -398,7 +398,7 @@ class GeoTools(
         progress("Building a loop…")
         val deadline = System.currentTimeMillis() + PLAN_BUDGET_MS
         val loop = Router.loop(
-            graph, here, target, deadline, avoidRoads, cancelled,
+            graph, here, target, deadline, avoidRoads, isCancelled = cancelled,
         ) { note -> progress(note) }
 
         val planned = listOfNotNull(loop)
