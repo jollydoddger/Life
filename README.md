@@ -324,13 +324,17 @@ nothing at all if none met its thresholds — while holding perfectly good
 loops it had discarded for being shorter than a quarter of the ask. Stop
 works during a plan too, and gives you the best so far.
 
-"Avoid roads" now prices A and B roads at twenty-five times a lane rather
-than deleting them from the map. Deleting them was the deeper problem: an A
-road does not merely make a walk unpleasant, it cuts the path network into
-islands, and no loop can be closed across an island's edge at any price. A
-route will now cross an A road to reach the lanes beyond but will not walk
-along one — and every plan reports the road metres it actually used, so the
-claim is checkable rather than merely made.
+"Avoid roads" is a preference now, not a wall. Deleting roads from the map
+was the deeper problem: an A road does not merely make a walk unpleasant, it
+cuts the path network into islands, and no loop closes across an island's
+edge at any price. Every class carries a per-metre cost you can read as
+"metres of path I'd walk to avoid one metre of this" — a minor road 2.6, a B
+road 4, an A road 6.5, multiplied by 2.5 again when avoiding — so **crossing**
+a road costs a few metres' worth and **walking along** one costs its whole
+length, which is the distinction that actually matters and falls straight out
+of the arithmetic. Nothing is forbidden; you will get some road and you will
+certainly get crossings. Every plan names the road metres it used ("including
+180 m on a B road"), so the claim is checkable rather than merely made.
 
 ## Tap a point, get a buzz there
 

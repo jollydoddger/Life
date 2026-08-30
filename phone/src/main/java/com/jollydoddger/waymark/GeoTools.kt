@@ -449,8 +449,7 @@ class GeoTools(
             if (p.repeatFraction > 0.05) {
                 lines.append(", retraces ${(p.repeatFraction * 100).roundToInt()}%")
             }
-            val road = p.roadMetres()
-            if (road > 50) lines.append(", ${road.roundToInt()} m of it on roads")
+            p.roadSummary()?.let { lines.append(", including $it") }
         }
         real.forEach { w ->
             val shape = if (isCircular(w)) "circular" else "linear"

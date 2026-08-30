@@ -384,8 +384,8 @@ class Assistant(private val ctx: Context, private val tools: GeoTools) {
                     "actually achieved and the percentage on paths, tracks and bridleways, " +
                     "counted off the route rather than estimated — quote those figures back " +
                     "to him. Takes up to a minute. If it cannot close a loop under the rules " +
-                    "it says so; retrying with avoid_roads false, or a different distance, is " +
-                    "a sensible next move. Distances are KILOMETRES: convert miles yourself " +
+                    "it says so; a different distance, or avoid_roads false, is a sensible " +
+                    "next move. Distances are KILOMETRES: convert miles yourself " +
                     "(1 mile = 1.61 km).",
                 schema(
                     mapOf(
@@ -406,9 +406,12 @@ class Assistant(private val ctx: Context, private val tools: GeoTools) {
                         ),
                         "avoid_roads" to property(
                             "boolean",
-                            "Default true: keep off A, B and C roads entirely, walking only " +
-                                "paths, tracks, bridleways and quiet lanes. Set false only if " +
-                                "he asks, or if a plan failed for want of a link road.",
+                            "Default true: strongly prefer paths, tracks, bridleways and " +
+                                "quiet lanes. It does NOT forbid bigger roads — crossing one " +
+                                "costs almost nothing and a short stretch along one is used " +
+                                "when it is the way through, which is why loops close now. " +
+                                "The reply names any road metres it used. Set false to drop " +
+                                "even the preference.",
                         ),
                         "start_place" to property(
                             "string",

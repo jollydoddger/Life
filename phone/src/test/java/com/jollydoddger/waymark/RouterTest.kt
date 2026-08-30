@@ -172,13 +172,20 @@ class RouterTest {
         val g = awkwardNetwork(5)
         val far = En(-50_000.0, -50_000.0)
         assertEquals(null, g.nearestJunction(far, 500.0))
-        val near = g.nearestJunction(centre(), 900.0)
-        assertNotNull(near)
-        assertTrue("what comes back is a junction", g.edges[near!!].size >= 3)
-        assertTrue(
-            "and it is genuinely within reach",
-            hypot(g.nodes[near].e - centre().e, g.nodes[near].n - centre().n) <= 900.0,
-        )
+        // The invariant, at every radius: what comes back is a junction and
+        // is genuinely inside the bound. Whether one *exists* at a given
+        // radius is the random network's business, not the contract's — the
+        // first version of this test asserted that and was rightly wrong.
+        for (within in doubleArrayOf(150.0, 400.0, 900.0, 2_000.0)) {
+            val j = g.nearestJunction(centre(), within) ?: continue
+            assertTrue("what comes back is a junction", g.edges[j].size >= 3)
+            assertTrue(
+                "and it is genuinely within $within m",
+                hypot(g.nodes[j].e - centre().e, g.nodes[j].n - centre().n) <= within,
+            )
+        }
+        // Somewhere in a nine-by-nine grid of lanes there is certainly one.
+        assertNotNull(g.nearestJunction(centre(), 5_000.0))
     }
 
     @Test

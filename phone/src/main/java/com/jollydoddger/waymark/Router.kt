@@ -6,6 +6,7 @@ import org.json.JSONObject
 import kotlin.math.abs
 import kotlin.math.cos
 import kotlin.math.hypot
+import kotlin.math.roundToInt
 import kotlin.math.sin
 
 /**
@@ -29,13 +30,19 @@ object Router {
     private val COST = mapOf(
         "path" to 1.0, "footway" to 1.0, "bridleway" to 1.0, "track" to 1.05,
         "steps" to 1.4, "pedestrian" to 1.0, "cycleway" to 1.15,
-        "living_street" to 1.4, "residential" to 1.8, "unclassified" to 1.8,
-        "service" to 1.9, "tertiary" to 4.0, "secondary" to 12.0, "primary" to 30.0,
+        "living_street" to 1.3, "residential" to 1.6, "unclassified" to 1.7,
+        "service" to 1.8,
+        // Read each number as "metres of path I would walk to avoid one
+        // metre of this". The old table said 12 for a B road and 30 for an
+        // A — which is not a preference, it is a refusal wearing a number,
+        // and it is why loops would not close. He will need some road and
+        // will certainly need to cross one.
+        "tertiary" to 2.6, "secondary" to 4.0, "primary" to 6.5,
         // The link classes were named in ROADS and NEVER but never priced,
         // and the builder drops anything COST has no entry for — so every
         // slip road fell out of the graph even when roads were allowed,
         // cutting lanes off from the roads they actually join.
-        "tertiary_link" to 4.0, "secondary_link" to 12.0, "primary_link" to 30.0,
+        "tertiary_link" to 2.6, "secondary_link" to 4.0, "primary_link" to 6.5,
     )
 
     /** Never routed on foot, whatever the setting: no pavement, no business. */
@@ -53,8 +60,14 @@ object Router {
      */
     private val ROADS = setOf("primary", "primary_link", "secondary", "secondary_link", "tertiary", "tertiary_link")
 
-    /** What a road edge costs when he asked to avoid roads. */
-    const val ROAD_AVOID_PENALTY = 25.0
+    /**
+     * What "avoid roads" multiplies a road by. Modest on purpose: the cost
+     * is already per metre, so crossing an A road costs ten metres' worth
+     * and walking a mile along it costs a mile's worth — the distinction
+     * he actually cares about falls out of the arithmetic without anything
+     * being forbidden. A blanket twenty-five made every road a wall.
+     */
+    const val ROAD_AVOID_FACTOR = 2.5
 
     /** What a way counts as when the result is described back to him. */
     fun group(kind: String): String = when (kind) {
@@ -76,6 +89,9 @@ object Router {
              *  thing an inner loop run hundreds of thousands of times
              *  needs. */
             val road: Boolean,
+            /** The same edge priced for someone avoiding roads. Computed
+             *  once at build rather than multiplied per relaxation. */
+            val avoidCost: Double = cost,
         )
 
         // A uniform grid over the nodes. Finding the nearest node used to be
@@ -184,7 +200,27 @@ object Router {
          * home, and saying so is better than presenting it as a clean loop.
          */
         val repeatFraction: Double = 0.0,
+        /** Metres on each actual highway class, so a route that used roads
+         *  can say which ones rather than lumping them together. */
+        val byKind: Map<String, Double> = emptyMap(),
     ) {
+
+        /** "180 m on a B road, 40 m on an A road", or null if it kept off
+         *  them entirely. Named the way a walker would name them. */
+        fun roadSummary(): String? {
+            val names = linkedMapOf(
+                "tertiary" to "a minor road", "tertiary_link" to "a minor road",
+                "secondary" to "a B road", "secondary_link" to "a B road",
+                "primary" to "an A road", "primary_link" to "an A road",
+            )
+            val out = LinkedHashMap<String, Double>()
+            for ((kind, metres) in byKind) {
+                val name = names[kind] ?: continue
+                out[name] = (out[name] ?: 0.0) + metres
+            }
+            if (out.isEmpty()) return null
+            return out.entries.joinToString(", ") { "${it.value.roundToInt()} m on ${it.key}" }
+        }
         fun pathFraction(): Double =
             if (metres <= 0) 0.0 else (byGroup["path"] ?: 0.0) / metres
 
@@ -278,8 +314,10 @@ object Router {
                     val d = hypot(en.e - prevEn!!.e, en.n - prevEn.n)
                     if (d > 0) {
                         // Walking has no one-way streets.
-                        edges[prev].add(Graph.Edge(idx, d, d * cost, kind, isRoad))
-                        edges[idx].add(Graph.Edge(prev, d, d * cost, kind, isRoad))
+                        val plain = d * cost
+                        val avoid = if (isRoad) plain * ROAD_AVOID_FACTOR else plain
+                        edges[prev].add(Graph.Edge(idx, d, plain, kind, isRoad, avoid))
+                        edges[idx].add(Graph.Edge(prev, d, plain, kind, isRoad, avoid))
                     }
                 }
                 prev = idx
@@ -299,7 +337,7 @@ object Router {
         from: Int,
         to: Int,
         penalise: Set<Long> = emptySet(),
-        roadPenalty: Double = 1.0,
+        avoidRoads: Boolean = false,
     ): List<Int>? {
         val n = g.nodes.size
         if (from >= n || to >= n) return null
@@ -320,7 +358,7 @@ object Router {
             for (e in g.edges[u]) {
                 if (done[e.to]) continue
                 val key = edgeKey(u, e.to)
-                var step = if (e.road) e.cost * roadPenalty else e.cost
+                var step = if (avoidRoads) e.avoidCost else e.cost
                 if (key in penalise) step *= REUSE_PENALTY
                 val alt = best[u] + step
                 if (alt < best[e.to]) {
@@ -429,15 +467,17 @@ object Router {
         var total = 0.0
         var repeated = 0.0
         val byGroup = HashMap<String, Double>()
+        val byKind = HashMap<String, Double>()
         val seen = HashMap<Long, Double>()
         for (i in 1 until walk.size) {
             val e = g.edges[walk[i - 1]].firstOrNull { it.to == walk[i] } ?: continue
             total += e.metres
             byGroup[group(e.kind)] = (byGroup[group(e.kind)] ?: 0.0) + e.metres
+            byKind[e.kind] = (byKind[e.kind] ?: 0.0) + e.metres
             val key = edgeKey(walk[i - 1], walk[i])
             if (seen.put(key, e.metres) != null) repeated += e.metres
         }
-        return Planned(pts, total, byGroup, if (total > 0) repeated / total else 0.0)
+        return Planned(pts, total, byGroup, if (total > 0) repeated / total else 0.0, byKind)
     }
 
     /**
@@ -495,7 +535,6 @@ object Router {
         isCancelled: () -> Boolean = { false },
         onProgress: (String) -> Unit = {},
     ): Planned? {
-        val roadPenalty = if (avoidRoads) ROAD_AVOID_PENALTY else 1.0
         // Where a loop may begin. He said his start "can be anywhere within
         // 500 m", which is a licence worth spending: a junction a street
         // away often closes a circuit his exact doorstep cannot.
@@ -547,14 +586,14 @@ object Router {
                                     val ideal = En(from.e + radius * sin(b), from.n + radius * cos(b))
                                     val wp = g.nearestJunction(ideal, radius * 0.6) ?: continue
                                     if (wp == cursor) continue
-                                    val leg = path(g, cursor, wp, used, roadPenalty) ?: continue
+                                    val leg = path(g, cursor, wp, used, avoidRoads) ?: continue
                                     for (i in 1 until leg.size) used.add(edgeKey(leg[i - 1], leg[i]))
                                     if (walk.isEmpty()) walk.add(leg.first())
                                     walk.addAll(leg.drop(1))
                                     cursor = wp
                                 }
                                 if (walk.isEmpty()) continue
-                                val home = path(g, cursor, startNode, used, roadPenalty) ?: continue
+                                val home = path(g, cursor, startNode, used, avoidRoads) ?: continue
                                 walk.addAll(home.drop(1))
                                 val circuit = prune(walk)
                                 if (circuit.size < 4) continue
@@ -611,7 +650,7 @@ object Router {
     fun between(g: Graph, from: En, to: En, avoidRoads: Boolean = true): Planned? {
         val a = g.nearest(from) ?: return null
         val b = g.nearest(to) ?: return null
-        val walk = path(g, a, b, emptySet(), if (avoidRoads) ROAD_AVOID_PENALTY else 1.0) ?: return null
+        val walk = path(g, a, b, emptySet(), avoidRoads) ?: return null
         return measure(g, walk)
     }
 
