@@ -36,7 +36,9 @@ object Weather {
     private val executor = Executors.newSingleThreadExecutor { r ->
         Thread(r, "weather").apply { isDaemon = true }
     }
-    private val main = Handler(Looper.getMainLooper())
+    // Lazy so the object can be touched from a local unit test: Handler is
+    // an Android stub off the phone, and parseField needs none of it.
+    private val main by lazy { Handler(Looper.getMainLooper()) }
 
     /**
      * Hourly values on a lat/lon grid. Points run row-major from the
