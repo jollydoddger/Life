@@ -436,6 +436,7 @@ class BngMapView @JvmOverloads constructor(
     // by luck; anything calling it from an init block or onSizeChanged would
     // get a null on a non-null property, with no warning of any kind.
     private var fieldPaint = Paint(Paint.FILTER_BITMAP_FLAG).apply { alpha = 150 }
+    private var skyPaint = Paint(Paint.FILTER_BITMAP_FLAG)
 
     fun setWeatherOpacity(percent: Int) {
         weatherOpacity = (percent.coerceIn(0, 100)) / 100f
@@ -446,6 +447,7 @@ class BngMapView @JvmOverloads constructor(
     private fun applyWeatherAlpha() {
         radarPaint.alpha = (radarBaseAlpha * weatherOpacity).toInt().coerceIn(0, 255)
         fieldPaint.alpha = (fieldBaseAlpha * weatherOpacity).toInt().coerceIn(0, 255)
+        skyPaint.alpha = (255 * weatherOpacity).toInt().coerceIn(0, 255)
     }
 
     /** Mesh resolution per tile: 6x6 quads is plenty at county scale. */
@@ -486,6 +488,20 @@ class BngMapView @JvmOverloads constructor(
      */
     private var fieldTile: MeshTile? = null
 
+    /**
+     * The sky wash — cloud and fog — its own slot under the rain wash. The
+     * old one-wash-at-a-time rule dated from when temperature was a wash
+     * too: an opaque full-bleed ramp under anything said nothing. Cloud is
+     * thin grey and rain saturated colour, and they layer legibly — which
+     * is what makes the weather one picture instead of a choice.
+     */
+    private var skyTile: MeshTile? = null
+
+    fun setSky(tile: MeshTile?) {
+        skyTile = tile
+        invalidate()
+    }
+
     fun setField(tile: MeshTile?, alpha: Int) {
         fieldTile = tile
         fieldBaseAlpha = alpha
@@ -494,7 +510,11 @@ class BngMapView @JvmOverloads constructor(
     }
 
     private fun drawField(canvas: Canvas) {
-        val t = fieldTile ?: return
+        skyTile?.let { meshTile(canvas, it, skyPaint) }
+        fieldTile?.let { meshTile(canvas, it, fieldPaint) }
+    }
+
+    private fun meshTile(canvas: Canvas, t: MeshTile, paint: Paint) {
         val m = mpp(zl)
         val yN = mercY(t.north)
         val yS = mercY(t.south)
@@ -508,7 +528,7 @@ class BngMapView @JvmOverloads constructor(
                 radarMesh[i++] = sy(en.n, m)
             }
         }
-        canvas.drawBitmapMesh(t.bitmap, radarMeshN, radarMeshN, radarMesh, 0, null, 0, fieldPaint)
+        canvas.drawBitmapMesh(t.bitmap, radarMeshN, radarMeshN, radarMesh, 0, null, 0, paint)
     }
 
     /**
@@ -576,14 +596,16 @@ class BngMapView @JvmOverloads constructor(
      *  wind. Real speed at map scale is imperceptible — a 20 mph gale would
      *  cross a viewport in three minutes — so this is honest exaggeration,
      *  and the arrows and the readout carry the actual number. */
-    private val PX_PER_MPH = 2.2f
+    private val PX_PER_MPH = 2.6f
 
     /** Enough to read as flow, few enough to draw in a couple of
      *  milliseconds. Scaled to the screen so a tablet is not sparse. */
     private fun moteCount(): Int = ((width * height) / (9_000 * density)).toInt().coerceIn(120, 700)
 
     /** How fast a trail fades. Higher is shorter. */
-    private val TRAIL_FADE = 30
+    // 16, halved from 30 after "can hardly see em": a lower fade is a
+    // roughly doubled tail, and the tail is the picture.
+    private val TRAIL_FADE = 16
 
     /** Frames redraw at about 30 a second; a walking map does not need 60,
      *  and this runs while he is out with the screen on. */
@@ -712,7 +734,7 @@ class BngMapView @JvmOverloads constructor(
         c.drawRect(0f, 0f, width.toFloat(), height.toFloat(), windFade)
 
         val m = mpp(zl)
-        motePaint.strokeWidth = 1.7f * density
+        motePaint.strokeWidth = 3.4f * density
         for (mote in motes) {
             mote.life--
             if (mote.life <= 0 || !sampleWind(g, mote.x, mote.y, m, windSample)) {

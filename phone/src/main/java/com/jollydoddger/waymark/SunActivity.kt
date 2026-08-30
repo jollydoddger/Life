@@ -98,6 +98,11 @@ class SunActivity : Activity() {
         sensors.getDefaultSensor(Sensor.TYPE_ROTATION_VECTOR)?.let {
             sensors.registerListener(orientation, it, SensorManager.SENSOR_DELAY_UI)
         }
+        // Gravity referees the matrix convention (see Aim); the plain
+        // accelerometer is close enough when the fused sensor is absent.
+        val g = sensors.getDefaultSensor(Sensor.TYPE_GRAVITY)
+            ?: sensors.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
+        g?.let { sensors.registerListener(orientation, it, SensorManager.SENSOR_DELAY_UI) }
         if (checkSelfPermission(Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
             startCamera()
         } else {
@@ -127,19 +132,46 @@ class SunActivity : Activity() {
 
     private val rotation = FloatArray(9)
 
+    // Which convention this phone's rotation matrix actually arrives in,
+    // measured against gravity rather than assumed — see Aim. A running
+    // majority, so one noisy sample cannot flip the compass mid-walk.
+    private var gravity: FloatArray? = null
+    private var votes = 0
+    private var mirroredVotes = 0
+    private var mirrored = false
+
     private val orientation = object : SensorEventListener {
         override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {
-            overlay.setCompassTrusted(accuracy >= SensorManager.SENSOR_STATUS_ACCURACY_MEDIUM)
+            if (sensor?.type == Sensor.TYPE_ROTATION_VECTOR) {
+                overlay.setCompassTrusted(accuracy >= SensorManager.SENSOR_STATUS_ACCURACY_MEDIUM)
+            }
         }
 
         override fun onSensorChanged(event: SensorEvent) {
-            SensorManager.getRotationMatrixFromVector(rotation, event.values)
-            overlay.setAim(
-                // Magnetic → true north, which is what solar azimuths are in.
-                azimuth = Aim.azimuth(rotation) + declination,
-                elevation = Aim.elevation(rotation),
-                roll = Aim.roll(rotation),
-            )
+            when (event.sensor?.type) {
+                Sensor.TYPE_GRAVITY, Sensor.TYPE_ACCELEROMETER ->
+                    gravity = floatArrayOf(event.values[0], event.values[1], event.values[2])
+                Sensor.TYPE_ROTATION_VECTOR -> {
+                    SensorManager.getRotationMatrixFromVector(rotation, event.values)
+                    gravity?.let { g ->
+                        when (Aim.vote(rotation, g[0], g[1], g[2])) {
+                            1 -> votes++
+                            -1 -> { votes++; mirroredVotes++ }
+                        }
+                        if (votes >= 12) {
+                            val m = mirroredVotes * 2 > votes
+                            if (m != mirrored) { mirrored = m; overlay.setMirrored(m) }
+                        }
+                    }
+                    overlay.setAim(
+                        // Magnetic → true north, which is what solar
+                        // azimuths are in.
+                        azimuth = Aim.azimuth(rotation, mirrored) + declination,
+                        elevation = Aim.elevation(rotation),
+                        roll = Aim.roll(rotation, mirrored),
+                    )
+                }
+            }
         }
     }
 
@@ -260,6 +292,7 @@ class SkyOverlay(activity: Activity) : View(activity) {
     private var aimEl = 0.0
     private var aimRoll = 0.0
     private var compassTrusted = true
+    private var mirrored = false
     private var cameraNote: String? = null
 
     private val clock = SimpleDateFormat("HH:mm", Locale.UK)
@@ -284,6 +317,12 @@ class SkyOverlay(activity: Activity) : View(activity) {
 
     fun setCompassTrusted(trusted: Boolean) {
         if (compassTrusted != trusted) { compassTrusted = trusted; invalidate() }
+    }
+
+    /** Named on screen so the next "still wrong" report says which matrix
+     *  convention the phone was caught using — see Aim. */
+    fun setMirrored(m: Boolean) {
+        if (mirrored != m) { mirrored = m; invalidate() }
     }
 
     fun setNoCamera(note: String) {
@@ -423,7 +462,7 @@ class SkyOverlay(activity: Activity) : View(activity) {
             lines.add("Compass unsure — figure-of-eight the phone to settle it.")
         }
         cameraNote?.let { lines.add(it) }
-        lines.add("Tap to close")
+        lines.add(if (mirrored) "Tap to close · compass: mirrored" else "Tap to close")
         box(canvas, lines, 12f)
     }
 

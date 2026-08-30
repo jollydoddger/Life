@@ -81,4 +81,7 @@ dependencies {
     // held to a test on the JVM without a device — and "circular means a
     // circuit" is exactly the kind of promise that needs one.
     testImplementation("junit:junit:4.13.2")
+    // Local unit tests run against android.jar's stubbed org.json; the real
+    // library lets Weather's response parsing be tested off the phone.
+    testImplementation("org.json:json:20240303")
 }

@@ -18,6 +18,8 @@ class WeatherFieldTest {
             timesMs = LongArray(hours) { base + it * hour },
             lat = DoubleArray(n), lon = DoubleArray(n),
             temp = grid(), rain = grid(), cloud = grid(),
+            cloudLow = grid(), cloudMid = grid(), cloudHigh = grid(),
+            visibility = grid(),
             windSpeed = grid(), windDir = grid(),
             south = 53.0, west = -4.6, north = 53.4, east = -4.0,
         )
@@ -52,5 +54,27 @@ class WeatherFieldTest {
 
     @Test fun `an empty field describes nothing`() {
         assertEquals(-1L, field(0L, 0).hourIndex(0L).toLong())
+    }
+
+    @Test fun `places fill the grid by position, not by reported coordinates`() {
+        // The regression that blanked the weather: Open-Meteo echoes the
+        // centre of its own model cell, so nearby points all report the
+        // same coordinates — matching by them collapsed 25 points onto 1.
+        // This response gives every place an identical lat/lon and a
+        // temperature equal to its position; every grid cell must get its
+        // own value regardless.
+        val n = Weather.GRID * Weather.GRID
+        val places = (0 until n).joinToString(",") { p ->
+            """{"latitude":53.2,"longitude":-4.4,"hourly":{
+                "time":[0],"temperature_2m":[$p]}}"""
+        }
+        val f = Weather.parseField(
+            "[$places]",
+            DoubleArray(n) { 53.0 + it * 0.001 }, DoubleArray(n) { -4.6 + it * 0.001 },
+            doubleArrayOf(53.0, -4.6, 53.4, -4.0),
+        )
+        for (p in 0 until n) {
+            assertEquals(p.toDouble(), f.temp[0][p], 0.0)
+        }
     }
 }

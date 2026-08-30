@@ -27,22 +27,19 @@ import com.jollydoddger.waymark.shared.Prefs.anthropicKey
 import com.jollydoddger.waymark.shared.Prefs.arrowColour
 import com.jollydoddger.waymark.shared.Prefs.assistantEnabled
 import com.jollydoddger.waymark.shared.Prefs.cloudEnabled
-import com.jollydoddger.waymark.shared.Prefs.cloudShown
 import com.jollydoddger.waymark.shared.Prefs.osApiKey
 import com.jollydoddger.waymark.shared.Prefs.prowEnabled
 import com.jollydoddger.waymark.shared.Prefs.prowShown
 import com.jollydoddger.waymark.shared.Prefs.radarEnabled
 import com.jollydoddger.waymark.shared.Prefs.radarScheme
-import com.jollydoddger.waymark.shared.Prefs.radarShown
 import com.jollydoddger.waymark.shared.Prefs.routeColour
 import com.jollydoddger.waymark.shared.Prefs.screenTimeoutSec
 import com.jollydoddger.waymark.shared.Prefs.tempEnabled
-import com.jollydoddger.waymark.shared.Prefs.tempShown
 import com.jollydoddger.waymark.shared.Prefs.tracesEnabled
 import com.jollydoddger.waymark.shared.Prefs.tracesShown
+import com.jollydoddger.waymark.shared.Prefs.weatherShown
 import com.jollydoddger.waymark.shared.Prefs.trailColour
 import com.jollydoddger.waymark.shared.Prefs.windEnabled
-import com.jollydoddger.waymark.shared.Prefs.windShown
 import com.jollydoddger.waymark.shared.Prefs.windStyle
 import com.jollydoddger.waymark.shared.Sync
 import com.jollydoddger.waymark.shared.TileGrid
@@ -260,9 +257,9 @@ class SettingsActivity : Activity() {
             isChecked = radarEnabled
             setOnCheckedChangeListener { _, on ->
                 radarEnabled = on
-                if (on) radarShown = true
-                result.text = if (on) "Rain radar available — its toggle is on the map, switched on."
-                else "Rain radar off, and its toggle is gone from the map."
+                if (on) weatherShown = true
+                result.text = if (on) "Rain radar on — part of the map's Weather chip."
+                else "Rain radar off."
             }
         }
         val radarScales = listOf(
@@ -297,9 +294,9 @@ class SettingsActivity : Activity() {
             isChecked = windEnabled
             setOnCheckedChangeListener { _, on ->
                 windEnabled = on
-                if (on) windShown = true
-                result.text = if (on) "Wind available — its toggle is on the map, switched on."
-                else "Wind off, and its toggle is gone from the map."
+                if (on) weatherShown = true
+                result.text = if (on) "Wind on — part of the map's Weather chip."
+                else "Wind off."
             }
         }
         val windStyles = listOf("Drifting lines" to 1, "Arrows" to 0)
@@ -324,34 +321,35 @@ class SettingsActivity : Activity() {
             isChecked = tempEnabled
             setOnCheckedChangeListener { _, on ->
                 tempEnabled = on
-                if (on) tempShown = true
-                result.text = if (on) "Temperature available — the figure appears at the top of the map."
+                if (on) weatherShown = true
+                result.text = if (on) "Temperature on — a figure at the top of the map, with the Weather chip."
                 else "Temperature off."
             }
         }
 
         val cloudSwitch = Switch(this).apply {
-            text = "  Cloud and sunshine"
+            text = "  Cloud, sunshine and fog"
             textSize = 16f
             isChecked = cloudEnabled
             setOnCheckedChangeListener { _, on ->
                 cloudEnabled = on
-                if (on) cloudShown = true
-                result.text = if (on) "Cloud available — grey where it is dull, clear map where it is not."
+                if (on) weatherShown = true
+                result.text = if (on) "Cloud on — grey where it is dull, its own colour for fog, " +
+                    "and a clear map where the sky is clear."
                 else "Cloud off."
             }
         }
         val washNote = TextView(this).apply {
             textSize = 13f
-            text = "Temperature is a figure at the top of the map rather than a wash of " +
-                "colour: a yellow film over everything said less than two characters " +
-                "do, and buried the contours saying it. Cloud leaves the map alone " +
-                "below a quarter cover, so a clean map means a clear sky, and greys " +
-                "in as it thickens.\n\n" +
-                "Two washes over each other say nothing legible, so only one is drawn: " +
-                "forecast rain wherever the radar cannot see, otherwise cloud. Wind, " +
-                "temperature and cloud all come from one forecast request, so switching " +
-                "a second one on costs nothing.\n\n" +
+            text = "The weather draws as one picture: cloud under rain, wind over both, " +
+                "temperature as a figure at the top of the map. Cloud leaves the map " +
+                "alone below a quarter cover — a clean map means a clear sky — greys " +
+                "in as it thickens, weighs low cloud far heavier than high (cirrus " +
+                "barely dims a day; a lid of stratus wrecks one), and paints fog in " +
+                "its own denser colour whatever the sky above it says, because fog is " +
+                "the one condition that turns walking by sight into a compass leg.\n\n" +
+                "Everything here comes from one forecast request, so switching a " +
+                "second part on costs nothing.\n\n" +
                 "These are a model, not a measurement — the forecast's opinion about the " +
                 "sky, a few kilometres between readings. Only the radar frames are " +
                 "observations, and the timeline label says which you are looking at.\n\n" +
@@ -494,12 +492,13 @@ class SettingsActivity : Activity() {
             addView(
                 TextView(this@SettingsActivity).apply {
                     textSize = 13f
-                    text = "Everything switched on here gets a small toggle across the " +
-                        "top of the map, and that toggle is what turns the layer on and " +
-                        "off while you are out — one tap, without coming in here. " +
-                        "Switching something on here switches its toggle on too; " +
-                        "switching it off here takes the toggle away entirely, so the " +
-                        "row across the map stays as short as you have chosen."
+                    text = "Everything switched on here gets a toggle across the top of " +
+                        "the map, and that toggle is what turns the layer on and off " +
+                        "while you are out — one tap, without coming in here. The " +
+                        "weather shares a single Weather chip (rain, wind, cloud and " +
+                        "the temperature figure together — it is all one sky); the " +
+                        "path layers keep a chip each. Switching something on here " +
+                        "lights its chip too; off here takes it away entirely."
                     setPadding(0, dp(2), 0, dp(10))
                 },
             )

@@ -91,31 +91,43 @@ object Ramp {
     fun temperature(celsius: Double): Int = ramp(TEMPERATURE, celsius)
 
     /**
-     * Cloud cover. Clear sky is **nothing at all** — no wash, the map as
-     * printed.
+     * The sky as one colour, from what each layer of it actually does to a
+     * day out. Clear sky is **nothing at all** — no wash, the map as
+     * printed. (An earlier version marked clear sky gold; it covered the
+     * whole map most of the time and said nothing. The ink goes where the
+     * weather is.)
      *
-     * It used to be a faint gold, on the reasoning that marking sunshine
-     * says more than leaving it blank. That was wrong in practice: cloud is
-     * under 30% over most of a viewport most of the time, so the gold was
-     * almost never a *finding* and almost always a film over the whole map.
-     * A colour that covers everything distinguishes nothing, and it was
-     * sitting on top of contours and path lines he navigates by.
-     *
-     * So the ink now goes where the cloud is. Nothing below a quarter cover,
-     * then grey thickening to a solid overcast — which means a clear map
-     * genuinely reads as clear sky, and the grey patches are worth looking
-     * at because there aren't many of them.
+     * Low cloud is the walk-wrecker, mid dims, high cirrus barely matters —
+     * so cover is weighed, not summed. Fog is not cloud at all: visibility
+     * under a kilometre is the one condition that turns a walk-by-sight
+     * into a compass leg, so it paints denser and warmer than any overcast,
+     * whatever the sky above it says.
      */
-    private val CLOUD = arrayOf(
+    fun sky(low: Double, mid: Double, high: Double, visibilityM: Double): Int {
+        val foggy = !visibilityM.isNaN() && visibilityM < FOG_VIS_M
+        if (foggy) return pack(200, 148, 138, 116)
+        val l = if (low.isNaN()) 0.0 else low
+        val m = if (mid.isNaN()) 0.0 else mid
+        val h = if (high.isNaN()) 0.0 else high
+        if (low.isNaN() && mid.isNaN() && high.isNaN()) return 0
+        val gloom = (l + 0.7 * m + 0.35 * h).coerceAtMost(100.0)
+        return gloom(gloom)
+    }
+
+    /** Metres of visibility below which the sky wash calls it fog. */
+    const val FOG_VIS_M = 1_000.0
+
+    /** Weighted cover to grey: nothing below a quarter, never opaque —
+     *  the map underneath is the thing being walked on. */
+    fun gloom(g: Double): Int = if (g < 25.0) 0 else ramp(GLOOM, g)
+
+    private val GLOOM = arrayOf(
         Stop(25.0, pack(0, 150, 156, 166)),
         Stop(45.0, pack(46, 150, 156, 166)),
         Stop(65.0, pack(96, 138, 144, 154)),
         Stop(85.0, pack(150, 118, 124, 134)),
         Stop(100.0, pack(190, 96, 102, 112)),
     )
-
-    fun cloud(percent: Double): Int =
-        if (percent < 25.0) 0 else ramp(CLOUD, percent)
 
     /**
      * Forecast rainfall in mm per hour. Drizzle is drawn boldly on purpose:

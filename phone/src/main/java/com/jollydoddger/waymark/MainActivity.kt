@@ -41,28 +41,25 @@ import com.jollydoddger.waymark.shared.Prefs.allPathsShown
 import com.jollydoddger.waymark.shared.Prefs.arrowColour
 import com.jollydoddger.waymark.shared.Prefs.assistantEnabled
 import com.jollydoddger.waymark.shared.Prefs.cloudEnabled
-import com.jollydoddger.waymark.shared.Prefs.cloudShown
 import com.jollydoddger.waymark.shared.Prefs.libraryFolder
 import com.jollydoddger.waymark.shared.Prefs.osApiKey
 import com.jollydoddger.waymark.shared.Prefs.prowEnabled
 import com.jollydoddger.waymark.shared.Prefs.prowShown
 import com.jollydoddger.waymark.shared.Prefs.radarEnabled
 import com.jollydoddger.waymark.shared.Prefs.radarScheme
-import com.jollydoddger.waymark.shared.Prefs.radarShown
 import com.jollydoddger.waymark.shared.Prefs.recording
 import com.jollydoddger.waymark.shared.Prefs.recordingStartedAt
 import com.jollydoddger.waymark.shared.Prefs.routeColour
 import com.jollydoddger.waymark.shared.Prefs.routeHidden
 import com.jollydoddger.waymark.shared.Prefs.routeReversed
 import com.jollydoddger.waymark.shared.Prefs.tempEnabled
-import com.jollydoddger.waymark.shared.Prefs.tempShown
 import com.jollydoddger.waymark.shared.Prefs.tracesEnabled
 import com.jollydoddger.waymark.shared.Prefs.tracesShown
+import com.jollydoddger.waymark.shared.Prefs.weatherShown
 import com.jollydoddger.waymark.shared.Prefs.trailColour
 import com.jollydoddger.waymark.shared.Prefs.wantRecording
 import com.jollydoddger.waymark.shared.Prefs.weatherOpacity
 import com.jollydoddger.waymark.shared.Prefs.windEnabled
-import com.jollydoddger.waymark.shared.Prefs.windShown
 import com.jollydoddger.waymark.shared.Prefs.windStyle
 import com.jollydoddger.waymark.shared.RouteStore
 import com.jollydoddger.waymark.shared.Sun
@@ -429,11 +426,15 @@ class MainActivity : Activity() {
         // on. A switch buried two screens away is not something anyone
         // operates halfway up a hill, and the full list is long enough that
         // putting all of it here would be its own clutter.
+        // One big number: he asked for "a nice big number somewhere" over
+        // the wash of colour it used to be — two characters say more than a
+        // film over the whole map did, and bury nothing saying it.
         tempChip = TextView(this).apply {
-            textSize = 15f
+            textSize = 26f
+            setTypeface(typeface, android.graphics.Typeface.BOLD)
             setTextColor(Color.WHITE)
             setBackgroundColor(Color.argb(205, 30, 34, 32))
-            setPadding(dp(10), dp(5), dp(10), dp(5))
+            setPadding(dp(12), dp(4), dp(12), dp(4))
             visibility = View.GONE
         }
         chipRow = LinearLayout(this).apply {
@@ -668,10 +669,15 @@ class MainActivity : Activity() {
     )
 
     private fun layers(): List<Layer> = listOf(
-        Layer("Rain", radarEnabled, radarShown) { radarShown = it },
-        Layer("Wind", windEnabled, windShown) { windShown = it },
-        Layer("Cloud", cloudEnabled, cloudShown) { cloudShown = it },
-        Layer("Temp", tempEnabled, tempShown) { tempShown = it },
+        // One chip for the whole sky — rain, wind, cloud and the
+        // temperature figure come on and off together, his call: "it's all
+        // kinda relevant isn't it". Settings still decides which parts the
+        // chip includes.
+        Layer(
+            "Weather",
+            radarEnabled || windEnabled || tempEnabled || cloudEnabled,
+            weatherShown,
+        ) { weatherShown = it },
         Layer("Paths used", tracesEnabled, tracesShown) { tracesShown = it },
         Layer("Rights of way", prowEnabled, prowShown) { prowShown = it },
         Layer("All paths", allPathsEnabled, allPathsShown) { allPathsShown = it },
@@ -719,10 +725,10 @@ class MainActivity : Activity() {
     // Whether a layer actually draws: allowed in Settings *and* toggled on
     // here. Read through these rather than the raw preferences, or a chip
     // switched off would go on quietly fetching.
-    private val wantRadar: Boolean get() = radarEnabled && radarShown
-    private val wantWind: Boolean get() = windEnabled && windShown
-    private val wantCloud: Boolean get() = cloudEnabled && cloudShown
-    private val wantTemp: Boolean get() = tempEnabled && tempShown
+    private val wantRadar: Boolean get() = radarEnabled && weatherShown
+    private val wantWind: Boolean get() = windEnabled && weatherShown
+    private val wantCloud: Boolean get() = cloudEnabled && weatherShown
+    private val wantTemp: Boolean get() = tempEnabled && weatherShown
 
     /**
      * Wire whichever overlays are switched on to the map settling. Switched
@@ -743,6 +749,7 @@ class MainActivity : Activity() {
         if (!wantRadar) map.setRadar(emptyList())
         if (!wantWind) { map.setWind(emptyList()); map.setWind(null, windStyle == 1) }
         if (!wantGrid && !wantRadar) map.setField(null, 255)
+        if (!wantCloud) map.setSky(null)
         if (!wantTemp) tempChip.visibility = View.GONE
         if (!wantWeather) {
             wxFrames = emptyList()
@@ -903,48 +910,33 @@ class MainActivity : Activity() {
      * the real palette would be worse than none.
      */
     private fun showLegend(frame: WxFrame, haveField: Boolean) {
-        val wash = if (haveField) washKind(frame) else ""
-        // Radar and a wash can be on the map together — rain from RainViewer
-        // over a temperature field — so the key names both. It used to name
-        // only the radar, which left a blue-to-red field across his map with
-        // nothing anywhere saying what it meant.
+        // Every part painted right now gets its line in the key. The scale
+        // named for the radar is the one actually being fetched: if the
+        // server refused his choice, the tiles are the fallback's colours,
+        // and a key naming his preference would describe nothing on screen.
         val radar = if (wantRadar && frame.radarPath != null) Radar.schemeNow() else 0
-        // The scale named is the one actually being fetched. If the server
-        // refused his choice, the tiles are the fallback's colours and a key
-        // still naming his preference is a key that describes nothing on the
-        // screen.
-        val key = "$radar/$wash"
+        val rain = wantRadar && frame.radarPath == null && haveField
+        val sky = wantCloud && haveField
+        val key = "$radar/$rain/$sky"
         if (key == legendKey) return
         legendKey = key
         wxLegend.removeAllViews()
-        wxLegend.visibility = if (radar == 0 && wash.isEmpty()) View.GONE else View.VISIBLE
+        wxLegend.visibility = if (radar == 0 && !rain && !sky) View.GONE else View.VISIBLE
         if (radar != 0) wxLegend.addView(legendNote(RADAR_SCALES[radar] ?: "RainViewer"))
-        when (wash) {
-            "rain" -> {
-                wxLegend.addView(legendNote("Forecast rain"))
-                for ((mm, name) in RAIN_KEY) wxLegend.addView(legendChip(name, Ramp.rain(mm)))
-            }
-            "cloud" -> {
-                // No swatch for clear sky, because clear sky has no swatch:
-                // the map is simply left alone, and saying so in words is
-                // the honest key for it.
-                wxLegend.addView(legendNote("Cloud — clear map is clear sky"))
-                wxLegend.addView(legendChip("half", Ramp.cloud(55.0)))
-                wxLegend.addView(legendChip("dull", Ramp.cloud(80.0)))
-                wxLegend.addView(legendChip("full", Ramp.cloud(100.0)))
-            }
+        if (rain) {
+            wxLegend.addView(legendNote("Rain"))
+            for ((mm, name) in RAIN_KEY) wxLegend.addView(legendChip(name, Ramp.rain(mm)))
         }
-    }
-
-    /**
-     * Which single wash this frame gets, decided once. Both the painting and
-     * the key read this, because the two disagreeing is how a colour ends up
-     * on the map with no words for it.
-     */
-    private fun washKind(frame: WxFrame): String = when {
-        wantRadar && frame.radarPath == null -> "rain"
-        wantCloud -> "cloud"
-        else -> ""
+        if (sky) {
+            // No swatch for clear sky, because clear sky has no swatch: the
+            // map is simply left alone, and saying so in words is the honest
+            // key for it. High cloud barely registers by design; fog is its
+            // own colour because it is its own problem.
+            wxLegend.addView(legendNote("Sky — clear map is clear sky"))
+            wxLegend.addView(legendChip("high", Ramp.sky(0.0, 0.0, 100.0, 10_000.0)))
+            wxLegend.addView(legendChip("low", Ramp.sky(100.0, 0.0, 0.0, 10_000.0)))
+            wxLegend.addView(legendChip("fog", Ramp.sky(0.0, 0.0, 0.0, 500.0)))
+        }
     }
 
     private fun legendNote(text: String): TextView = TextView(this).apply {
@@ -978,21 +970,31 @@ class MainActivity : Activity() {
     }
 
     /**
-     * One colour wash at a time: two of them over each other say nothing
-     * legible, and this is a map first. Forecast rain takes the map wherever
-     * the radar cannot see, because rain is the thing that changes a plan;
-     * otherwise temperature, then cloud.
+     * The weather as one picture: the sky wash (cloud and fog) under the
+     * rain, wind over both, the temperature as a figure. The old
+     * one-wash-at-a-time rule dated from when temperature was an opaque
+     * full-bleed ramp; cloud is thin grey and rain saturated colour, and
+     * they layer legibly.
      */
     private fun drawWeatherField(field: Weather.Field?, hour: Int, frame: WxFrame) {
-        if (field == null || hour < 0) { map.setField(null, 255); return }
-        fun tile(values: DoubleArray, ramp: (Double) -> Int) = BngMapView.MeshTile(
-            Weather.render(values, ramp),
+        if (field == null || hour < 0) {
+            map.setSky(null)
+            map.setField(null, 255)
+            return
+        }
+        map.setSky(if (wantCloud) BngMapView.MeshTile(
+            Weather.renderSky(field, hour),
             field.south, field.west, field.north, field.east,
-        )
-        when (washKind(frame)) {
-            "rain" -> map.setField(tile(field.rain[hour]) { Ramp.rain(it) }, 255)
-            "cloud" -> map.setField(tile(field.cloud[hour]) { Ramp.cloud(it) }, 255)
-            else -> map.setField(null, 255)
+        ) else null)
+        // Forecast rain fills in wherever the radar cannot see; on a radar
+        // frame the radar itself is the rain.
+        if (wantRadar && frame.radarPath == null) {
+            map.setField(BngMapView.MeshTile(
+                Weather.render(field.rain[hour]) { Ramp.rain(it) },
+                field.south, field.west, field.north, field.east,
+            ), 255)
+        } else {
+            map.setField(null, 255)
         }
     }
 
@@ -1101,9 +1103,14 @@ class MainActivity : Activity() {
             }
         }
         if (wantCloud) {
+            val vis = field.visibility[hour][centre]
+            val low = field.cloudLow[hour][centre]
             val cloud = field.cloud[hour][centre]
-            if (!cloud.isNaN()) {
-                sb.append(if (cloud < 25) " · clear" else " · ${cloud.roundToInt()}% cloud")
+            when {
+                !vis.isNaN() && vis < Ramp.FOG_VIS_M -> sb.append(" · fog")
+                !low.isNaN() && low >= 60 -> sb.append(" · low cloud")
+                !cloud.isNaN() ->
+                    sb.append(if (cloud < 25) " · clear" else " · ${cloud.roundToInt()}% cloud")
             }
         }
         return sb.toString()

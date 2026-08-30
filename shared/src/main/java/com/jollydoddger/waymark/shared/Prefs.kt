@@ -178,21 +178,12 @@ object Prefs {
         get() = shown(this, "allPaths")
         set(v) = setShown(this, "allPaths", v)
 
-    var Context.radarShown: Boolean
-        get() = shown(this, "radar")
-        set(v) = setShown(this, "radar", v)
-
-    var Context.windShown: Boolean
-        get() = shown(this, "wind")
-        set(v) = setShown(this, "wind", v)
-
-    var Context.tempShown: Boolean
-        get() = shown(this, "temp")
-        set(v) = setShown(this, "temp", v)
-
-    var Context.cloudShown: Boolean
-        get() = shown(this, "cloud")
-        set(v) = setShown(this, "cloud", v)
+    /** The weather — rain, wind, cloud and the temperature figure — is one
+     *  chip on the map, his call: "it's all kinda relevant isn't it". Which
+     *  parts that chip includes is still decided per-part in Settings. */
+    var Context.weatherShown: Boolean
+        get() = shown(this, "weather")
+        set(v) = setShown(this, "weather", v)
 
     /**
      * Hide the route line on the phone's map without touching the stored

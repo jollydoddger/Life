@@ -37,27 +37,39 @@ class RampTest {
     }
 
     @Test
-    fun clearSkyLeavesTheMapAloneAndCloudGreysIn() {
-        // This used to assert the opposite — a gold wash marking clear sky.
-        // It was replaced because cloud is under a quarter over most of a
-        // viewport most of the time, so the gold was almost never a finding
-        // and almost always a film over the whole map, sitting on the
-        // contours and path lines being navigated by.
-        assertEquals(0L, alpha(Ramp.cloud(0.0)).toLong())
-        assertEquals(0L, alpha(Ramp.cloud(24.9)).toLong())
-        // From there it only thickens, and never becomes opaque: the map
-        // underneath is the thing he is actually walking on.
+    fun clearSkyLeavesTheMapAloneAndGloomGreysIn() {
+        // Clear sky is no ink at all — the map as printed — and the wash
+        // only thickens from a quarter cover, never to opaque.
+        assertEquals(0L, alpha(Ramp.sky(0.0, 0.0, 0.0, 10_000.0)).toLong())
+        assertEquals(0L, alpha(Ramp.sky(20.0, 0.0, 0.0, 10_000.0)).toLong())
         var last = -1
-        for (pct in intArrayOf(25, 40, 60, 80, 100)) {
-            val a = alpha(Ramp.cloud(pct.toDouble()))
-            assertTrue("cloud at $pct% should be no thinner than below it", a >= last)
+        for (pct in intArrayOf(30, 50, 70, 90, 100)) {
+            val a = alpha(Ramp.sky(pct.toDouble(), 0.0, 0.0, 10_000.0))
+            assertTrue("gloom at $pct% should be no thinner than below it", a >= last)
             last = a
         }
         assertTrue("overcast must not hide the map", last < 220)
-        val dull = Ramp.cloud(100.0)
-        fun red(c: Int) = (c shr 16) and 0xFF
-        fun blue(c: Int) = c and 0xFF
-        assertTrue("overcast should read neutral", kotlin.math.abs(red(dull) - blue(dull)) < 40)
+    }
+
+    @Test
+    fun highCloudBarelyRegistersAndLowCloudDominates() {
+        // A sky of pure cirrus dims a day far less than the same cover of
+        // low cloud; the weights say so and the wash must too.
+        val high = alpha(Ramp.sky(0.0, 0.0, 100.0, 10_000.0))
+        val low = alpha(Ramp.sky(100.0, 0.0, 0.0, 10_000.0))
+        assertTrue("low cover must paint heavier than high", low > high + 60)
+    }
+
+    @Test
+    fun fogIsItsOwnThingWhateverTheSkyAboveSays() {
+        // Hill fog under a clear sky is not 0% cloud — it is the condition
+        // that turns walking-by-sight into a compass leg.
+        val fogClear = Ramp.sky(0.0, 0.0, 0.0, 500.0)
+        assertTrue("fog must paint even under clear sky", alpha(fogClear) >= 150)
+        // And it must out-paint any plain overcast.
+        assertTrue(alpha(fogClear) >= alpha(Ramp.sky(100.0, 100.0, 100.0, 5_000.0)))
+        // Unknown visibility is not fog.
+        assertEquals(0L, alpha(Ramp.sky(0.0, 0.0, 0.0, Double.NaN)).toLong())
     }
 
     @Test

@@ -49,6 +49,11 @@ object Weather {
         val temp: Array<DoubleArray>,
         val rain: Array<DoubleArray>,
         val cloud: Array<DoubleArray>,
+        val cloudLow: Array<DoubleArray>,
+        val cloudMid: Array<DoubleArray>,
+        val cloudHigh: Array<DoubleArray>,
+        /** Metres — under about a kilometre is fog, and fog is not "cloud". */
+        val visibility: Array<DoubleArray>,
         val windSpeed: Array<DoubleArray>,
         val windDir: Array<DoubleArray>,
         val south: Double, val west: Double, val north: Double, val east: Double,
@@ -162,11 +167,25 @@ object Weather {
         // unixtime rather than an ISO string: no parsing, no timezone to get
         // wrong, and the scrubber works in milliseconds anyway.
         val url = "https://api.open-meteo.com/v1/forecast?latitude=$lats&longitude=$lons" +
-            "&hourly=temperature_2m,precipitation,cloud_cover,wind_speed_10m,wind_direction_10m" +
+            "&hourly=temperature_2m,precipitation,cloud_cover,cloud_cover_low,cloud_cover_mid," +
+            "cloud_cover_high,visibility,wind_speed_10m,wind_direction_10m" +
             "&past_days=1&forecast_days=2&wind_speed_unit=mph" +
             "&timeformat=unixtime&timezone=UTC"
-        val body = Net.get(url, timeoutMs = 30_000)
+        return parseField(Net.get(url, timeoutMs = 30_000), lat, lon, box)
+    }
 
+    /**
+     * The response into a [Field]. Split from the fetch so the one rule that
+     * has already burned us — points are matched BY POSITION — sits under a
+     * unit test with a synthetic response.
+     */
+    internal fun parseField(
+        body: String,
+        lat: DoubleArray,
+        lon: DoubleArray,
+        box: DoubleArray,
+    ): Field {
+        val south = box[0]; val west = box[1]; val north = box[2]; val east = box[3]
         // One coordinate comes back as an object, several as an array. Accept
         // both rather than depending on which shape the request happened to
         // ask for.
@@ -186,22 +205,21 @@ object Weather {
 
         fun grid() = Array(hours) { DoubleArray(GRID * GRID) { Double.NaN } }
         val temp = grid(); val rain = grid(); val cloud = grid()
+        val low = grid(); val mid = grid(); val high = grid(); val vis = grid()
         val wind = grid(); val dir = grid()
 
-        for (place in places) {
-            val h = place.optJSONObject("hourly") ?: continue
-            // Which grid point this actually is, read off the answer rather
-            // than assumed from its position in it. If the ordering is ever
-            // not the order asked for, position-trusting would scramble the
-            // field into something that still looks like weather and is in
-            // the wrong places — a failure with nothing on screen to show
-            // for it. Falling back to the position keeps the old behaviour
-            // for a response that omits the coordinates.
-            val p = place.optDouble("latitude", Double.NaN).let { la ->
-                val lo = place.optDouble("longitude", Double.NaN)
-                if (la.isNaN() || lo.isNaN()) places.indexOf(place) else nearestPoint(lat, lon, la, lo)
-            }
-            if (p < 0 || p >= GRID * GRID) continue
+        // Places are matched to grid points BY POSITION in the response,
+        // which is the order the request asked for them in. Matching by the
+        // coordinates each place reports was tried and was a disaster:
+        // Open-Meteo echoes the centre of its own model cell (a tenth of a
+        // degree across), so twenty-five points on a walking-scale viewport
+        // all report near-identical coordinates and collapse onto one grid
+        // index — verified 1-of-25 filled — leaving the field NaN, the wind
+        // invisible, the temperature blank and the washes patchy, worse the
+        // further in the map was zoomed. Position is the reliable key.
+        for (p in places.indices) {
+            if (p >= GRID * GRID) break
+            val h = places[p].optJSONObject("hourly") ?: continue
             fun pull(name: String, into: Array<DoubleArray>) {
                 val a = h.optJSONArray(name) ?: return
                 for (t in 0 until minOf(hours, a.length())) into[t][p] = a.optDouble(t, Double.NaN)
@@ -209,23 +227,17 @@ object Weather {
             pull("temperature_2m", temp)
             pull("precipitation", rain)
             pull("cloud_cover", cloud)
+            pull("cloud_cover_low", low)
+            pull("cloud_cover_mid", mid)
+            pull("cloud_cover_high", high)
+            pull("visibility", vis)
             pull("wind_speed_10m", wind)
             pull("wind_direction_10m", dir)
         }
-        return Field(timesMs, lat, lon, temp, rain, cloud, wind, dir, south, west, north, east)
-    }
-
-    /** The grid point a returned location belongs to. Open-Meteo snaps a
-     *  request to its own grid, so the coordinates come back close but not
-     *  identical — nearest, not equal. */
-    private fun nearestPoint(lat: DoubleArray, lon: DoubleArray, la: Double, lo: Double): Int {
-        var best = -1
-        var bestD = Double.MAX_VALUE
-        for (i in lat.indices) {
-            val d = (lat[i] - la) * (lat[i] - la) + (lon[i] - lo) * (lon[i] - lo)
-            if (d < bestD) { bestD = d; best = i }
-        }
-        return best
+        return Field(
+            timesMs, lat, lon, temp, rain, cloud, low, mid, high, vis,
+            wind, dir, south, west, north, east,
+        )
     }
 
     // --- rendering -----------------------------------------------------------
@@ -249,6 +261,32 @@ object Weather {
                 val fc = px.toDouble() / (RENDER - 1) * (GRID - 1)
                 val v = Ramp.bilinear(values, GRID, fr, fc)
                 pixels[py * RENDER + px] = if (v.isNaN()) 0 else ramp(v)
+            }
+        }
+        return Bitmap.createBitmap(pixels, RENDER, RENDER, Bitmap.Config.ARGB_8888)
+    }
+
+    /**
+     * The sky as one wash: low, mid and high cloud weighed by how much each
+     * actually dims a day out, and fog drawn as its own thing — a hill fog
+     * with clear sky above it is not "0% cloud", it is the one condition
+     * that turns a navigation-by-sight walk into a compass leg.
+     */
+    fun renderSky(field: Field, hour: Int): Bitmap {
+        val pixels = IntArray(RENDER * RENDER)
+        val low = field.cloudLow[hour]
+        val mid = field.cloudMid[hour]
+        val high = field.cloudHigh[hour]
+        val vis = field.visibility[hour]
+        for (py in 0 until RENDER) {
+            val fr = py.toDouble() / (RENDER - 1) * (GRID - 1)
+            for (px in 0 until RENDER) {
+                val fc = px.toDouble() / (RENDER - 1) * (GRID - 1)
+                val l = Ramp.bilinear(low, GRID, fr, fc)
+                val m = Ramp.bilinear(mid, GRID, fr, fc)
+                val h = Ramp.bilinear(high, GRID, fr, fc)
+                val v = Ramp.bilinear(vis, GRID, fr, fc)
+                pixels[py * RENDER + px] = Ramp.sky(l, m, h, v)
             }
         }
         return Bitmap.createBitmap(pixels, RENDER, RENDER, Bitmap.Config.ARGB_8888)
