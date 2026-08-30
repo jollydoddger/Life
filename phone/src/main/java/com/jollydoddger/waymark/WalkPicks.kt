@@ -15,12 +15,16 @@ import java.io.File
  * process death in between. The file existing is the whole "pending" state;
  * adopting or dismissing deletes it. No seen-flags to get out of sync.
  *
- * Thirty minutes and they expire: a picker popping up over the map an hour
- * after the question was asked is a haunting, not a feature.
+ * Six hours and they expire — long enough that leaving the app and coming
+ * back mid-afternoon still finds them, short enough that yesterday's
+ * candidates never haunt today's map. And expiry stopped being loss the
+ * moment downloads became files: the queue is a working surface, the gpx
+ * folder is the keep, and "Walks on this map" in the GPX menu rebuilds a
+ * picker from the keep whenever one is wanted.
  */
 object WalkPicks {
 
-    private const val TTL_MS = 30 * 60_000L
+    private const val TTL_MS = 6 * 3600_000L
     private const val MAX = 20
 
     private fun file(c: Context) = File(c.filesDir, "picks.json")

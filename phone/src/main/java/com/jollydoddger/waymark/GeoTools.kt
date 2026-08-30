@@ -569,17 +569,23 @@ class GeoTools(
         } catch (e: Exception) {
             return "Failed: the GPX wouldn't parse (${e.message ?: "malformed"})."
         }
+        val name = route.name.ifBlank { "Downloaded route" }
+        // Kept as a file, not just a picker entry: the queue expires, the
+        // folder doesn't, and every walk search reads it from now on.
+        val saved = runCatching { Downloads.save(ctx, name, data) }.getOrNull()
         val walk = RouteFinder.FoundWalk(
-            name = route.name.ifBlank { "Downloaded route" },
+            name = name,
             source = "Web",
             lines = listOf(route.points),
             closestM = fix()?.let { Geom.closestApproach(it, route.points) } ?: 0.0,
             lengthM = Geom.length(route.points),
+            uri = saved?.let { android.net.Uri.fromFile(it).toString() },
         )
         WalkPicks.append(ctx, walk)
         return "\u201C${walk.name}\u201D downloaded: ${km(walk.lengthM)}" +
             (fix()?.let { ", line ${km(walk.closestM)} from him" } ?: "") +
-            ". Queued on the map picker — he previews and takes it there."
+            ". Queued on the map picker and saved to his downloads — " +
+            "\u201CWalks on this map\u201D in the GPX menu finds it again any time."
     }
 
     /**

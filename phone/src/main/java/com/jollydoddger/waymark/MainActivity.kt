@@ -1428,23 +1428,24 @@ class MainActivity : Activity() {
     private fun routeMenu() {
         val hideLabel = if (routeHidden) "Show the route" else "Hide the route"
         val items = arrayOf(
-            "Import a GPX file", "Walks near me", "Saved walks",
-            "Drive to the start", hideLabel, "GPX library folder…",
+            "Import a GPX file", "Walks near me", "Walks on this map ‹ ›",
+            "Saved walks", "Drive to the start", hideLabel, "GPX library folder…",
         )
         AlertDialog.Builder(this)
             .setItems(items) { _, i ->
                 when (i) {
                     0 -> pickGpx()
                     1 -> walksNearMe()
-                    2 -> savedWalksDialog()
-                    3 -> {
+                    2 -> walksOnScreen()
+                    3 -> savedWalksDialog()
+                    4 -> {
                         // Present even with no route, saying so — a menu item
                         // that comes and goes is a menu you can't learn.
                         val start = RouteStore.load(this)?.points?.firstOrNull()
                         if (start == null) say("No route loaded — import or find one first.")
                         else openParking(start)
                     }
-                    4 -> {
+                    5 -> {
                         routeHidden = !routeHidden
                         map.setRoute(if (routeHidden) null else RouteStore.load(this))
                         say(
@@ -1453,7 +1454,7 @@ class MainActivity : Activity() {
                             else "Route back on the map.",
                         )
                     }
-                    5 -> libraryDialog()
+                    6 -> libraryDialog()
                 }
             }
             .show()
@@ -1610,6 +1611,45 @@ class MainActivity : Activity() {
                 findWalks(here, options[i].second)
             }
             .show()
+    }
+
+    /**
+     * The walks crossing the map as it stands — OpenStreetMap's routes, his
+     * library, his downloads — back on the ‹ › picker whenever he wants
+     * them, however the last picker went away. "The screen area" is his
+     * framing and the right one: the map in front of you is the question.
+     */
+    private fun walksOnScreen() {
+        val b = map.viewportBounds()
+        say("Looking for walks crossing this map…")
+        scope.launch {
+            val centre = En((b[0] + b[2]) / 2, (b[1] + b[3]) / 2)
+            val radius = (kotlin.math.hypot(b[2] - b[0], b[3] - b[1]) / 2 + 500)
+                .coerceAtMost(30_000.0)
+            val result = withContext(Dispatchers.IO) {
+                RouteFinder.find(this@MainActivity, centre, radius)
+            }
+            status.visibility = View.GONE
+            result.note?.let { say(it) }
+            val visible = result.walks.filter { w ->
+                w.lines.any { line ->
+                    line.any { it.e in b[0]..b[2] && it.n in b[1]..b[3] }
+                }
+            }
+            if (visible.isEmpty()) {
+                say("No known walk crosses the map in view — OpenStreetMap, your " +
+                    "library and your downloads all came up empty here. Pan out, or " +
+                    "ask the assistant to search the walking websites.")
+                return@launch
+            }
+            WalkPicks.replace(this@MainActivity, visible)
+            if (pickerShowing) {
+                picks = WalkPicks.pending(this@MainActivity)
+                showPick(0)
+            } else {
+                maybeShowPicker()
+            }
+        }
     }
 
     /**

@@ -127,7 +127,13 @@ the start"** — Google Maps navigation to the nearest mapped car park within
 
 Everything found — by the menu below or by the assistant — lands on the same
 ‹ › picker over the live map: flick through the candidates, each previewed as
-a dashed line, and take one with Use or Start walk. The assistant can also be
+a dashed line, and take one with Use or Start walk. Downloaded routes are
+also **saved as .gpx files** the moment they parse, and the saved folder is a
+source every search reads — a walk found once is findable for ever, network
+or none. **"Walks on this map ‹ ›"** in the GPX menu rebuilds the picker from
+everything crossing the map in view (OSM routes, your library, your
+downloads), so losing the carousel to navigation or expiry costs nothing: aim
+the map at an area and flick. The assistant can also be
 handed a walk's *page* from a free walking website (gps-routes.co.uk,
 walkingclub.org.uk and friends): `download_gpx` digs the GPX link out of the
 page itself, so "find me a written-up circular near X" goes from web search

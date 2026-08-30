@@ -62,7 +62,11 @@ object RouteFinder {
                 uri = entry.uri,
             )
         }
-        val walks = (osm + library).sortedBy { it.closestM }.take(MAX_RESULTS)
+        // The downloads folder rides every search: a route he went to the
+        // trouble of finding once must stay findable, network or none.
+        val saved = runCatching { Downloads.walks(ctx, near) }.getOrDefault(emptyList())
+            .filter { it.closestM <= radiusM }
+        val walks = (osm + library + saved).sortedBy { it.closestM }.take(MAX_RESULTS)
         return Result(walks, note)
     }
 
