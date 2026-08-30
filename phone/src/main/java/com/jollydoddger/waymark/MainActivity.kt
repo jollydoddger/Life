@@ -1616,27 +1616,19 @@ class MainActivity : Activity() {
         val route = RouteStore.load(this) ?: return
         val fingerprint = RouteHeights.fingerprint(route)
 
-        // Tapping an existing flag is how one is removed.
-        Marks.load(this, fingerprint)
+        // Tapping an existing flag answers the same questions as the tap
+        // that set it — recomputed from where he is now, since "how far to
+        // mark 2" changes with every step — with Remove as the other button.
+        val existing = Marks.load(this, fingerprint)
             .firstOrNull { kotlin.math.hypot(it.e - en.e, it.n - en.n) <= Marks.ARRIVE_M }
-            ?.let { existing ->
-                AlertDialog.Builder(this)
-                    .setMessage("Mark ${existing.number} — remove it?")
-                    .setPositiveButton("Remove") { _, _ ->
-                        Marks.remove(this, fingerprint, existing.number)
-                        refreshMarks()
-                    }
-                    .setNegativeButton("Keep", null)
-                    .show()
-                return
-            }
 
         scope.launch {
             // Everything measured against the full route line, not the
-            // decimated drawing copy the tap snapped to.
+            // decimated drawing copy the tap snapped to — and for a flag,
+            // against the flag's own stored point, not the vertex nearest
+            // the finger.
             val cum = Eta.cumulative(route.points)
-            val targetIdx = Eta.nearestIndex(route.points, en)
-            val targetAlong = cum[targetIdx]
+            val targetAlong = existing?.alongM ?: cum[Eta.nearestIndex(route.points, en)]
             val here = lastFix
             val hereAlong = here?.let { cum[Eta.nearestIndex(route.points, it)] }
 
@@ -1674,12 +1666,20 @@ class MainActivity : Activity() {
                     ?: "\nNo height data yet — time is pace only",
             )
 
-            AlertDialog.Builder(this@MainActivity)
-                .setTitle("This point on the route")
+            val dialog = AlertDialog.Builder(this@MainActivity)
+                .setTitle(existing?.let { "Mark ${it.number}" } ?: "This point on the route")
                 .setMessage(sb.toString())
-                .setPositiveButton("Buzz me there") { _, _ -> armMark(en, targetAlong, mins) }
-                .setNegativeButton("Close", null)
-                .show()
+            if (existing == null) {
+                dialog.setPositiveButton("Buzz me there") { _, _ -> armMark(en, targetAlong, mins) }
+                    .setNegativeButton("Close", null)
+            } else {
+                dialog.setPositiveButton("Close", null)
+                    .setNegativeButton("Remove") { _, _ ->
+                        Marks.remove(this@MainActivity, fingerprint, existing.number)
+                        refreshMarks()
+                    }
+            }
+            dialog.show()
         }
     }
 

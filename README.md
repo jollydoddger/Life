@@ -293,7 +293,8 @@ while the phone is in a pocket.
 Arming a buzz without a recording running quietly starts the same kind of
 GPS hold the watch uses (visible as a notification, sized to the walk with
 slack), because a buzz that only works with the app open is a promise about
-missed turns nobody can keep. Tap an existing flag to remove it; a new route
+missed turns nobody can keep. Tap a flag to see the live numbers to it —
+distance left, time at your pace, climb remaining — or remove it; a new route
 retires them all — a flag on a line you are no longer walking is a lie
 waiting for an alarm. While the mode is on, taps pick points instead of
 zooming; the chip switches it back.
