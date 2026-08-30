@@ -127,6 +127,11 @@ class MainActivity : Activity() {
      * to half a minute, doing work nobody will see.
      */
     private var alive = true
+
+    /** Density pixels. onCreate has its own local copy of this for the
+     *  layout it builds; anything outside that needs a member. */
+    private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
+
     private var wxFrames: List<WxFrame> = emptyList()
     private var wxIndex = 0
     private var radarFrames: List<WxFrame> = emptyList()
