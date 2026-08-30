@@ -16,7 +16,9 @@ import android.location.LocationManager
 import android.os.Build
 import android.os.IBinder
 import android.os.Looper
+import android.os.Handler
 import com.jollydoddger.waymark.shared.Prefs.recording
+import com.jollydoddger.waymark.shared.Prefs.warmUntil
 
 /**
  * Keeps the trail growing with the screen off and the phone in a pocket.
@@ -27,15 +29,29 @@ import com.jollydoddger.waymark.shared.Prefs.recording
  * a stub. The permanent notification is the price of that, and is honest: it
  * says recording is happening and offers Stop.
  *
+ * On the watch it has a second job: **holding the GPS warm** between quick
+ * looks. The map screen's own locator is foreground-only, so every screen
+ * sleep used to release the GPS engine entirely and reopening cost twenty
+ * seconds of grey arrow — on the device whose whole point is a glance
+ * without getting the phone out. Warm mode keeps a slow location request
+ * alive (which also keeps getLastKnownLocation fresh, so the locator's
+ * seed on reopen is current rather than stale), records nothing, and stops
+ * itself when [warmUntil] passes — a deadline the watch activity stamps
+ * ninety minutes past every glance. The phone never sets the deadline, so
+ * the phone never runs warm.
+ *
  * Deliberately NOT using ACCESS_BACKGROUND_LOCATION: the service is only ever
  * started from the visible activity, which is exactly the case Android allows
- * without it. No extra permission, no trip to system settings.
+ * without it. No extra permission, no trip to system settings. Warm's
+ * self-stop and the stop→warm downgrade both happen inside the already-
+ * foregrounded service, which keeps them inside that rule too.
  */
 class TrackingService : Service() {
 
     companion object {
         const val ACTION_START = "waymark.record.start"
         const val ACTION_STOP = "waymark.record.stop"
+        const val ACTION_WARM = "waymark.record.warm"
         const val CHANNEL = "waymark_recording"
         private const val NOTIFICATION_ID = 4101
 
@@ -45,8 +61,21 @@ class TrackingService : Service() {
         /** Something changed the trail; the map redraws if it is on screen. */
         const val BROADCAST_TRAIL = "waymark.trail.changed"
 
+        private const val WARM_CHECK_MS = 60_000L
+
+        /** Warm fixes are slow on purpose: enough to hold the lock, far
+         *  lighter than the 1-second foreground locator. */
+        private const val WARM_INTERVAL_MS = 10_000L
+
         fun start(ctx: Context) {
             val i = Intent(ctx, TrackingService::class.java).setAction(ACTION_START)
+            ctx.startForegroundService(i)
+        }
+
+        /** Hold the GPS ready without recording — the watch's quick-look
+         *  keep-alive. Caller stamps [Prefs.warmUntil] first. */
+        fun warm(ctx: Context) {
+            val i = Intent(ctx, TrackingService::class.java).setAction(ACTION_WARM)
             ctx.startForegroundService(i)
         }
 
@@ -63,11 +92,32 @@ class TrackingService : Service() {
     }
 
     private val lm by lazy { getSystemService(Context.LOCATION_SERVICE) as LocationManager }
+    private val handler by lazy { Handler(Looper.getMainLooper()) }
+
+    /** Whether this instance is recording (true) or only holding warm. */
+    private var tracking = false
 
     private val listener = LocationListener { loc: Location ->
+        // Warm mode records nothing: the fixes exist to keep the chipset
+        // lock and getLastKnownLocation fresh, never to grow the trail.
+        if (!tracking) return@LocationListener
         if (loc.hasAccuracy() && loc.accuracy > WORST_ACCURACY_M) return@LocationListener
         if (TrailStore.add(this, Bng.fromWgs84(loc.latitude, loc.longitude))) {
             sendBroadcast(Intent(BROADCAST_TRAIL).setPackage(packageName))
+        }
+    }
+
+    /** The warm window's clock: past the deadline and not recording, stop.
+     *  Checking a stored deadline is what ends the hold with no background
+     *  service starts anywhere. */
+    private val warmCheck = object : Runnable {
+        override fun run() {
+            if (tracking) return
+            if (System.currentTimeMillis() > warmUntil) {
+                stopSelf()
+            } else {
+                handler.postDelayed(this, WARM_CHECK_MS)
+            }
         }
     }
 
@@ -75,33 +125,80 @@ class TrackingService : Service() {
 
     @SuppressLint("MissingPermission")
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        if (intent?.action == ACTION_STOP) {
-            recording = false
-            stopSelf()
-            return START_NOT_STICKY
+        when (intent?.action) {
+            ACTION_STOP -> {
+                recording = false
+                // A walk ending mid-afternoon must not cold-kill the fix:
+                // inside the warm window, drop back to holding rather than
+                // stopping. This runs in an already-foregrounded service,
+                // so it needs no background-start allowance.
+                if (System.currentTimeMillis() < warmUntil) {
+                    warmMode()
+                    return START_NOT_STICKY
+                }
+                stopSelf()
+                return START_NOT_STICKY
+            }
+            ACTION_WARM -> {
+                // Recording already holds the GPS harder than warm would.
+                if (tracking) return START_STICKY
+                goForeground(notification())
+                warmMode()
+                // Not sticky: resurrecting a convenience hold from a service
+                // restart is the murky background-FGS path, and the next
+                // glance restarts it legitimately anyway.
+                return START_NOT_STICKY
+            }
         }
 
-        goForeground(notification())
+        tracking = true
         recording = true
-        try {
-            lm.requestLocationUpdates(
-                LocationManager.GPS_PROVIDER, 4_000L, 8f, listener, Looper.getMainLooper(),
-            )
-        } catch (e: SecurityException) {
-            recording = false
-            stopSelf()
-        } catch (e: IllegalArgumentException) {
-            recording = false
-            stopSelf()
-        }
+        goForeground(notification())
+        handler.removeCallbacks(warmCheck)
+        // A fresh request replaces the warm one if we are upgrading.
+        lm.removeUpdates(listener)
+        if (!request(4_000L, 8f)) return START_NOT_STICKY
         // START_STICKY: if Android kills us for memory mid-walk, come back.
         return START_STICKY
     }
 
-    override fun onDestroy() {
+    @SuppressLint("MissingPermission")
+    private fun warmMode() {
+        tracking = false
         lm.removeUpdates(listener)
-        recording = false
-        sendBroadcast(Intent(BROADCAST_TRAIL).setPackage(packageName))
+        if (!request(WARM_INTERVAL_MS, 0f)) return
+        goForeground(notification())
+        handler.removeCallbacks(warmCheck)
+        handler.postDelayed(warmCheck, WARM_CHECK_MS)
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun request(intervalMs: Long, metres: Float): Boolean {
+        return try {
+            lm.requestLocationUpdates(
+                LocationManager.GPS_PROVIDER, intervalMs, metres, listener, Looper.getMainLooper(),
+            )
+            true
+        } catch (e: SecurityException) {
+            recording = false
+            stopSelf()
+            false
+        } catch (e: IllegalArgumentException) {
+            recording = false
+            stopSelf()
+            false
+        }
+    }
+
+    override fun onDestroy() {
+        handler.removeCallbacks(warmCheck)
+        lm.removeUpdates(listener)
+        // Only a recording death changes recorded-state or needs the map
+        // told; a warm hold ending is nobody's news.
+        if (tracking) {
+            recording = false
+            sendBroadcast(Intent(BROADCAST_TRAIL).setPackage(packageName))
+        }
         super.onDestroy()
     }
 
@@ -119,19 +216,24 @@ class TrackingService : Service() {
         val open = packageManager.getLaunchIntentForPackage(packageName)?.let {
             PendingIntent.getActivity(this, 1, it, PendingIntent.FLAG_IMMUTABLE)
         }
-        return Notification.Builder(this, CHANNEL)
-            .setContentTitle("Recording your walk")
-            .setContentText("Leaving a trail on the map")
+        val builder = Notification.Builder(this, CHANNEL)
             .setSmallIcon(android.R.drawable.ic_menu_mylocation)
             .setOngoing(true)
             .setContentIntent(open)
-            .addAction(
-                Notification.Action.Builder(
-                    Icon.createWithResource(this, android.R.drawable.ic_menu_close_clear_cancel),
-                    "Stop", stop,
-                ).build(),
-            )
-            .build()
+        if (tracking) {
+            builder.setContentTitle("Recording your walk")
+                .setContentText("Leaving a trail on the map")
+                .addAction(
+                    Notification.Action.Builder(
+                        Icon.createWithResource(this, android.R.drawable.ic_menu_close_clear_cancel),
+                        "Stop", stop,
+                    ).build(),
+                )
+        } else {
+            builder.setContentTitle("Holding GPS ready")
+                .setContentText("So a quick look at the map is instant")
+        }
+        return builder.build()
     }
 
     @Suppress("DEPRECATION")

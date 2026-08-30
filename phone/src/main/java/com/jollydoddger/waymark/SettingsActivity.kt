@@ -39,6 +39,7 @@ import com.jollydoddger.waymark.shared.Prefs.tracesEnabled
 import com.jollydoddger.waymark.shared.Prefs.tracesShown
 import com.jollydoddger.waymark.shared.Prefs.weatherShown
 import com.jollydoddger.waymark.shared.Prefs.trailColour
+import com.jollydoddger.waymark.shared.Prefs.watchGpsWarm
 import com.jollydoddger.waymark.shared.Prefs.windEnabled
 import com.jollydoddger.waymark.shared.Prefs.windStyle
 import com.jollydoddger.waymark.shared.Sync
@@ -544,6 +545,30 @@ class SettingsActivity : Activity() {
             addView(swatches({ arrowColour }) { arrowColour = it })
             addView(heading("Recorded trail"))
             addView(swatches({ trailColour }) { trailColour = it })
+
+            addView(heading("Watch"))
+            addView(Switch(this@SettingsActivity).apply {
+                text = "  Hold GPS on the watch between looks"
+                textSize = 16f
+                isChecked = watchGpsWarm
+                setOnCheckedChangeListener { _, on ->
+                    watchGpsWarm = on
+                    // pushStyle narrates the send into the same result line,
+                    // so the watch actually learning of the change is what
+                    // gets reported, not just the phone remembering it.
+                    pushStyle(result)
+                }
+            })
+            addView(TextView(this@SettingsActivity).apply {
+                textSize = 13f
+                text = "The watch's map only asks for GPS while it is on screen, so every " +
+                    "screen sleep used to release the fix and the next glance cost twenty " +
+                    "seconds of grey arrow. With this on, a quiet background hold keeps the " +
+                    "fix for 90 minutes after you last look — every glance restarts the " +
+                    "clock, so it is instant all walk long and costs nothing overnight. " +
+                    "The price is watch battery while it is held, and a small \u201CHolding " +
+                    "GPS ready\u201D notification so it can always be seen and stopped."
+            })
 
             addView(heading("Waymark holds the watch screen on for"))
             addView(HorizontalScrollView(this@SettingsActivity).apply {

@@ -227,17 +227,24 @@ class BngMapView @JvmOverloads constructor(
     fun zoomOut() = setZoom(zl - 1.0)
 
     /**
-     * Follow me again, and zoom right in while doing it: the button is asked
-     * "where am I", and an answer at a mile to the inch is not one.
+     * Follow me again — at whatever zoom the map is already at. It used to
+     * zoom right in as well; he asked for that once and unasked it: the
+     * button answers "where am I", and the zoom is his. With no fix yet it
+     * centres on the route instead, again without touching the zoom —
+     * re-fitting belongs to the first-layout path, not to a button pressed
+     * on a map already set up the way he wants it.
      */
     fun recentre() {
         follow = true
         if (hasFix) {
             centreE = fixE; centreN = fixN
-            setZoom(maxZl)
         } else {
-            centreOnRoute()
+            routePts.takeIf { it.isNotEmpty() }?.let { pts ->
+                centreE = (pts.minOf { it.e } + pts.maxOf { it.e }) / 2
+                centreN = (pts.minOf { it.n } + pts.maxOf { it.n }) / 2
+            }
         }
+        viewportChanged()
         invalidate()
     }
 

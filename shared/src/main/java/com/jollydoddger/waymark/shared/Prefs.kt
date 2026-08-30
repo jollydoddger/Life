@@ -226,6 +226,26 @@ object Prefs {
      * watch honours it — the phone is left to its own system timeout. Set on
      * the phone and synced, because the watch has no room for settings.
      */
+    /**
+     * Hold the watch's GPS warm between quick looks. The map screen's own
+     * locator is foreground-only, so without this every screen sleep
+     * releases the GPS engine and the next glance costs twenty seconds of
+     * grey arrow — on the device whose whole point is the quick look.
+     * Synced from the phone's Settings; battery is the honest price.
+     */
+    var Context.watchGpsWarm: Boolean
+        get() = p(this).getBoolean("watchGpsWarm", true)
+        set(v) = p(this).edit().putBoolean("watchGpsWarm", v).apply()
+
+    /**
+     * When the warm hold expires — stamped ninety minutes past every glance
+     * by the watch activity, and never by the phone, which is what keeps
+     * warm mode a watch-only behaviour.
+     */
+    var Context.warmUntil: Long
+        get() = p(this).getLong("warmUntil", 0L)
+        set(v) = p(this).edit().putLong("warmUntil", v).apply()
+
     var Context.screenTimeoutSec: Int
         get() = p(this).getInt("screenTimeoutSec", DEFAULT_SCREEN_TIMEOUT_SEC)
         set(v) = p(this).edit().putInt("screenTimeoutSec", v).apply()

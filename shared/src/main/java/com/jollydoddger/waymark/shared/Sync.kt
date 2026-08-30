@@ -9,6 +9,7 @@ import com.google.android.gms.wearable.Wearable
 import com.jollydoddger.waymark.shared.Prefs.arrowColour
 import com.jollydoddger.waymark.shared.Prefs.osApiKey
 import com.jollydoddger.waymark.shared.Prefs.recording
+import com.jollydoddger.waymark.shared.Prefs.watchGpsWarm
 import com.jollydoddger.waymark.shared.Prefs.routeColour
 import com.jollydoddger.waymark.shared.Prefs.routeReversed
 import com.jollydoddger.waymark.shared.Prefs.screenTimeoutSec
@@ -85,6 +86,7 @@ object Sync {
         trail: Int,
         reversed: Boolean,
         screenTimeoutSec: Int,
+        gpsWarm: Boolean,
     ) {
         val req = PutDataMapRequest.create(PATH_STYLE).apply {
             dataMap.putInt("route", route)
@@ -92,6 +94,7 @@ object Sync {
             dataMap.putInt("trail", trail)
             dataMap.putBoolean("reversed", reversed)
             dataMap.putInt("timeout", screenTimeoutSec)
+            dataMap.putBoolean("gpsWarm", gpsWarm)
             dataMap.putLong("stamp", System.currentTimeMillis())
         }.asPutDataRequest().setUrgent()
         Wearable.getDataClient(ctx).putDataItem(req).await()
@@ -99,7 +102,8 @@ object Sync {
 
     /** Convenience: send whatever the phone currently holds. */
     suspend fun sendStyle(ctx: Context) = sendStyle(
-        ctx, ctx.routeColour, ctx.arrowColour, ctx.trailColour, ctx.routeReversed, ctx.screenTimeoutSec,
+        ctx, ctx.routeColour, ctx.arrowColour, ctx.trailColour, ctx.routeReversed,
+        ctx.screenTimeoutSec, ctx.watchGpsWarm,
     )
 
     /**
@@ -133,6 +137,7 @@ object Sync {
         ctx.trailColour = data.getInt("trail", Colours.DEFAULT_TRAIL)
         ctx.routeReversed = data.getBoolean("reversed", false)
         ctx.screenTimeoutSec = data.getInt("timeout", Prefs.DEFAULT_SCREEN_TIMEOUT_SEC)
+        ctx.watchGpsWarm = data.getBoolean("gpsWarm", true)
     }
 
     /**

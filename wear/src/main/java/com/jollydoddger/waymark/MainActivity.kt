@@ -31,6 +31,9 @@ import com.jollydoddger.waymark.shared.PoiStore
 import com.jollydoddger.waymark.shared.Prefs.arrowColour
 import com.jollydoddger.waymark.shared.Prefs.osApiKey
 import com.jollydoddger.waymark.shared.Prefs.recording
+import com.jollydoddger.waymark.shared.Prefs.recordingStartedAt
+import com.jollydoddger.waymark.shared.Prefs.warmUntil
+import com.jollydoddger.waymark.shared.Prefs.watchGpsWarm
 import com.jollydoddger.waymark.shared.Prefs.routeColour
 import com.jollydoddger.waymark.shared.Prefs.routeReversed
 import com.jollydoddger.waymark.shared.Prefs.screenTimeoutSec
@@ -56,6 +59,11 @@ import kotlinx.coroutines.launch
  * the phone and arrive over the Data Layer.
  */
 class MainActivity : Activity(), DataClient.OnDataChangedListener {
+
+    private companion object {
+        /** How long one glance holds the GPS warm for the next one. */
+        const val WARM_HOLD_MS = 90 * 60_000L
+    }
 
     private lateinit var map: BngMapView
     private lateinit var hint: TextView
@@ -145,6 +153,7 @@ class MainActivity : Activity(), DataClient.OnDataChangedListener {
      * TrackingService, which runs regardless of this screen.
      */
     private fun keepAwake() {
+        keepGpsWarm()
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         handler.removeCallbacks(sleepScreen)
         val seconds = screenTimeoutSec
@@ -185,6 +194,7 @@ class MainActivity : Activity(), DataClient.OnDataChangedListener {
         }
 
         startRecordingIfWanted()
+        keepGpsWarm()
 
         if (checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
             locator = Locator(this, { en, stale -> map.setFix(en.e, en.n, stale) }, { map.setHeading(it) })
@@ -206,7 +216,33 @@ class MainActivity : Activity(), DataClient.OnDataChangedListener {
      * background, so this is the earliest honest moment.
      */
     private fun startRecordingIfWanted() {
-        if (wantRecording && !recording) TrackingService.start(this)
+        if (wantRecording && !recording) {
+            // This path never set the start time, so a watch-started walk
+            // carried a stale one — wrong clock, wrong saved duration.
+            recordingStartedAt = System.currentTimeMillis()
+            TrackingService.start(this)
+        }
+    }
+
+    /**
+     * Every glance buys ninety minutes of held GPS. The map's own locator is
+     * foreground-only, so before this every screen sleep released the GPS
+     * engine and the next look cost twenty seconds of grey arrow — on the
+     * device whose whole point is the quick look. The service stops itself
+     * when the deadline passes; each glance here pushes it on.
+     */
+    private var lastWarmStamp = 0L
+
+    private fun keepGpsWarm() {
+        if (!watchGpsWarm) return
+        if (checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) return
+        // Touches arrive in bursts; one re-stamp a minute is plenty, and the
+        // service start is idempotent while it is already holding.
+        val now = System.currentTimeMillis()
+        if (now - lastWarmStamp < 60_000L) return
+        lastWarmStamp = now
+        warmUntil = now + WARM_HOLD_MS
+        TrackingService.warm(this)
     }
 
     private fun showHint() {

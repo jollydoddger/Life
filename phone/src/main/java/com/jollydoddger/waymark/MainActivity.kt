@@ -1322,7 +1322,7 @@ class MainActivity : Activity() {
         val hideLabel = if (routeHidden) "Show the route" else "Hide the route"
         val items = arrayOf(
             "Import a GPX file", "Walks near me", "Saved walks",
-            hideLabel, "GPX library folder…",
+            "Drive to the start", hideLabel, "GPX library folder…",
         )
         AlertDialog.Builder(this)
             .setItems(items) { _, i ->
@@ -1331,6 +1331,13 @@ class MainActivity : Activity() {
                     1 -> walksNearMe()
                     2 -> savedWalksDialog()
                     3 -> {
+                        // Present even with no route, saying so — a menu item
+                        // that comes and goes is a menu you can't learn.
+                        val start = RouteStore.load(this)?.points?.firstOrNull()
+                        if (start == null) say("No route loaded — import or find one first.")
+                        else openParking(start)
+                    }
+                    4 -> {
                         routeHidden = !routeHidden
                         map.setRoute(if (routeHidden) null else RouteStore.load(this))
                         say(
@@ -1339,7 +1346,7 @@ class MainActivity : Activity() {
                             else "Route back on the map.",
                         )
                     }
-                    4 -> libraryDialog()
+                    5 -> libraryDialog()
                 }
             }
             .show()
@@ -1667,7 +1674,14 @@ class MainActivity : Activity() {
      */
     private fun openParking() {
         val walk = picks.getOrNull(pickIndex) ?: return
-        val start = walk.routePoints().firstOrNull() ?: return
+        walk.routePoints().firstOrNull()?.let { openParking(it) }
+    }
+
+    /**
+     * Navigation to where a walk starts — the picker's Parking button and
+     * the GPX menu's "Drive to the start" both land here.
+     */
+    private fun openParking(start: En) {
         sayBriefly("Finding parking near the start…")
         scope.launch {
             val target = withContext(Dispatchers.IO) {
