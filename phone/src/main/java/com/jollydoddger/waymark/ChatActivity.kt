@@ -191,6 +191,14 @@ class ChatActivity : Activity() {
             )
             setPadding(dp(12), dp(9), dp(12), dp(9))
             contentDescription = clock
+            // A URL in a reply is usually the assistant handing over a walk
+            // page it couldn't download from; it has to be one tap, not a
+            // string to retype into a browser.
+            android.text.util.Linkify.addLinks(this, android.text.util.Linkify.WEB_URLS)
+            movementMethod = android.text.method.LinkMovementMethod.getInstance()
+            setLinkTextColor(
+                if (said.fromHim) Color.rgb(20, 90, 60) else Color.rgb(140, 200, 255),
+            )
         }.also { view ->
             val lp = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT,

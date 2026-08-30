@@ -126,8 +126,12 @@ a dashed line, and take one with Use or Start walk. The assistant can also be
 handed a walk's *page* from a free walking website (gps-routes.co.uk,
 walkingclub.org.uk and friends): `download_gpx` digs the GPX link out of the
 page itself, so "find me a written-up circular near X" goes from web search
-to routes on the map without copying links about. AllTrails, komoot and OS
-Maps stay refused — their terms.
+to routes on the map without copying links about. Where a site's download
+sits behind a script, a login or a cookie wall the app cannot honestly get
+past, the assistant hands you the walk page as a tappable link instead — a
+GPX downloaded in your browser and opened or shared with Waymark imports
+straight onto the map, so a failed fetch is one tap, not a dead end.
+AllTrails, komoot and OS Maps stay refused — their terms.
 
 Community route apps show a pin where a walk *starts*; a walk that passes 400 m
 from your door can start two villages away. The GPX button's **Walks near me**

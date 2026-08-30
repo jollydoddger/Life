@@ -41,6 +41,16 @@ class GeoTools(
     /** A downloaded GPX bigger than this is not a walking route. */
     private val MAX_GPX_BYTES = 5 * 1024 * 1024
 
+    /**
+     * The line every download failure ends with: the browser can get past
+     * the cookie walls, scripts and logins this app never will, and a GPX
+     * he downloads there imports into Waymark by opening or sharing the
+     * file — so a failed fetch becomes his one tap, not a dead end.
+     */
+    private fun handItOver(pageUrl: String): String =
+        "Give him this link to open in his browser: $pageUrl — a GPX downloaded " +
+            "there and opened or shared with Waymark imports straight onto the map."
+
     /** The .gpx links a walk page holds, resolved against the page's own
      *  URL, deduplicated, capped — enough to choose from, never a sitemap. */
     private fun gpxLinks(html: String, pageUrl: String): List<String> {
@@ -531,7 +541,8 @@ class GeoTools(
                     out.toByteArray()
                 }
             } catch (e: Exception) {
-                return "Failed: couldn't download it (${e.message ?: "no connection"})."
+                return "Failed: couldn't download it (${e.message ?: "no connection"}). " +
+                    handItOver(target)
             }
             val head = String(got, 0, minOf(got.size, 512), Charsets.UTF_8)
             if (Gpx.looksLikeGpx(head)) {
@@ -539,13 +550,14 @@ class GeoTools(
                 break
             }
             if (hop == 1) {
-                return "Failed: that page's GPX link served another page rather than the file."
+                return "Failed: that page's GPX link served another page rather than the file. " +
+                    handItOver(url)
             }
             val links = gpxLinks(String(got, Charsets.UTF_8), target)
             when {
                 links.isEmpty() -> return "Failed: that isn't a GPX file and the page holds " +
-                    "no .gpx links. The walk's own page usually carries a download link — " +
-                    "try that page's URL."
+                    "no plain .gpx links — likely a button behind a script or a login. " +
+                    handItOver(target)
                 links.size == 1 -> target = links.first()
                 else -> return "That page holds ${links.size} GPX links — call download_gpx " +
                     "with the right one:\n" + links.joinToString("\n") { "- $it" }

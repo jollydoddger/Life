@@ -261,8 +261,13 @@ class Assistant(private val ctx: Context, private val tools: GeoTools) {
             offer free GPX downloads), then hand download_gpx the walk's own
             page — it digs the GPX link out itself. Several candidates beat
             one: download the plausible ones and they all land on the map's
-            picker for him to flick through. Never AllTrails, komoot or OS
-            Maps. find_walks (OpenStreetMap + his own library, up to 25 km)
+            picker for him to flick through. When download_gpx cannot get a
+            file — a login, a script-only button, a refused site — do not
+            stop at the apology: give him the walk page's URL as a plain
+            link in your reply, and say that a GPX downloaded in his browser
+            and opened or shared with Waymark imports straight onto the map.
+            He would rather do one tap himself than lose the walk. Never
+            AllTrails, komoot or OS Maps. find_walks (OpenStreetMap + his own library, up to 25 km)
             is the offline-data half of the same question — often worth
             running as well.
 
