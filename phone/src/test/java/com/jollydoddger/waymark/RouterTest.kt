@@ -189,6 +189,31 @@ class RouterTest {
     }
 
     @Test
+    fun `there and back goes out and comes home down its own line`() {
+        // The shape no loop-finder will ever offer, because the best turning
+        // points are dead ends and a circuit search refuses those on purpose.
+        val g = awkwardNetwork(3)
+        val out = Router.outAndBack(g, centre(), 4_000.0)
+        assertNotNull("a grid of lanes can always make an out-and-back", out)
+        val p = out!!.points
+        assertEquals("it must come home", p.first(), p.last())
+        assertEquals("out and back is an odd number of points", 1, p.size % 2)
+        assertEquals("every metre of it is walked twice, by design", 1.0, out.repeatFraction, 0.001)
+        assertTrue("and it is somewhere near the length asked for", out.metres in 2_000.0..7_000.0)
+        // And the app agrees with the router about what it just built.
+        assertEquals(Form.OUT_AND_BACK, Specifier.formOf(p))
+    }
+
+    @Test
+    fun `the clock stops the there-and-back search too`() {
+        val g = awkwardNetwork(4)
+        val started = System.currentTimeMillis()
+        val out = Router.outAndBack(g, centre(), 9_000.0, isCancelled = { true })
+        assertTrue("cancelling must not grind", System.currentTimeMillis() - started < 3_000)
+        assertTrue("cancelled returns nothing or something real", out == null || out.metres > 0)
+    }
+
+    @Test
     fun `the grid index finds what a full scan would`() {
         val g = awkwardNetwork(6)
         val rnd = Random(11)

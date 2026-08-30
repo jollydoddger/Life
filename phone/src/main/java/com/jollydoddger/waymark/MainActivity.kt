@@ -19,12 +19,16 @@ import android.view.MotionEvent
 import android.view.View
 import android.view.WindowInsets
 import android.view.inputmethod.EditorInfo
+import android.widget.ArrayAdapter
 import android.widget.EditText
 import android.widget.HorizontalScrollView
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.ScrollView
+import android.widget.RadioButton
+import android.widget.RadioGroup
 import android.widget.SeekBar
+import android.widget.Spinner
 import android.widget.TextView
 import com.jollydoddger.waymark.shared.Bng
 import com.jollydoddger.waymark.shared.BngMapView
@@ -57,6 +61,7 @@ import com.jollydoddger.waymark.shared.Prefs.tracesEnabled
 import com.jollydoddger.waymark.shared.Prefs.tracesShown
 import com.jollydoddger.waymark.shared.Prefs.weatherShown
 import com.jollydoddger.waymark.shared.Prefs.trailColour
+import com.jollydoddger.waymark.shared.Prefs.walkSpec
 import com.jollydoddger.waymark.shared.Prefs.wantRecording
 import com.jollydoddger.waymark.shared.Prefs.weatherOpacity
 import com.jollydoddger.waymark.shared.Prefs.windEnabled
@@ -138,6 +143,17 @@ class MainActivity : Activity() {
     private var picks: List<RouteFinder.FoundWalk> = emptyList()
     private var pickIndex = 0
     private var pickerShowing = false
+
+    /**
+     * Which day the picker's walks were specified for, and whether they came
+     * from the specifier at all. Both exist because a brief is about a walk
+     * *on a day* — "best time to set off" means nothing without one — and
+     * only the form knows which day he picked. A picker filled any other
+     * way briefs for today, which is the honest default.
+     */
+    private var pickDayOffset = 0
+    private var picksFromSpec = false
+    private var specJob: kotlinx.coroutines.Job? = null
 
     /**
      * Whether this screen is still the one on the phone. Radar and Weather
@@ -489,16 +505,24 @@ class MainActivity : Activity() {
         }
         val pickerRow = LinearLayout(this).apply {
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(10), dp(6), dp(10), dp(10))
             fun space() = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT,
             ).apply { rightMargin = dp(8) }
             addView(pickerButton("‹") { showPick(pickIndex - 1) }, space())
             addView(pickerButton("›") { showPick(pickIndex + 1) }, space())
-            addView(View(this@MainActivity), LinearLayout.LayoutParams(0, 1, 1f))
+            addView(pickerButton("Brief", wide = true) { briefPick() }, space())
             addView(pickerButton("Use", wide = true) { usePick() }, space())
             addView(pickerButton("Start walk", wide = true) { startWalkFromPick() }, space())
             addView(pickerButton("Parking", wide = true) { openParking() })
+        }
+        // Five buttons is one more than a phone's width holds, and a squashed
+        // "Start walk" reading "Start w…" is the button he needs most. The
+        // row scrolls instead: nothing is ever cut off, only out of sight,
+        // and the two that move off the end are the two used least.
+        val pickerScroll = HorizontalScrollView(this).apply {
+            isHorizontalScrollBarEnabled = false
+            setPadding(dp(10), dp(6), dp(10), dp(10))
+            addView(pickerRow)
         }
         pickerBar = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -507,7 +531,7 @@ class MainActivity : Activity() {
             addView(pickerTop, LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT,
             ))
-            addView(pickerRow, LinearLayout.LayoutParams(
+            addView(pickerScroll, LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT,
             ))
         }
@@ -1469,24 +1493,26 @@ class MainActivity : Activity() {
     private fun routeMenu() {
         val hideLabel = if (routeHidden) "Show the route" else "Hide the route"
         val items = arrayOf(
-            "Import a GPX file", "Walks near me", "Walks on this map ‹ ›",
-            "Saved walks", "Drive to the start", hideLabel, "GPX library folder…",
+            "Plan a walk…", "Import a GPX file", "Walks near me",
+            "Walks on this map ‹ ›", "Saved walks", "Drive to the start",
+            hideLabel, "GPX library folder…",
         )
         AlertDialog.Builder(this)
             .setItems(items) { _, i ->
                 when (i) {
-                    0 -> pickGpx()
-                    1 -> walksNearMe()
-                    2 -> walksOnScreen()
-                    3 -> savedWalksDialog()
-                    4 -> {
+                    0 -> walkSpecifier()
+                    1 -> pickGpx()
+                    2 -> walksNearMe()
+                    3 -> walksOnScreen()
+                    4 -> savedWalksDialog()
+                    5 -> {
                         // Present even with no route, saying so — a menu item
                         // that comes and goes is a menu you can't learn.
                         val start = RouteStore.load(this)?.points?.firstOrNull()
                         if (start == null) say("No route loaded — import or find one first.")
                         else openParking(start)
                     }
-                    5 -> {
+                    6 -> {
                         routeHidden = !routeHidden
                         map.setRoute(if (routeHidden) null else RouteStore.load(this))
                         say(
@@ -1495,7 +1521,7 @@ class MainActivity : Activity() {
                             else "Route back on the map.",
                         )
                     }
-                    6 -> libraryDialog()
+                    7 -> libraryDialog()
                 }
             }
             .show()
@@ -1661,6 +1687,7 @@ class MainActivity : Activity() {
      * framing and the right one: the map in front of you is the question.
      */
     private fun walksOnScreen() {
+        forgetSpec()
         val b = map.viewportBounds()
         say("Looking for walks crossing this map…")
         scope.launch {
@@ -1693,6 +1720,274 @@ class MainActivity : Activity() {
         }
     }
 
+    // --- the walk specifier: the form instead of the sentence --------------
+
+    /**
+     * "A little walk specifier so I don't have to type it every time."
+     *
+     * Four questions, remembered between openings: what shape, how long,
+     * whether that length is hours or kilometres, and which day. It then
+     * does the finding — real walks first, an invented one alongside — and
+     * fills the same ‹ › picker everything else fills, so choosing is the
+     * gesture he already knows.
+     *
+     * The reason this is a form and not a sentence to the assistant: the
+     * assistant can already do all of it, and doing it that way costs a paid
+     * call, a wait, and a sentence composed on a phone in the wind, every
+     * single time. A question asked the same way every week is a form.
+     */
+    private fun walkSpecifier() {
+        val here = lastFix ?: run {
+            say("No GPS fix yet — the walk finder starts from where you are.")
+            return
+        }
+        val spec = WalkSpec.fromJson(walkSpec)
+
+        fun heading(t: String) = TextView(this).apply {
+            text = t
+            textSize = 12f
+            setTextColor(Color.argb(210, 150, 160, 152))
+            setPadding(0, dp(14), 0, dp(4))
+        }
+
+        val shapes = arrayOf("Circular", "There and back", "Don\u2019t mind")
+        val shapeSpinner = Spinner(this).apply {
+            adapter = ArrayAdapter(
+                this@MainActivity, android.R.layout.simple_spinner_dropdown_item, shapes,
+            )
+            setSelection(
+                when (spec.shape) {
+                    Shape.CIRCULAR -> 0
+                    Shape.OUT_AND_BACK -> 1
+                    Shape.ANY -> 2
+                },
+            )
+        }
+
+        val days = (0..WalkSpec.MAX_DAY_OFFSET).map { WalkSpec.dayName(it) }
+            .map { it.replaceFirstChar { c -> c.uppercase() } }
+        val daySpinner = Spinner(this).apply {
+            adapter = ArrayAdapter(
+                this@MainActivity, android.R.layout.simple_spinner_dropdown_item, days.toTypedArray(),
+            )
+            setSelection(spec.dayOffset.coerceIn(0, WalkSpec.MAX_DAY_OFFSET))
+        }
+
+        val units = TextView(this).apply {
+            textSize = 13f
+            setTextColor(Color.argb(200, 150, 160, 152))
+            setPadding(dp(8), 0, 0, 0)
+        }
+        fun number(v: Double) = EditText(this).apply {
+            setText(WalkSpec.trim(v))
+            inputType = android.text.InputType.TYPE_CLASS_NUMBER or
+                android.text.InputType.TYPE_NUMBER_FLAG_DECIMAL
+            textSize = 16f
+            setSingleLine()
+        }
+        val fromBox = number(spec.from)
+        val toBox = number(spec.to)
+
+        val byTime = RadioGroup(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            addView(RadioButton(this@MainActivity).apply { id = 1; text = "Distance"; textSize = 14f })
+            addView(RadioButton(this@MainActivity).apply { id = 2; text = "Time"; textSize = 14f })
+            check(if (spec.byTime) 2 else 1)
+            setOnCheckedChangeListener { _, id -> units.text = if (id == 2) "hours" else "km" }
+        }
+        units.text = if (spec.byTime) "hours" else "km"
+
+        val row = LinearLayout(this).apply {
+            gravity = Gravity.CENTER_VERTICAL
+            addView(fromBox, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+            addView(
+                TextView(this@MainActivity).apply {
+                    text = "to"
+                    textSize = 14f
+                    setPadding(dp(10), 0, dp(10), 0)
+                },
+            )
+            addView(toBox, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+            addView(units)
+        }
+
+        val form = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(22), dp(4), dp(22), dp(4))
+            addView(heading("SHAPE"))
+            addView(shapeSpinner)
+            addView(heading("HOW LONG"))
+            addView(byTime)
+            addView(row)
+            addView(heading("WHICH DAY"))
+            addView(daySpinner)
+            addView(
+                TextView(this@MainActivity).apply {
+                    text = "The day decides the weather in the brief, not which walks are " +
+                        "found \u2014 a path is there whatever the day."
+                    textSize = 12f
+                    setTextColor(Color.argb(170, 150, 160, 152))
+                    setPadding(0, dp(12), 0, 0)
+                },
+            )
+        }
+
+        AlertDialog.Builder(this)
+            .setTitle("Plan a walk")
+            .setView(ScrollView(this).apply { addView(form) })
+            .setNegativeButton("Cancel", null)
+            .setPositiveButton("Find walks") { _, _ ->
+                val chosen = WalkSpec(
+                    shape = when (shapeSpinner.selectedItemPosition) {
+                        0 -> Shape.CIRCULAR
+                        1 -> Shape.OUT_AND_BACK
+                        else -> Shape.ANY
+                    },
+                    byTime = byTime.checkedRadioButtonId == 2,
+                    from = fromBox.text.toString().toDoubleOrNull() ?: spec.from,
+                    to = toBox.text.toString().toDoubleOrNull() ?: spec.to,
+                    dayOffset = daySpinner.selectedItemPosition.coerceIn(0, WalkSpec.MAX_DAY_OFFSET),
+                )
+                // Saved before the search, not after: the point of the form is
+                // that tomorrow it opens on today's answers, and a search he
+                // cancels or that finds nothing was still an answer he gave.
+                walkSpec = chosen.toJson()
+                runSpec(chosen, here)
+            }
+            .show()
+    }
+
+    /** How long the invented loop may search before it answers with its
+     *  best. His number, and it is spent in the background while the real
+     *  walks are already on the picker. */
+    private val specBudgetMs = 90_000L
+
+    /**
+     * The specifier's search. Real walks go up first and the invented one
+     * joins them when it lands — because the network fetch and the loop
+     * search together take up to a minute and a half, and a picker he can
+     * already flick through is worth more than a tidy single delivery.
+     */
+    private fun runSpec(spec: WalkSpec, here: En) {
+        val (pace, paceLabel) = currentPace()
+        val (minM, maxM) = spec.rangeMetres(pace)
+        pickDayOffset = spec.dayOffset
+        picksFromSpec = true
+        say(
+            "Looking for ${spec.label()}" +
+                (if (spec.byTime) " \u2014 ${Brief.fmtKm(minM)} to ${Brief.fmtKm(maxM)} at $paceLabel" else "") +
+                "\u2026",
+        )
+        specJob?.cancel()
+        specJob = scope.launch {
+            val found = withContext(Dispatchers.IO) {
+                runCatching { RouteFinder.find(this@MainActivity, here, 12_000.0) }.getOrNull()
+            }
+            val real = found?.walks?.let { Specifier.shortlist(it, spec, minM, maxM) } ?: emptyList()
+            if (real.isNotEmpty()) {
+                WalkPicks.replace(this@MainActivity, real)
+                showSpecPicks()
+                say(
+                    "${real.size} real walk${if (real.size == 1) "" else "s"} matching \u2014 " +
+                        "working out one of our own alongside\u2026",
+                )
+            } else {
+                say(
+                    (found?.note?.plus(" ") ?: "") +
+                        "No established walk matches that. Working one out\u2026",
+                )
+            }
+
+            // The invented one. Its shape follows the ask: nobody wants a
+            // circuit when they asked to go out to something and come back.
+            val target = (minM + maxM) / 2
+            val planned = withContext(Dispatchers.IO) {
+                runCatching {
+                    val graph = Router.buildCached(here, target / (2 * Math.PI) * 1.9 + 900)
+                    if (graph.nodes.size < 20) return@runCatching null
+                    val deadline = System.currentTimeMillis() + specBudgetMs
+                    if (spec.shape == Shape.OUT_AND_BACK) {
+                        Router.outAndBack(graph, here, target, deadline) { note ->
+                            runOnUiThread { if (alive) sayBriefly(note) }
+                        }
+                    } else {
+                        Router.loop(graph, here, target, deadline) { note ->
+                            runOnUiThread { if (alive) sayBriefly(note) }
+                        }
+                    }
+                }.getOrNull()
+            }
+            if (planned == null) {
+                if (real.isEmpty()) {
+                    // Nothing of his on the picker, so nothing on it was
+                    // specified: a later search from anywhere else must not
+                    // inherit this day and start briefing for Saturday.
+                    picksFromSpec = false
+                    pickDayOffset = 0
+                    say(
+                        "Nothing found and nothing plannable: no established walk of that " +
+                            "length passes within 12 km, and the paths round here wouldn\u2019t " +
+                            "close one either. A different length, or a start a mile or two " +
+                            "away, usually does it.",
+                    )
+                } else {
+                    say("${real.size} to choose from \u2014 \u2039 \u203a to flick through, " +
+                        "Brief for the day\u2019s plan. (Couldn\u2019t work out one of our own.)")
+                }
+                return@launch
+            }
+            val shapeWord = if (spec.shape == Shape.OUT_AND_BACK) "there and back" else "circular"
+            val invented = RouteFinder.FoundWalk(
+                name = "Planned ${Brief.fmtKm(planned.metres)} $shapeWord",
+                source = "Planned",
+                lines = listOf(planned.points),
+                closestM = 0.0,
+                lengthM = planned.metres,
+            )
+            // Only onto a picker that is still open: dismissing cancels this
+            // job, but a Use that landed a moment ago has already consumed
+            // the file, and appending would quietly build a new one.
+            if (!pickerShowing && real.isNotEmpty()) return@launch
+            WalkPicks.append(this@MainActivity, invented)
+            // Re-stated rather than assumed: a picker dismissed while this
+            // was searching cleared the day, and the loop landing is a fresh
+            // picker full of walks specified for it.
+            picksFromSpec = true
+            pickDayOffset = spec.dayOffset
+            showSpecPicks()
+            val roads = planned.roadSummary()
+            say(
+                "Planned a ${Brief.fmtKm(planned.metres)} $shapeWord from here" +
+                    (roads?.let { ", including $it" } ?: ", off the roads") +
+                    ". ${picks.size} to choose from \u2014 \u2039 \u203a to flick through, " +
+                    "Brief for the day\u2019s plan.",
+            )
+        }
+    }
+
+    /** These walks were not specified, so no day is attached to them and
+     *  the brief button briefs for today. */
+    private fun forgetSpec() {
+        specJob?.cancel()
+        specJob = null
+        picksFromSpec = false
+        pickDayOffset = 0
+    }
+
+    /** Show or refresh the picker on the specifier's candidates, keeping the
+     *  one he is looking at rather than snapping back to the first. */
+    private fun showSpecPicks() {
+        val pending = WalkPicks.pending(this)
+        if (pending.isEmpty()) return
+        if (pickerShowing) {
+            val at = pickIndex
+            picks = pending
+            showPick(at.coerceAtMost(picks.size - 1))
+        } else {
+            maybeShowPicker()
+        }
+    }
+
     /**
      * Everything found lands on the same ‹ › picker the assistant's results
      * use — one flick-through for walks from any source, which is what he
@@ -1700,6 +1995,7 @@ class MainActivity : Activity() {
      * *see* are not the same answer.
      */
     private fun findWalks(here: En, radiusM: Double) {
+        forgetSpec()
         say("Searching walking routes within ${fmtDist(radiusM)}…")
         scope.launch {
             val result = withContext(Dispatchers.IO) {
@@ -1982,14 +2278,68 @@ class MainActivity : Activity() {
         map.setPreview(emptyList())
         WalkPicks.consume(this)
         picks = emptyList()
+        // A loop still being worked out has nowhere to land once the picker
+        // is gone, and letting it finish would re-create the file this line
+        // just deleted — the picker would reappear on the next resume with
+        // one lonely candidate in it.
+        specJob?.cancel()
+        specJob = null
+        picksFromSpec = false
+        pickDayOffset = 0
         if (wxFrames.isNotEmpty()) wxBar.visibility = View.VISIBLE
     }
 
     private fun usePick() {
         val walk = picks.getOrNull(pickIndex) ?: return
+        // Read before dismissing: dismissPicker forgets which day these were
+        // specified for, and the brief is about that day.
+        val day = pickDayOffset
+        val brief = picksFromSpec
         dismissPicker()
         adoptFound(walk)
+        // "I select one. I then get a whole brief for the walk" — his words,
+        // and only for a walk he specified: a route imported from a file has
+        // no day attached and should not be answering questions about one.
+        if (brief) showBrief(walk, day)
     }
+
+    /** The brief on demand, for whatever is in front of him on the picker. */
+    private fun briefPick() {
+        val walk = picks.getOrNull(pickIndex) ?: return
+        showBrief(walk, pickDayOffset)
+    }
+
+    /**
+     * The whole brief, in a dialog: distance, climb, how long at his pace,
+     * when to set off, and what is worth knowing before he does.
+     *
+     * Not the assistant's — [Brief] computes it — so it costs nothing, needs
+     * no key, and the daylight half of it works with no signal.
+     */
+    private fun showBrief(walk: RouteFinder.FoundWalk, dayOffset: Int) {
+        val body = TextView(this).apply {
+            text = "Working the brief out…"
+            textSize = 15f
+            setLineSpacing(dp(3).toFloat(), 1f)
+            setPadding(dp(20), dp(16), dp(20), dp(8))
+        }
+        val dialog = AlertDialog.Builder(this)
+            .setTitle("Brief · ${WalkSpec.dayName(dayOffset)}")
+            .setView(ScrollView(this).apply { addView(body) })
+            .setPositiveButton("Close", null)
+            .create()
+        dialog.show()
+        val (pace, paceLabel) = currentPace()
+        val here = lastFix
+        scope.launch {
+            val text = withContext(Dispatchers.IO) {
+                runCatching { Brief.compose(walk, dayOffset, pace, paceLabel, here) }
+                    .getOrElse { "Couldn't work the brief out: ${it.message ?: it.javaClass.simpleName}" }
+            }
+            if (dialog.isShowing) body.text = text
+        }
+    }
+
 
     /**
      * Take the route and start the walk in one tap: adopt, record, timer.

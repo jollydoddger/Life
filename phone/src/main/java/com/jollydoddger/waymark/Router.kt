@@ -642,6 +642,73 @@ object Router {
     /** How far from him a loop may start — his own licence. */
     const val START_SLACK_M = 500.0
 
+    /**
+     * There and back: out to something worth turning round at, then home
+     * the way you came.
+     *
+     * A deliberately different search from [loop], because they are
+     * different walks. A loop wants corners and hates retracing; an
+     * out-and-back retraces all of itself on purpose and wants only a good
+     * turning point at about half the distance. That difference is also why
+     * this one answers on ground the loop-finder cannot: a dead-end lane out
+     * to a headland is a fine walk, and [Graph.nearestJunction] refuses a
+     * dead end by design, so no circuit search will ever offer it.
+     */
+    fun outAndBack(
+        g: Graph,
+        start: En,
+        targetM: Double,
+        deadlineMs: Long = Long.MAX_VALUE,
+        avoidRoads: Boolean = true,
+        isCancelled: () -> Boolean = { false },
+        onProgress: (String) -> Unit = {},
+    ): Planned? {
+        val from = g.nearest(start) ?: return null
+        val half = targetM / 2
+        var best: Planned? = null
+        var bestErr = Double.MAX_VALUE
+        val spin = Math.random() * 2 * Math.PI
+        // The turning point is aimed *nearer* than half the distance,
+        // because a path never goes where a straight line goes: crow-flies
+        // to the turn is always shorter than the walk to it.
+        for (reach in doubleArrayOf(0.8, 0.6, 0.95)) {
+            for (b in 0 until 8) {
+                if (System.currentTimeMillis() > deadlineMs || isCancelled()) return best
+                val ang = spin + b * Math.PI / 4
+                val aim = En(start.e + sin(ang) * half * reach, start.n + cos(ang) * half * reach)
+                // Any connected node will do. Unlike a loop's corner, a dead
+                // end is a perfectly good place to turn round — often the
+                // best one there is.
+                val to = g.nearestWhere(aim, half * 0.35 + 300.0) { g.edges[it].isNotEmpty() }
+                    ?: continue
+                if (to == from) continue
+                val walk = path(g, from, to, emptySet(), avoidRoads) ?: continue
+                val out = measure(g, walk)
+                if (out.metres < MIN_LOOP_M / 2) continue
+                val err = abs(out.metres * 2 - targetM) / targetM
+                if (err < bestErr) {
+                    bestErr = err
+                    val doubled = doubleBack(out)
+                    best = doubled
+                    onProgress("Found a there-and-back of %.1f km\u2026".format(doubled.metres / 1000))
+                }
+                if (bestErr < GOOD_ERROR) return best
+            }
+        }
+        return best
+    }
+
+    /** One leg walked twice. Its repeat fraction is 1.0 and that is not a
+     *  failure — it is the shape he asked for, and anything downstream that
+     *  reads the number should say "there and back", never "retraces". */
+    private fun doubleBack(out: Planned): Planned = Planned(
+        points = out.points + out.points.reversed().drop(1),
+        metres = out.metres * 2,
+        byGroup = out.byGroup.mapValues { it.value * 2 },
+        repeatFraction = 1.0,
+        byKind = out.byKind.mapValues { it.value * 2 },
+    )
+
     /** Point-to-point on the same graph, so the same rules apply. */
     fun between(g: Graph, from: En, to: En, avoidRoads: Boolean = true): Planned? {
         val a = g.nearest(from) ?: return null

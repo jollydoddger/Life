@@ -274,4 +274,16 @@ object Prefs {
     var Context.wantRecording: Boolean
         get() = p(this).getBoolean("wantRecording", false)
         set(v) = p(this).edit().putBoolean("wantRecording", v).apply()
+
+    /**
+     * The walk specifier's last answers, as JSON — shape, length, whether
+     * that length is in hours, which day. Phone-only, and remembered for one
+     * reason: he asked for a form "so I don't have to type it every time",
+     * and a form that opens blank is the typing back again. The JSON is
+     * parsed by WalkSpec on the phone side; nothing in shared code reads
+     * inside it.
+     */
+    var Context.walkSpec: String
+        get() = p(this).getString("walkSpec", "") ?: ""
+        set(v) = p(this).edit().putString("walkSpec", v).apply()
 }

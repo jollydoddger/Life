@@ -71,7 +71,7 @@ an app that steals it for zoom is an app you cannot reliably get out of.
 
 | | |
 |---|---|
-| GPX | import a route file, find walks near you, or set up your GPX library |
+| GPX | plan a walk, import a route file, find walks near you, or set up your GPX library |
 | ⇄ | flip the direction of the arrows along the route |
 | ◉ | centre on you, and zoom right in |
 | ● | start recording a trail (■ stops it) |
@@ -123,6 +123,52 @@ zoom the map is already at. (It used to zoom right in as well; that turned
 out to answer a question nobody asked.) The GPX menu also gains **"Drive to
 the start"** — Google Maps navigation to the nearest mapped car park within
 500 m of the current route's start, or the start itself, said plainly.
+
+## Plan a walk
+
+The GPX menu's first item is a small form, because the question never changes
+shape: **circular / there and back / don't mind**, **from–to** in kilometres
+*or* in hours, and **which day**. It remembers what you last said, so the
+usual case is opening it and tapping Find.
+
+Hours become distance through *your* pace — the median of your own recorded
+walks, or a book pace with the fact stated — on level ground, since the
+climb is unknowable before a route exists.
+
+Then it fills the ‹ › picker from both directions at once. Real, established
+walks go up first: OpenStreetMap route relations, your GPX library and your
+downloads, narrowed to the shape you asked for. Shape is **measured off the
+line, never taken from the name** — a closed walk that comes home down its
+own outward leg is a there-and-back, one that comes home a different way is a
+circuit. Ask for a there-and-back and a one-way path is offered mirrored, at
+**double** its published length: nobody publishes out-and-backs, because half
+of one is already published.
+
+Alongside them, Waymark works out a route of its own on the paths and lanes
+round you — a circuit, or, for a there-and-back, a leg out to somewhere worth
+turning round at. That second shape is one no circuit-finder can produce: the
+best turning points are dead ends, and a loop search refuses dead ends by
+design. It gets ninety seconds and answers with the best it found, while the
+real walks are already on the picker to flick through.
+
+### The brief
+
+**Brief** on the picker — and automatically when you take a walk you asked
+for — gives the whole thing for the day you picked: distance, climb up and
+down, how long at your pace, and **what time to set off**, chosen by scanning
+every half-hour of that day's forecast across the walk's own window. Rain
+that actually falls counts for more than a mere chance of it; a 90% chance of
+nothing is a dry walk. It says when the sun sets and how much light that
+leaves in hand, and finishes with what is worth knowing before you go —
+whether the walk is steep for its length, whether it comes back to where it
+started, how far the start is from you, whether it is gusting on exposed
+ground, and whether the day is far enough out that the weather half of it
+will move.
+
+None of it is the assistant's: no key, no paid call, and the daylight half is
+computed on the phone, so it still answers on a hill with no signal. When the
+forecast can't be reached it says so and hands you everything else, rather
+than leaving a gap that reads as a fine day.
 
 ## Walks near me
 
