@@ -24,6 +24,31 @@ import kotlin.math.hypot
 /** What he asked for. */
 enum class Shape { CIRCULAR, OUT_AND_BACK, ANY }
 
+/**
+ * Where the walk is allowed to begin — the question the first version of
+ * this form forgot to ask, and the one that decides everything else. A
+ * five-mile circular is a different walk from his kitchen than from a car
+ * park two valleys away, and until he could say which, the form could only
+ * ever plan the first.
+ *
+ * All three are a *region*, never a point: he said "within like 500 m"
+ * himself, and a start pinned to the exact metre is a start that often has
+ * no junction to work with.
+ */
+enum class Origin {
+    /** Where he is, give or take 500 m. */
+    HERE,
+
+    /** Somewhere he taps on the map, give or take 500 m. Needs no GPS at
+     *  all, which is the point: planning happens at a kitchen table as
+     *  often as at a trailhead. */
+    TAP,
+
+    /** Anywhere on the map as it is currently framed. The map in front of
+     *  you is the question — the same framing "Walks on this map" uses. */
+    SCREEN,
+}
+
 /** What a walk in front of us actually *is* — measured off its line, never
  *  taken from its name. Plenty of routes called "circular" are not. */
 enum class Form { CIRCULAR, OUT_AND_BACK, LINEAR }
@@ -39,6 +64,8 @@ data class WalkSpec(
     val to: Double = 10.0,
     /** 0 = today. Bounded by what a forecast can honestly cover. */
     val dayOffset: Int = 0,
+    /** Where it may start. See [Origin]. */
+    val origin: Origin = Origin.HERE,
 ) {
 
     /**
@@ -68,7 +95,12 @@ data class WalkSpec(
             Shape.OUT_AND_BACK -> "there and back"
             Shape.ANY -> "any shape"
         }
-        return "$kind, $size, ${dayName(dayOffset)}"
+        val where = when (origin) {
+            Origin.HERE -> "from near you"
+            Origin.TAP -> "from the point you picked"
+            Origin.SCREEN -> "starting anywhere on this map"
+        }
+        return "$kind, $size, ${dayName(dayOffset)}, $where"
     }
 
     fun toJson(): String = JSONObject()
@@ -77,6 +109,7 @@ data class WalkSpec(
         .put("from", from)
         .put("to", to)
         .put("dayOffset", dayOffset)
+        .put("origin", origin.name)
         .toString()
 
     companion object {
@@ -94,6 +127,8 @@ data class WalkSpec(
                     from = o.optDouble("from", 5.0),
                     to = o.optDouble("to", 10.0),
                     dayOffset = o.optInt("dayOffset").coerceIn(0, MAX_DAY_OFFSET),
+                    origin = runCatching { Origin.valueOf(o.optString("origin")) }
+                        .getOrDefault(Origin.HERE),
                 )
             } catch (e: Exception) {
                 WalkSpec()

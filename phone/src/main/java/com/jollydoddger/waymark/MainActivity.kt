@@ -1737,10 +1737,10 @@ class MainActivity : Activity() {
      * single time. A question asked the same way every week is a form.
      */
     private fun walkSpecifier() {
-        val here = lastFix ?: run {
-            say("No GPS fix yet — the walk finder starts from where you are.")
-            return
-        }
+        // No fix needed to *open* it any more. Two of the three starting
+        // points — a tapped place, the map as framed — need no GPS at all,
+        // and planning tomorrow's walk at a kitchen table is exactly when
+        // there isn't one.
         val spec = WalkSpec.fromJson(walkSpec)
 
         fun heading(t: String) = TextView(this).apply {
@@ -1760,6 +1760,24 @@ class MainActivity : Activity() {
                     Shape.CIRCULAR -> 0
                     Shape.OUT_AND_BACK -> 1
                     Shape.ANY -> 2
+                },
+            )
+        }
+
+        val origins = arrayOf(
+            "Where I am (within 500 m)",
+            "A point I\u2019ll tap (within 500 m)",
+            "Anywhere on this map",
+        )
+        val originSpinner = Spinner(this).apply {
+            adapter = ArrayAdapter(
+                this@MainActivity, android.R.layout.simple_spinner_dropdown_item, origins,
+            )
+            setSelection(
+                when (spec.origin) {
+                    Origin.HERE -> 0
+                    Origin.TAP -> 1
+                    Origin.SCREEN -> 2
                 },
             )
         }
@@ -1814,6 +1832,8 @@ class MainActivity : Activity() {
         val form = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(22), dp(4), dp(22), dp(4))
+            addView(heading("STARTING FROM"))
+            addView(originSpinner)
             addView(heading("SHAPE"))
             addView(shapeSpinner)
             addView(heading("HOW LONG"))
@@ -1847,12 +1867,17 @@ class MainActivity : Activity() {
                     from = fromBox.text.toString().toDoubleOrNull() ?: spec.from,
                     to = toBox.text.toString().toDoubleOrNull() ?: spec.to,
                     dayOffset = daySpinner.selectedItemPosition.coerceIn(0, WalkSpec.MAX_DAY_OFFSET),
+                    origin = when (originSpinner.selectedItemPosition) {
+                        0 -> Origin.HERE
+                        1 -> Origin.TAP
+                        else -> Origin.SCREEN
+                    },
                 )
                 // Saved before the search, not after: the point of the form is
                 // that tomorrow it opens on today's answers, and a search he
                 // cancels or that finds nothing was still an answer he gave.
                 walkSpec = chosen.toJson()
-                runSpec(chosen, here)
+                startSpec(chosen)
             }
             .show()
     }
@@ -1862,13 +1887,76 @@ class MainActivity : Activity() {
      *  walks are already on the picker. */
     private val specBudgetMs = 90_000L
 
+    /** Where "published walks near the start" looks when the start's own
+     *  licence turns up nothing: driving distance, said out loud as such. */
+    private val widerSearchM = 12_000.0
+
+    /**
+     * Resolve where the walk may start, then search.
+     *
+     * Three answers, and only one of them needs a satellite. "A point I'll
+     * tap" hands the map over for one tap; "anywhere on this map" takes the
+     * screen as framed, which is the same question "Walks on this map"
+     * already answers and the same one he asked here.
+     */
+    private fun startSpec(spec: WalkSpec) {
+        forgetSpec()
+        when (spec.origin) {
+            Origin.HERE -> {
+                val here = lastFix ?: run {
+                    say(
+                        "No GPS fix yet, so \u201Cwhere I am\u201D has nothing to work from. " +
+                            "Pick a point on the map instead, or use the map as framed.",
+                    )
+                    return
+                }
+                runSpec(spec, here, Router.START_SLACK_M, null)
+            }
+            Origin.TAP -> awaitPlaceTap(spec)
+            Origin.SCREEN -> {
+                val b = map.viewportBounds()
+                val centre = En((b[0] + b[2]) / 2, (b[1] + b[3]) / 2)
+                // Half the diagonal is the honest radius of what he can see.
+                // Capped, because a map zoomed out to the whole of Wales is
+                // not a licence to plan a walk starting in Cardiff.
+                val slack = (kotlin.math.hypot(b[2] - b[0], b[3] - b[1]) / 2)
+                    .coerceIn(500.0, 12_000.0)
+                runSpec(spec, centre, slack, b)
+            }
+        }
+    }
+
+    /**
+     * Hand the map over for one tap. The status line is the way out as well
+     * as the instruction: a mode with no visible exit that eats every tap on
+     * the map is how an app stops zooming and nobody can say why.
+     */
+    private fun awaitPlaceTap(spec: WalkSpec) {
+        map.placeMode = true
+        say("Tap the map where the walk should start \u2014 tap this line to cancel.")
+        fun leave() {
+            map.placeMode = false
+            map.onPlacePicked = null
+            status.isClickable = false
+            status.setOnClickListener(null)
+        }
+        status.setOnClickListener {
+            leave()
+            sayBriefly("Cancelled \u2014 the map is back to normal.")
+        }
+        map.onPlacePicked = { en ->
+            leave()
+            runSpec(spec, en, Router.START_SLACK_M, null)
+        }
+    }
+
     /**
      * The specifier's search. Real walks go up first and the invented one
      * joins them when it lands — because the network fetch and the loop
      * search together take up to a minute and a half, and a picker he can
      * already flick through is worth more than a tidy single delivery.
      */
-    private fun runSpec(spec: WalkSpec, here: En) {
+    private fun runSpec(spec: WalkSpec, here: En, slackM: Double, bounds: DoubleArray?) {
         val (pace, paceLabel) = currentPace()
         val (minM, maxM) = spec.rangeMetres(pace)
         pickDayOffset = spec.dayOffset
@@ -1880,16 +1968,51 @@ class MainActivity : Activity() {
         )
         specJob?.cancel()
         specJob = scope.launch {
+            // A walk he can start within the licence he gave, and no wider.
+            // This used to search a flat 12 km, which quietly answered a
+            // different question — "somewhere in the county" — and put walks
+            // on the picker he would have had to drive to.
+            val searchM = slackM.coerceAtLeast(Router.START_SLACK_M)
             val found = withContext(Dispatchers.IO) {
-                runCatching { RouteFinder.find(this@MainActivity, here, 12_000.0) }.getOrNull()
+                runCatching { RouteFinder.find(this@MainActivity, here, searchM) }.getOrNull()
             }
-            val real = found?.walks?.let { Specifier.shortlist(it, spec, minM, maxM) } ?: emptyList()
+            fun narrow(r: RouteFinder.Result?) = Specifier.shortlist(
+                r?.walks?.filter { w ->
+                    bounds == null || w.lines.any { line ->
+                        line.any { it.e in bounds[0]..bounds[2] && it.n in bounds[1]..bounds[3] }
+                    }
+                } ?: emptyList(),
+                spec, minM, maxM,
+            )
+            var real = narrow(found)
+            // A 500 m licence around a house in Anglesey contains no
+            // published walking route at all, most days. Rather than an
+            // empty picker, look once more at driving distance and say
+            // outright that these are further out than he asked — the
+            // widening is offered, never slipped in.
+            var widened = 0.0
+            if (real.isEmpty() && bounds == null && searchM < widerSearchM) {
+                widened = widerSearchM
+                real = narrow(
+                    withContext(Dispatchers.IO) {
+                        runCatching {
+                            RouteFinder.find(this@MainActivity, here, widerSearchM)
+                        }.getOrNull()
+                    },
+                )
+            }
             if (real.isNotEmpty()) {
                 WalkPicks.replace(this@MainActivity, real)
                 showSpecPicks()
                 say(
-                    "${real.size} real walk${if (real.size == 1) "" else "s"} matching \u2014 " +
-                        "working out one of our own alongside\u2026",
+                    if (widened > 0) {
+                        "Nothing published starts within ${Brief.fmtKm(searchM)} of there. " +
+                            "${real.size} within ${Brief.fmtKm(widened)} \u2014 a drive, not a " +
+                            "walk from the door. Working out one of our own alongside\u2026"
+                    } else {
+                        "${real.size} real walk${if (real.size == 1) "" else "s"} matching " +
+                            "\u2014 working out one of our own alongside\u2026"
+                    },
                 )
             } else {
                 say(
@@ -1903,17 +2026,22 @@ class MainActivity : Activity() {
             val target = (minM + maxM) / 2
             val planned = withContext(Dispatchers.IO) {
                 runCatching {
-                    val graph = Router.buildCached(here, target / (2 * Math.PI) * 1.9 + 900)
+                    // The network has to cover the start region as well as
+                    // the walk: a loop beginning at the far edge of the map
+                    // needs the paths out there to be in the graph.
+                    val graph = Router.buildCached(
+                        here, target / (2 * Math.PI) * 1.9 + 900 + slackM,
+                    )
                     if (graph.nodes.size < 20) return@runCatching null
                     val deadline = System.currentTimeMillis() + specBudgetMs
                     if (spec.shape == Shape.OUT_AND_BACK) {
-                        Router.outAndBack(graph, here, target, deadline) { note ->
-                            runOnUiThread { if (alive) sayBriefly(note) }
-                        }
+                        Router.outAndBack(
+                            graph, here, target, deadline, startSlackM = slackM,
+                        ) { note -> runOnUiThread { if (alive) sayBriefly(note) } }
                     } else {
-                        Router.loop(graph, here, target, deadline) { note ->
-                            runOnUiThread { if (alive) sayBriefly(note) }
-                        }
+                        Router.loop(
+                            graph, here, target, deadline, startSlackM = slackM,
+                        ) { note -> runOnUiThread { if (alive) sayBriefly(note) } }
                     }
                 }.getOrNull()
             }
@@ -1926,9 +2054,9 @@ class MainActivity : Activity() {
                     pickDayOffset = 0
                     say(
                         "Nothing found and nothing plannable: no established walk of that " +
-                            "length passes within 12 km, and the paths round here wouldn\u2019t " +
-                            "close one either. A different length, or a start a mile or two " +
-                            "away, usually does it.",
+                            "length starts within ${Brief.fmtKm(searchM)} of there, and the " +
+                            "paths round it wouldn\u2019t close one either. A different length, " +
+                            "a wider start, or somewhere a mile or two away usually does it.",
                     )
                 } else {
                     say("${real.size} to choose from \u2014 \u2039 \u203a to flick through, " +
@@ -1970,6 +2098,13 @@ class MainActivity : Activity() {
     private fun forgetSpec() {
         specJob?.cancel()
         specJob = null
+        // A half-armed "tap where it starts" left on would eat every tap on
+        // the map, and the map would simply stop zooming with nothing on
+        // screen to say why.
+        map.placeMode = false
+        map.onPlacePicked = null
+        status.isClickable = false
+        status.setOnClickListener(null)
         picksFromSpec = false
         pickDayOffset = 0
     }

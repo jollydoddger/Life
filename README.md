@@ -127,9 +127,22 @@ the start"** — Google Maps navigation to the nearest mapped car park within
 ## Plan a walk
 
 The GPX menu's first item is a small form, because the question never changes
-shape: **circular / there and back / don't mind**, **from–to** in kilometres
-*or* in hours, and **which day**. It remembers what you last said, so the
-usual case is opening it and tapping Find.
+shape: **where it starts**, **circular / there and back / don't mind**,
+**from–to** in kilometres *or* in hours, and **which day**. It remembers what
+you last said, so the usual case is opening it and tapping Find.
+
+Where it starts is a **region, never a point** — a start pinned to the exact
+metre often has no junction to work with. Three answers: **where I am**
+(within 500 m), **a point I'll tap** (within 500 m of it), or **anywhere on
+this map** as you have it framed. Only the first needs a satellite, which is
+the point: planning tomorrow's walk happens at a kitchen table as often as at
+a trailhead. A wide licence is *spread* across the region rather than spent
+on three junctions huddled in the middle of it.
+
+If nothing published starts inside the licence you gave — which is most days,
+around a house — it looks once more at driving distance and says outright
+that those are a drive rather than a walk from the door. The widening is
+offered, never slipped in.
 
 Hours become distance through *your* pace — the median of your own recorded
 walks, or a book pace with the fact stated — on level ground, since the

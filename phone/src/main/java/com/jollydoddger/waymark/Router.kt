@@ -528,17 +528,11 @@ object Router {
         targetM: Double,
         deadlineMs: Long = Long.MAX_VALUE,
         avoidRoads: Boolean = true,
+        startSlackM: Double = START_SLACK_M,
         isCancelled: () -> Boolean = { false },
         onProgress: (String) -> Unit = {},
     ): Planned? {
-        // Where a loop may begin. He said his start "can be anywhere within
-        // 500 m", which is a licence worth spending: a junction a street
-        // away often closes a circuit his exact doorstep cannot.
-        val startNodes = ArrayList<Int>()
-        g.nearest(start)?.let { startNodes.add(it) }
-        for (j in g.junctionsNear(start, START_SLACK_M, 3)) {
-            if (j !in startNodes) startNodes.add(j)
-        }
+        val startNodes = startsFor(g, start, startSlackM)
         if (startNodes.isEmpty()) return null
 
         var base = targetM / (2 * Math.PI)
@@ -639,8 +633,47 @@ object Router {
     /** Loops shorter than this are noise, not walks. */
     private const val MIN_LOOP_M = 300.0
 
-    /** How far from him a loop may start — his own licence. */
+    /** How far from him a walk may start — his own licence, and the default
+     *  when he has not said otherwise. */
     const val START_SLACK_M = 500.0
+
+    /** Past this, the licence is a *region* rather than a doorstep, and the
+     *  starts have to be spread across it rather than taken nearest-first. */
+    private const val REGION_SLACK_M = 800.0
+
+    /**
+     * Where a walk may begin. He said his start "can be anywhere within
+     * 500 m", which is a licence worth spending: a junction a street away
+     * often closes a circuit his exact doorstep cannot.
+     *
+     * "Anywhere on this screen" is the same licence written large, and it
+     * needs different arithmetic. Nearest-first would hand back a dozen
+     * junctions all within a hundred metres of the middle of the map —
+     * technically inside the region, and not what a person means by
+     * anywhere on it. Past [REGION_SLACK_M] the candidates are gathered
+     * from points spread around the region instead, so the whole of it is
+     * genuinely in play.
+     */
+    fun startsFor(g: Graph, start: En, slackM: Double): List<Int> {
+        val out = ArrayList<Int>()
+        g.nearest(start)?.let { out.add(it) }
+        for (j in g.junctionsNear(start, minOf(slackM, REGION_SLACK_M), 3)) {
+            if (j !in out) out.add(j)
+        }
+        if (slackM > REGION_SLACK_M) {
+            for (k in 0 until 6) {
+                val a = k * Math.PI / 3
+                // 0.55 out and 0.4 of reach: they sum to less than one, so
+                // every start this returns is genuinely inside the licence
+                // he gave. Ring plus reach adding up to more than the
+                // licence would quietly plan walks starting outside it.
+                val p = En(start.e + sin(a) * slackM * 0.55, start.n + cos(a) * slackM * 0.55)
+                val j = g.nearestJunction(p, slackM * 0.4) ?: continue
+                if (j !in out) out.add(j)
+            }
+        }
+        return out
+    }
 
     /**
      * There and back: out to something worth turning round at, then home
@@ -660,10 +693,15 @@ object Router {
         targetM: Double,
         deadlineMs: Long = Long.MAX_VALUE,
         avoidRoads: Boolean = true,
+        startSlackM: Double = START_SLACK_M,
         isCancelled: () -> Boolean = { false },
         onProgress: (String) -> Unit = {},
     ): Planned? {
-        val from = g.nearest(start) ?: return null
+        // The same licence as a loop's: where he is willing to begin. A
+        // there-and-back is even more sensitive to it, because the whole
+        // walk is decided by the one direction it sets off in.
+        val froms = startsFor(g, start, startSlackM)
+        if (froms.isEmpty()) return null
         val half = targetM / 2
         var best: Planned? = null
         var bestErr = Double.MAX_VALUE
@@ -672,27 +710,39 @@ object Router {
         // because a path never goes where a straight line goes: crow-flies
         // to the turn is always shorter than the walk to it.
         for (reach in doubleArrayOf(0.8, 0.6, 0.95)) {
-            for (b in 0 until 8) {
-                if (System.currentTimeMillis() > deadlineMs || isCancelled()) return best
-                val ang = spin + b * Math.PI / 4
-                val aim = En(start.e + sin(ang) * half * reach, start.n + cos(ang) * half * reach)
-                // Any connected node will do. Unlike a loop's corner, a dead
-                // end is a perfectly good place to turn round — often the
-                // best one there is.
-                val to = g.nearestWhere(aim, half * 0.35 + 300.0) { g.edges[it].isNotEmpty() }
-                    ?: continue
-                if (to == from) continue
-                val walk = path(g, from, to, emptySet(), avoidRoads) ?: continue
-                val out = measure(g, walk)
-                if (out.metres < MIN_LOOP_M / 2) continue
-                val err = abs(out.metres * 2 - targetM) / targetM
-                if (err < bestErr) {
-                    bestErr = err
-                    val doubled = doubleBack(out)
-                    best = doubled
-                    onProgress("Found a there-and-back of %.1f km\u2026".format(doubled.metres / 1000))
+            for (from in froms) {
+                // Bearings are taken from the node the walk would actually
+                // leave, not from the middle of the licence: aiming a
+                // turning point relative to a place he isn't standing puts
+                // half of them behind him.
+                val origin = g.nodes[from]
+                for (b in 0 until 8) {
+                    if (System.currentTimeMillis() > deadlineMs || isCancelled()) return best
+                    val ang = spin + b * Math.PI / 4
+                    val aim = En(
+                        origin.e + sin(ang) * half * reach,
+                        origin.n + cos(ang) * half * reach,
+                    )
+                    // Any connected node will do. Unlike a loop's corner, a
+                    // dead end is a perfectly good place to turn round —
+                    // often the best one there is.
+                    val to = g.nearestWhere(aim, half * 0.35 + 300.0) { g.edges[it].isNotEmpty() }
+                        ?: continue
+                    if (to == from) continue
+                    val walk = path(g, from, to, emptySet(), avoidRoads) ?: continue
+                    val out = measure(g, walk)
+                    if (out.metres < MIN_LOOP_M / 2) continue
+                    val err = abs(out.metres * 2 - targetM) / targetM
+                    if (err < bestErr) {
+                        bestErr = err
+                        val doubled = doubleBack(out)
+                        best = doubled
+                        onProgress(
+                            "Found a there-and-back of %.1f km\u2026".format(doubled.metres / 1000),
+                        )
+                    }
+                    if (bestErr < GOOD_ERROR) return best
                 }
-                if (bestErr < GOOD_ERROR) return best
             }
         }
         return best

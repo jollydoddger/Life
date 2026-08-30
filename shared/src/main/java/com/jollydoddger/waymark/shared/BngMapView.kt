@@ -110,6 +110,27 @@ class BngMapView @JvmOverloads constructor(
      *  (from the route's stored start, ignoring direction). */
     var onRoutePointPicked: ((En, Double) -> Unit)? = null
 
+    /**
+     * Place mode: a tap picks the ground itself, snapped to nothing.
+     *
+     * Deliberately a separate mode from [pickMode] rather than a flag on it.
+     * That one answers "which part of my route", so it snaps to the line and
+     * a tap off the line does nothing at all. This one answers "where shall
+     * the walk start", and there is no line yet — every point on the map is a
+     * legitimate answer, including the middle of a field.
+     */
+    var placeMode = false
+        set(v) { field = v; invalidate() }
+
+    /** Called with the grid point under a tap while [placeMode] is on. */
+    var onPlacePicked: ((En) -> Unit)? = null
+
+    /** The grid point under a screen position. */
+    fun enAt(x: Float, y: Float): En {
+        val m = mpp(zl)
+        return En((x - width / 2f) * m + centreE, centreN - (y - height / 2f) * m)
+    }
+
     /** Numbered flags at his marked points. */
     private var marks: List<Pair<En, Int>> = emptyList()
 
@@ -1144,6 +1165,11 @@ class BngMapView @JvmOverloads constructor(
         // swipe-to-dismiss, so intercepting it for zoom would take away the
         // way out of the app. The screen is the honest place for it.
         override fun onSingleTapUp(e: MotionEvent): Boolean {
+            if (placeMode) {
+                performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK)
+                onPlacePicked?.invoke(enAt(e.x, e.y))
+                return true
+            }
             if (pickMode) {
                 pickAt(e.x, e.y)
                 return true

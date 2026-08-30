@@ -136,11 +136,26 @@ class WalkSpecTest {
 
     @Test
     fun `the form survives a round trip through storage`() {
-        val spec = WalkSpec(Shape.OUT_AND_BACK, byTime = true, from = 1.5, to = 3.0, dayOffset = 4)
+        val spec = WalkSpec(
+            Shape.OUT_AND_BACK, byTime = true, from = 1.5, to = 3.0,
+            dayOffset = 4, origin = Origin.SCREEN,
+        )
         assertEquals(spec, WalkSpec.fromJson(spec.toJson()))
         // And nonsense in the file is a fresh form, never a crash on the way
         // to a walk.
         assertEquals(WalkSpec(), WalkSpec.fromJson("not json"))
         assertEquals(WalkSpec(), WalkSpec.fromJson(null))
+    }
+
+    @Test
+    fun `where it starts from is remembered too`() {
+        // The field the first version of the form forgot. A spec written
+        // before it existed must still load, as "where I am".
+        val old = """{"shape":"CIRCULAR","byTime":false,"from":5,"to":10,"dayOffset":0}"""
+        assertEquals(Origin.HERE, WalkSpec.fromJson(old).origin)
+        assertEquals(
+            Origin.TAP,
+            WalkSpec.fromJson(WalkSpec(origin = Origin.TAP).toJson()).origin,
+        )
     }
 }

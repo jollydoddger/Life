@@ -214,6 +214,40 @@ class RouterTest {
     }
 
     @Test
+    fun `a wide start licence is spread across the region, not spent in its middle`() {
+        // "Anywhere on this map" is a region, and nearest-first would hand
+        // back a dozen junctions all within a hundred metres of the middle
+        // of it — technically inside, and not what anybody means.
+        val g = awkwardNetwork(2)
+        val licence = 2_400.0
+        val tight = Router.startsFor(g, centre(), Router.START_SLACK_M)
+        val wide = Router.startsFor(g, centre(), licence)
+        assertTrue(
+            "a wide licence must offer more places to begin (${tight.size} vs ${wide.size})",
+            wide.size > tight.size,
+        )
+        for (i in wide) {
+            val d = hypot(g.nodes[i].e - centre().e, g.nodes[i].n - centre().n)
+            assertTrue("a start $d m out is outside the $licence m licence", d <= licence)
+        }
+        val far = wide.count {
+            hypot(g.nodes[it].e - centre().e, g.nodes[it].n - centre().n) > 800.0
+        }
+        assertTrue("a region licence must actually reach into the region", far > 0)
+    }
+
+    @Test
+    fun `a tight licence stays tight`() {
+        val g = awkwardNetwork(2)
+        for (i in Router.startsFor(g, centre(), Router.START_SLACK_M)) {
+            val d = hypot(g.nodes[i].e - centre().e, g.nodes[i].n - centre().n)
+            // The nearest node is always offered even if it is further out —
+            // there has to be somewhere to start — but nothing else is.
+            assertTrue("$d m from him on a 500 m licence", d <= Router.START_SLACK_M || i == g.nearest(centre()))
+        }
+    }
+
+    @Test
     fun `the grid index finds what a full scan would`() {
         val g = awkwardNetwork(6)
         val rnd = Random(11)
