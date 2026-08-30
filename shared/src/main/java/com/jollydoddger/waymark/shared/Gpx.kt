@@ -111,7 +111,7 @@ object RouteStore {
         // write, an old bug) must load as "no route", never as a landmine
         // for the first caller that asks for points.first().
         return try {
-            fromJson(f.readText()).takeIf { it.points.size >= 2 }
+            fromJson(f.readText())?.takeIf { it.points.size >= 2 }
         } catch (e: Exception) {
             null
         }
