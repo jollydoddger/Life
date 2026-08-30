@@ -91,20 +91,31 @@ object Ramp {
     fun temperature(celsius: Double): Int = ramp(TEMPERATURE, celsius)
 
     /**
-     * Cloud cover, and the point of it: clear sky is marked rather than
-     * merely absent. A faint gold where the sun is getting through is the
-     * difference between "no data" and "it is sunny there", and he asked to
-     * see sunshine, not just cloud.
+     * Cloud cover. Clear sky is **nothing at all** — no wash, the map as
+     * printed.
+     *
+     * It used to be a faint gold, on the reasoning that marking sunshine
+     * says more than leaving it blank. That was wrong in practice: cloud is
+     * under 30% over most of a viewport most of the time, so the gold was
+     * almost never a *finding* and almost always a film over the whole map.
+     * A colour that covers everything distinguishes nothing, and it was
+     * sitting on top of contours and path lines he navigates by.
+     *
+     * So the ink now goes where the cloud is. Nothing below a quarter cover,
+     * then grey thickening to a solid overcast — which means a clear map
+     * genuinely reads as clear sky, and the grey patches are worth looking
+     * at because there aren't many of them.
      */
     private val CLOUD = arrayOf(
-        Stop(0.0, pack(78, 255, 214, 120)),
-        Stop(30.0, pack(20, 255, 226, 160)),
-        Stop(55.0, pack(96, 168, 172, 178)),
-        Stop(80.0, pack(150, 138, 142, 150)),
-        Stop(100.0, pack(196, 104, 108, 118)),
+        Stop(25.0, pack(0, 150, 156, 166)),
+        Stop(45.0, pack(46, 150, 156, 166)),
+        Stop(65.0, pack(96, 138, 144, 154)),
+        Stop(85.0, pack(150, 118, 124, 134)),
+        Stop(100.0, pack(190, 96, 102, 112)),
     )
 
-    fun cloud(percent: Double): Int = ramp(CLOUD, percent)
+    fun cloud(percent: Double): Int =
+        if (percent < 25.0) 0 else ramp(CLOUD, percent)
 
     /**
      * Forecast rainfall in mm per hour. Drizzle is drawn boldly on purpose:

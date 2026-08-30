@@ -2,6 +2,7 @@ package com.jollydoddger.waymark.shared
 
 import android.annotation.SuppressLint
 import android.content.Context
+import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
@@ -157,6 +158,10 @@ class BngMapView @JvmOverloads constructor(
     private val settleRunnable = Runnable { onViewportSettled?.invoke() }
 
     private fun viewportChanged() {
+        // The streamline trails live in screen pixels, so a pan or a zoom
+        // leaves them describing wind that was somewhere else. Wiped rather
+        // than reprojected: they redraw in about a second.
+        windTrail?.eraseColor(Color.TRANSPARENT)
         if (onViewportSettled == null) return
         removeCallbacks(settleRunnable)
         postDelayed(settleRunnable, 600)
@@ -316,6 +321,7 @@ class BngMapView @JvmOverloads constructor(
         drawTrail(canvas)
         drawPreview(canvas)
         drawPois(canvas)
+        drawStreamlines(canvas)
         drawWind(canvas)
         drawHere(canvas)
     }
@@ -534,6 +540,209 @@ class BngMapView @JvmOverloads constructor(
     }
     private val windFill = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
 
+    // --- wind as drifting streamlines ---------------------------------------
+
+    /**
+     * The wind over the viewport as two components in metres per second —
+     * [u] eastward, [v] northward — on a regular grid covering the box from
+     * ([west], [south]) to ([east], [north]) in National Grid metres. Row 0
+     * is the northern edge, column 0 the western, matching the forecast grid
+     * it is built from.
+     *
+     * Components rather than speed and bearing because the animation
+     * interpolates between neighbouring readings every frame, and averaging
+     * two bearings either side of north gives south.
+     */
+    class WindGrid(
+        val west: Double, val south: Double, val east: Double, val north: Double,
+        val n: Int, val u: DoubleArray, val v: DoubleArray,
+    )
+
+    /**
+     * One drifting particle. It carries where it was as well as where it is,
+     * because what gets drawn is the segment between the two — the trail is
+     * the picture, not the dot.
+     */
+    private class Mote(var x: Float, var y: Float, var px: Float, var py: Float, var life: Int)
+
+    private var windGrid: WindGrid? = null
+    private var windStreamlines = true
+    private val motes = ArrayList<Mote>()
+    private var windTrail: Bitmap? = null
+    private var windTrailCanvas: Canvas? = null
+    private var lastWindFrameMs = 0L
+
+    /** How many pixels a second the air appears to move, per mph of real
+     *  wind. Real speed at map scale is imperceptible — a 20 mph gale would
+     *  cross a viewport in three minutes — so this is honest exaggeration,
+     *  and the arrows and the readout carry the actual number. */
+    private val PX_PER_MPH = 2.2f
+
+    /** Enough to read as flow, few enough to draw in a couple of
+     *  milliseconds. Scaled to the screen so a tablet is not sparse. */
+    private fun moteCount(): Int = ((width * height) / (9_000 * density)).toInt().coerceIn(120, 700)
+
+    /** How fast a trail fades. Higher is shorter. */
+    private val TRAIL_FADE = 30
+
+    /** Frames redraw at about 30 a second; a walking map does not need 60,
+     *  and this runs while he is out with the screen on. */
+    private val FRAME_MS = 33L
+
+    private val windFade = Paint().apply {
+        color = Color.argb(TRAIL_FADE, 0, 0, 0)
+        xfermode = android.graphics.PorterDuffXfermode(android.graphics.PorterDuff.Mode.DST_OUT)
+    }
+    private val windBlit = Paint()
+    private val motePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeCap = Paint.Cap.ROUND
+    }
+
+    private val windTick = Runnable { stepWind() }
+
+    fun setWind(grid: WindGrid?, streamlines: Boolean) {
+        windGrid = grid
+        windStreamlines = streamlines
+        if (grid == null || !streamlines) {
+            removeCallbacks(windTick)
+            motes.clear()
+            windTrail?.eraseColor(Color.TRANSPARENT)
+        } else {
+            lastWindFrameMs = 0L
+            removeCallbacks(windTick)
+            post(windTick)
+        }
+        invalidate()
+    }
+
+    override fun onDetachedFromWindow() {
+        // Nothing about a map off the screen is worth thirty frames a second
+        // of somebody's battery.
+        removeCallbacks(windTick)
+        super.onDetachedFromWindow()
+    }
+
+    override fun onWindowVisibilityChanged(visibility: Int) {
+        super.onWindowVisibilityChanged(visibility)
+        removeCallbacks(windTick)
+        if (visibility == VISIBLE && windGrid != null && windStreamlines) post(windTick)
+    }
+
+    /** The wind at a point on screen, as pixels of travel per second. */
+    private fun sampleWind(g: WindGrid, x: Float, y: Float, m: Double, out: FloatArray): Boolean {
+        val e = (x - width / 2f) * m + centreE
+        val n = centreN - (y - height / 2f) * m
+        val fc = (e - g.west) / (g.east - g.west) * (g.n - 1)
+        val fr = (g.north - n) / (g.north - g.south) * (g.n - 1)
+        // Off the forecast box is not "no wind", it is "not known here" —
+        // the particle is retired rather than parked.
+        if (fc < 0 || fr < 0 || fc > g.n - 1 || fr > g.n - 1) return false
+        val eu = lerpGrid(g.u, g.n, fr, fc)
+        val ev = lerpGrid(g.v, g.n, fr, fc)
+        if (eu.isNaN() || ev.isNaN()) return false
+        // Metres per second back to mph, then to pixels per second — so the
+        // apparent speed is the same at every zoom, which is what makes it
+        // readable as wind rather than as a zoom level.
+        val k = PX_PER_MPH / 0.44704f
+        out[0] = (eu * k).toFloat()
+        out[1] = (-ev * k).toFloat() // screen y grows southward
+        return true
+    }
+
+    /**
+     * Bilinear over the grid, dropping absent corners and re-weighting what
+     * is left — the forecast can come back with holes, and a NaN dragged
+     * through the arithmetic would park every particle downwind of the gap.
+     */
+    private fun lerpGrid(vals: DoubleArray, n: Int, fr: Double, fc: Double): Double {
+        val r0 = kotlin.math.floor(fr).toInt().coerceIn(0, n - 1)
+        val c0 = kotlin.math.floor(fc).toInt().coerceIn(0, n - 1)
+        val r1 = (r0 + 1).coerceAtMost(n - 1)
+        val c1 = (c0 + 1).coerceAtMost(n - 1)
+        val tr = fr - r0
+        val tc = fc - c0
+        var sum = 0.0
+        var weight = 0.0
+        fun take(r: Int, c: Int, w: Double) {
+            val v = vals[r * n + c]
+            if (!v.isNaN() && w > 0) { sum += v * w; weight += w }
+        }
+        take(r0, c0, (1 - tr) * (1 - tc))
+        take(r0, c1, (1 - tr) * tc)
+        take(r1, c0, tr * (1 - tc))
+        take(r1, c1, tr * tc)
+        return if (weight <= 0.0) Double.NaN else sum / weight
+    }
+
+    private fun spawn(mote: Mote) {
+        mote.x = (Math.random() * width).toFloat()
+        mote.y = (Math.random() * height).toFloat()
+        mote.px = mote.x
+        mote.py = mote.y
+        // Staggered lifetimes, or every particle in the field restarts on the
+        // same frame and the whole map blinks once a second.
+        mote.life = 40 + (Math.random() * 90).toInt()
+    }
+
+    private val windSample = FloatArray(2)
+
+    private fun stepWind() {
+        val g = windGrid
+        if (g == null || !windStreamlines || width == 0 || height == 0) return
+        val now = android.os.SystemClock.uptimeMillis()
+        val dt = if (lastWindFrameMs == 0L) 0.033f else ((now - lastWindFrameMs) / 1000f).coerceIn(0f, 0.1f)
+        lastWindFrameMs = now
+
+        var trail = windTrail
+        if (trail == null || trail.width != width || trail.height != height) {
+            trail?.recycle()
+            trail = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+            windTrail = trail
+            windTrailCanvas = Canvas(trail)
+        }
+        val c = windTrailCanvas ?: return
+
+        val want = moteCount()
+        while (motes.size < want) motes.add(Mote(0f, 0f, 0f, 0f, 0).also { spawn(it) })
+        while (motes.size > want) motes.removeAt(motes.size - 1)
+
+        // Fade what is already drawn rather than clearing it: the tail behind
+        // each particle *is* the streamline.
+        c.drawRect(0f, 0f, width.toFloat(), height.toFloat(), windFade)
+
+        val m = mpp(zl)
+        motePaint.strokeWidth = 1.7f * density
+        for (mote in motes) {
+            mote.life--
+            if (mote.life <= 0 || !sampleWind(g, mote.x, mote.y, m, windSample)) {
+                spawn(mote)
+                continue
+            }
+            mote.px = mote.x
+            mote.py = mote.y
+            mote.x += windSample[0] * dt
+            mote.y += windSample[1] * dt
+            if (mote.x < 0 || mote.y < 0 || mote.x > width || mote.y > height) {
+                spawn(mote)
+                continue
+            }
+            val mph = kotlin.math.hypot(windSample[0], windSample[1]) / PX_PER_MPH
+            motePaint.color = windColour(mph.toDouble())
+            c.drawLine(mote.px, mote.py, mote.x, mote.y, motePaint)
+        }
+        invalidate()
+        postDelayed(windTick, FRAME_MS)
+    }
+
+    private fun drawStreamlines(canvas: Canvas) {
+        if (!windStreamlines || windGrid == null) return
+        val t = windTrail ?: return
+        windBlit.alpha = (255 * weatherOpacity).toInt().coerceIn(0, 255)
+        canvas.drawBitmap(t, 0f, 0f, windBlit)
+    }
+
+
     /**
      * Wind by the feel of it rather than by a rainbow: a grey breath, a green
      * breeze, amber when it starts pushing you about, red when a walk on an
@@ -548,7 +757,7 @@ class BngMapView @JvmOverloads constructor(
     }
 
     private fun drawWind(canvas: Canvas) {
-        if (windArrows.isEmpty()) return
+        if (windStreamlines || windArrows.isEmpty()) return
         val m = mpp(zl)
         windCasing.strokeWidth = 6.5f * density
         windPaint.strokeWidth = 3.2f * density

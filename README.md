@@ -200,17 +200,26 @@ washes this app paints itself, and the scale's name for the radar — those
 colours are RainViewer's, so they are named rather than mimicked. A key that
 drifted from the real palette would be worse than none.
 
-**Wind.** Arrows across the map, coloured and sized by speed — grey a breath,
-green a breeze, amber when it starts pushing you about, red when an exposed
-ridge stops being a good idea. Each arrow flies the way the wind is *going*;
-the reading beside the timeline names the direction it comes *from*, which is
-how a forecast states it. The walk brief reports it too, with gusts.
+**Wind.** Lines drifting across the map the way the air is going, coloured by
+speed — grey a breath, green a breeze, amber when it starts pushing you about,
+red when an exposed ridge stops being a good idea. Flow is one picture you take
+in at a glance, where an arrow per reading is two dozen separate things to read
+and join up; arrows remain as an option in Settings. The lines move faster than
+the real wind on purpose, because at map scale a gale would take three minutes
+to cross the screen — so the picture is for *which way and roughly how hard*,
+and the reading beside the timeline gives the actual speed and the direction it
+comes *from*, which is how a forecast states it. They only animate while the
+map is in front of you. The walk brief reports it too, with gusts.
 
-**Temperature** and **cloud** as colour washes — cloud grey where it is dull
-and gold where the sun is getting through, so sunshine is marked rather than
-merely absent. Only one wash is drawn at a time (two over each other say
-nothing legible): forecast rain wherever the radar cannot see, then
-temperature, then cloud.
+**Temperature** is a figure in degrees at the top of the map, not a wash of
+colour: two characters said more than a yellow film over everything, and did
+not bury the contours saying it.
+
+**Cloud** greys the map in as it thickens and leaves it completely alone below
+a quarter cover — so a clean map means a clear sky, and the grey patches are
+worth looking at because there are not many of them. Only one wash is drawn at
+a time (two over each other say nothing legible): forecast rain wherever the
+radar cannot see, otherwise cloud.
 
 **The timeline.** A scrubber along the bottom, five hours back and five
 forward. Drag it and watch a shower travel — which is the one thing a radar
@@ -225,6 +234,14 @@ back and half an hour on; that is measured radar. The rest of the ten hours
 is the hourly forecast on a grid a few kilometres across — a model's opinion
 about the sky, not an observation. Wind, temperature and cloud are always the
 model.
+
+**Switching them on and off.** Settings decides which overlays exist; each one
+allowed there gets a small toggle across the top of the map, and that toggle is
+what turns the layer on and off while you are out. A switch two screens away is
+not something anyone operates halfway up a hill, and the full list is long
+enough that putting all of it on the map would be its own clutter. Turning
+something on in Settings turns its map toggle on too, so it appears immediately
+rather than needing a second switch you did not know about.
 
 Weather data by [RainViewer](https://rainviewer.com); forecast by
 [Open-Meteo](https://open-meteo.com).
@@ -243,9 +260,17 @@ where they will actually happen against the skyline in front of you.
 The astronomy is computed on the phone (the NOAA solar position algorithm,
 checked in CI against the sky's own facts — equinox sunrise due east, solar
 noon due south, published times for Anglesey), so it works with no signal,
-which is exactly where "how long have I got?" gets asked. The soft part is
-the phone's compass, so the view tells you what it thinks it is pointing at
-rather than implying survey accuracy. Refuse the camera permission and the
+which is exactly where "how long have I got?" gets asked.
+
+Which way the camera is pointing is worked out straight from the phone's
+rotation matrix — the camera looks along the device's negative Z, so its
+direction in the world is that matrix's third column, negated — and every
+case is checked in CI. It used to go through the axis-permutation recipe
+everyone quotes for augmented reality, which put the compass about ninety
+degrees out: pointing at a sun plainly visible in the east, the overlay
+called it north. The remaining soft part is the magnetometer itself, so the
+view tells you what it thinks it is pointing at rather than implying survey
+accuracy. Refuse the camera permission and the
 same arc is drawn on a plain sky — the information is the point.
 
 ## Ask it things (optional, off by default)

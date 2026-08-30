@@ -126,8 +126,6 @@ class SunActivity : Activity() {
     // --- orientation ---------------------------------------------------------
 
     private val rotation = FloatArray(9)
-    private val remapped = FloatArray(9)
-    private val angles = FloatArray(3)
 
     private val orientation = object : SensorEventListener {
         override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {
@@ -136,18 +134,11 @@ class SunActivity : Activity() {
 
         override fun onSensorChanged(event: SensorEvent) {
             SensorManager.getRotationMatrixFromVector(rotation, event.values)
-            // Held upright, looking through the back camera: remap so the
-            // "azimuth" is the direction the camera points and pitch is how
-            // far above the horizon it is aimed.
-            SensorManager.remapCoordinateSystem(
-                rotation, SensorManager.AXIS_X, SensorManager.AXIS_Z, remapped,
-            )
-            SensorManager.getOrientation(remapped, angles)
             overlay.setAim(
                 // Magnetic → true north, which is what solar azimuths are in.
-                azimuth = Math.toDegrees(angles[0].toDouble()) + declination,
-                elevation = -Math.toDegrees(angles[1].toDouble()),
-                roll = Math.toDegrees(angles[2].toDouble()),
+                azimuth = Aim.azimuth(rotation) + declination,
+                elevation = Aim.elevation(rotation),
+                roll = Aim.roll(rotation),
             )
         }
     }

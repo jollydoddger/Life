@@ -122,15 +122,77 @@ object Prefs {
         get() = p(this).getBoolean("windEnabled", false)
         set(v) = p(this).edit().putBoolean("windEnabled", v).apply()
 
-    /** Temperature as a colour wash over the map. */
+    /** Temperature, as a figure in degrees rather than a wash of colour. */
     var Context.tempEnabled: Boolean
         get() = p(this).getBoolean("tempEnabled", false)
         set(v) = p(this).edit().putBoolean("tempEnabled", v).apply()
 
-    /** Cloud cover — grey where it is dull, gold where the sun is out. */
+    /** Cloud cover — grey where it is dull, and nothing at all where it is
+     *  clear, so a clean map means a clean sky. */
     var Context.cloudEnabled: Boolean
         get() = p(this).getBoolean("cloudEnabled", false)
         set(v) = p(this).edit().putBoolean("cloudEnabled", v).apply()
+
+    /**
+     * How the wind is drawn: 1 for drifting streamlines, 0 for arrows.
+     *
+     * Streamlines by default. An arrow per grid point is precise and hard to
+     * read — twenty-five separate things to look at and mentally join up —
+     * whereas lines drifting the way the air is going are one picture you
+     * take in at a glance. Arrows stay available because precision is
+     * sometimes what you want, and because a moving map costs battery.
+     */
+    var Context.windStyle: Int
+        get() = p(this).getInt("windStyle", 1)
+        set(v) = p(this).edit().putInt("windStyle", v).apply()
+
+    // --- what is switched on in Settings, and what is switched on here ------
+    //
+    // Two levels on purpose, and his design. Settings decides which overlays
+    // he might want at all — the long list, visited rarely. Each one he
+    // allows there puts a small toggle on the map itself, and *that* is what
+    // turns the layer on and off while he is walking. Nine switches buried a
+    // screen away is not something anyone operates in the rain; three chips
+    // above the map is.
+    //
+    // Turning one on in Settings turns its map toggle on too, so allowing a
+    // layer shows it immediately rather than leaving him hunting for a second
+    // switch that did not exist a moment ago.
+
+    private fun shown(c: Context, key: String): Boolean =
+        p(c).getBoolean("shown_$key", true)
+
+    private fun setShown(c: Context, key: String, v: Boolean) {
+        p(c).edit().putBoolean("shown_$key", v).apply()
+    }
+
+    var Context.tracesShown: Boolean
+        get() = shown(this, "traces")
+        set(v) = setShown(this, "traces", v)
+
+    var Context.prowShown: Boolean
+        get() = shown(this, "prow")
+        set(v) = setShown(this, "prow", v)
+
+    var Context.allPathsShown: Boolean
+        get() = shown(this, "allPaths")
+        set(v) = setShown(this, "allPaths", v)
+
+    var Context.radarShown: Boolean
+        get() = shown(this, "radar")
+        set(v) = setShown(this, "radar", v)
+
+    var Context.windShown: Boolean
+        get() = shown(this, "wind")
+        set(v) = setShown(this, "wind", v)
+
+    var Context.tempShown: Boolean
+        get() = shown(this, "temp")
+        set(v) = setShown(this, "temp", v)
+
+    var Context.cloudShown: Boolean
+        get() = shown(this, "cloud")
+        set(v) = setShown(this, "cloud", v)
 
     /**
      * Hide the route line on the phone's map without touching the stored

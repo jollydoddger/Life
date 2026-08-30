@@ -22,20 +22,28 @@ import com.anthropic.client.okhttp.AnthropicOkHttpClient
 import com.anthropic.models.messages.MessageCreateParams
 import com.anthropic.models.messages.Model
 import com.jollydoddger.waymark.shared.Prefs.allPathsEnabled
+import com.jollydoddger.waymark.shared.Prefs.allPathsShown
 import com.jollydoddger.waymark.shared.Prefs.anthropicKey
 import com.jollydoddger.waymark.shared.Prefs.arrowColour
 import com.jollydoddger.waymark.shared.Prefs.assistantEnabled
+import com.jollydoddger.waymark.shared.Prefs.cloudEnabled
+import com.jollydoddger.waymark.shared.Prefs.cloudShown
 import com.jollydoddger.waymark.shared.Prefs.osApiKey
 import com.jollydoddger.waymark.shared.Prefs.prowEnabled
-import com.jollydoddger.waymark.shared.Prefs.cloudEnabled
+import com.jollydoddger.waymark.shared.Prefs.prowShown
 import com.jollydoddger.waymark.shared.Prefs.radarEnabled
 import com.jollydoddger.waymark.shared.Prefs.radarScheme
-import com.jollydoddger.waymark.shared.Prefs.tempEnabled
-import com.jollydoddger.waymark.shared.Prefs.windEnabled
+import com.jollydoddger.waymark.shared.Prefs.radarShown
 import com.jollydoddger.waymark.shared.Prefs.routeColour
 import com.jollydoddger.waymark.shared.Prefs.screenTimeoutSec
+import com.jollydoddger.waymark.shared.Prefs.tempEnabled
+import com.jollydoddger.waymark.shared.Prefs.tempShown
 import com.jollydoddger.waymark.shared.Prefs.tracesEnabled
+import com.jollydoddger.waymark.shared.Prefs.tracesShown
 import com.jollydoddger.waymark.shared.Prefs.trailColour
+import com.jollydoddger.waymark.shared.Prefs.windEnabled
+import com.jollydoddger.waymark.shared.Prefs.windShown
+import com.jollydoddger.waymark.shared.Prefs.windStyle
 import com.jollydoddger.waymark.shared.Sync
 import com.jollydoddger.waymark.shared.TileGrid
 import kotlinx.coroutines.CoroutineScope
@@ -252,8 +260,9 @@ class SettingsActivity : Activity() {
             isChecked = radarEnabled
             setOnCheckedChangeListener { _, on ->
                 radarEnabled = on
-                result.text = if (on) "Rain radar on — with a timeline to scrub at the bottom of the map."
-                else "Rain radar off."
+                if (on) radarShown = true
+                result.text = if (on) "Rain radar available — its toggle is on the map, switched on."
+                else "Rain radar off, and its toggle is gone from the map."
             }
         }
         val radarScales = listOf(
@@ -288,17 +297,25 @@ class SettingsActivity : Activity() {
             isChecked = windEnabled
             setOnCheckedChangeListener { _, on ->
                 windEnabled = on
-                result.text = if (on) "Wind on — arrows fly the way it is blowing." else "Wind off."
+                if (on) windShown = true
+                result.text = if (on) "Wind available — its toggle is on the map, switched on."
+                else "Wind off, and its toggle is gone from the map."
             }
         }
+        val windStyles = listOf("Drifting lines" to 1, "Arrows" to 0)
         val windNote = TextView(this).apply {
             textSize = 13f
-            text = "Arrows across the map, coloured and sized by speed: grey a breath, " +
-                "green a breeze, amber when it starts pushing you about, red when an " +
-                "exposed ridge stops being a good idea. Each arrow flies the way the " +
-                "wind is going; the reading beside the timeline names the direction it " +
-                "comes from, which is how a forecast states it. Moves with the timeline, " +
-                "so you can see what it will be doing when you get there."
+            text = "Lines drifting the way the air is going, coloured by speed: grey a " +
+                "breath, green a breeze, amber when it starts pushing you about, red " +
+                "when an exposed ridge stops being a good idea. Arrows are the other " +
+                "option — one per reading, precise but twenty-five separate things to " +
+                "read and join up.\n\n" +
+                "The picture is for which way and roughly how hard; the reading beside " +
+                "the timeline gives the actual speed and the direction the wind comes " +
+                "from, which is how a forecast states it. The lines are drawn faster " +
+                "than the real wind on purpose — at map scale a gale would take three " +
+                "minutes to cross the screen — and they only animate while the map is " +
+                "in front of you."
         }
 
         val tempSwitch = Switch(this).apply {
@@ -307,7 +324,9 @@ class SettingsActivity : Activity() {
             isChecked = tempEnabled
             setOnCheckedChangeListener { _, on ->
                 tempEnabled = on
-                result.text = if (on) "Temperature on — blue cold, red warm." else "Temperature off."
+                if (on) tempShown = true
+                result.text = if (on) "Temperature available — the figure appears at the top of the map."
+                else "Temperature off."
             }
         }
 
@@ -317,16 +336,22 @@ class SettingsActivity : Activity() {
             isChecked = cloudEnabled
             setOnCheckedChangeListener { _, on ->
                 cloudEnabled = on
-                result.text = if (on) "Cloud on — grey where it is dull, gold where the sun is out."
+                if (on) cloudShown = true
+                result.text = if (on) "Cloud available — grey where it is dull, clear map where it is not."
                 else "Cloud off."
             }
         }
         val washNote = TextView(this).apply {
             textSize = 13f
-            text = "Two colour washes over each other say nothing legible, so only one is " +
-                "drawn at a time: forecast rain wherever the radar cannot see, then " +
-                "temperature, then cloud. All three come from one forecast request, so " +
-                "switching a second one on costs nothing.\n\n" +
+            text = "Temperature is a figure at the top of the map rather than a wash of " +
+                "colour: a yellow film over everything said less than two characters " +
+                "do, and buried the contours saying it. Cloud leaves the map alone " +
+                "below a quarter cover, so a clean map means a clear sky, and greys " +
+                "in as it thickens.\n\n" +
+                "Two washes over each other say nothing legible, so only one is drawn: " +
+                "forecast rain wherever the radar cannot see, otherwise cloud. Wind, " +
+                "temperature and cloud all come from one forecast request, so switching " +
+                "a second one on costs nothing.\n\n" +
                 "These are a model, not a measurement — the forecast's opinion about the " +
                 "sky, a few kilometres between readings. Only the radar frames are " +
                 "observations, and the timeline label says which you are looking at.\n\n" +
@@ -339,6 +364,7 @@ class SettingsActivity : Activity() {
             isChecked = tracesEnabled
             setOnCheckedChangeListener { _, on ->
                 tracesEnabled = on
+                if (on) tracesShown = true
                 result.text = if (on) {
                     "Traces on — flashing red dots appear as you browse zoomed in."
                 } else {
@@ -362,6 +388,7 @@ class SettingsActivity : Activity() {
             isChecked = prowEnabled
             setOnCheckedChangeListener { _, on ->
                 prowEnabled = on
+                if (on) prowShown = true
                 result.text = if (on) {
                     "Rights of way on — they draw in as you browse."
                 } else {
@@ -393,6 +420,7 @@ class SettingsActivity : Activity() {
             isChecked = allPathsEnabled
             setOnCheckedChangeListener { _, on ->
                 allPathsEnabled = on
+                if (on) allPathsShown = true
                 result.text = if (on) "All mapped paths on — thin grey lines, drawn under the coloured rights."
                 else "All mapped paths off."
             }
@@ -463,6 +491,18 @@ class SettingsActivity : Activity() {
             ))
 
             addView(heading("Map overlays"))
+            addView(
+                TextView(this@SettingsActivity).apply {
+                    textSize = 13f
+                    text = "Everything switched on here gets a small toggle across the " +
+                        "top of the map, and that toggle is what turns the layer on and " +
+                        "off while you are out — one tap, without coming in here. " +
+                        "Switching something on here switches its toggle on too; " +
+                        "switching it off here takes the toggle away entirely, so the " +
+                        "row across the map stays as short as you have chosen."
+                    setPadding(0, dp(2), 0, dp(10))
+                },
+            )
             addView(prowSwitch)
             addView(prowNote)
             addView(allPathsSwitch, LinearLayout.LayoutParams(
@@ -487,6 +527,10 @@ class SettingsActivity : Activity() {
                 LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT,
             ).apply { topMargin = dp(16) })
             addView(windNote)
+            addView(HorizontalScrollView(this@SettingsActivity).apply {
+                isHorizontalScrollBarEnabled = false
+                addView(choices(windStyles, { windStyle }, sync = false) { windStyle = it })
+            })
             addView(tempSwitch, LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT,
             ).apply { topMargin = dp(12) })

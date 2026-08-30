@@ -20,6 +20,7 @@ import android.view.View
 import android.view.WindowInsets
 import android.view.inputmethod.EditorInfo
 import android.widget.EditText
+import android.widget.HorizontalScrollView
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.ScrollView
@@ -36,25 +37,33 @@ import com.jollydoddger.waymark.shared.Route
 import com.jollydoddger.waymark.shared.Gpx
 import com.jollydoddger.waymark.shared.Locator
 import com.jollydoddger.waymark.shared.Prefs.allPathsEnabled
-import com.jollydoddger.waymark.shared.Prefs.cloudEnabled
+import com.jollydoddger.waymark.shared.Prefs.allPathsShown
 import com.jollydoddger.waymark.shared.Prefs.arrowColour
 import com.jollydoddger.waymark.shared.Prefs.assistantEnabled
+import com.jollydoddger.waymark.shared.Prefs.cloudEnabled
+import com.jollydoddger.waymark.shared.Prefs.cloudShown
 import com.jollydoddger.waymark.shared.Prefs.libraryFolder
 import com.jollydoddger.waymark.shared.Prefs.osApiKey
 import com.jollydoddger.waymark.shared.Prefs.prowEnabled
+import com.jollydoddger.waymark.shared.Prefs.prowShown
 import com.jollydoddger.waymark.shared.Prefs.radarEnabled
-import com.jollydoddger.waymark.shared.Prefs.tempEnabled
 import com.jollydoddger.waymark.shared.Prefs.radarScheme
-import com.jollydoddger.waymark.shared.Prefs.tracesEnabled
-import com.jollydoddger.waymark.shared.Prefs.weatherOpacity
-import com.jollydoddger.waymark.shared.Prefs.windEnabled
+import com.jollydoddger.waymark.shared.Prefs.radarShown
 import com.jollydoddger.waymark.shared.Prefs.recording
 import com.jollydoddger.waymark.shared.Prefs.recordingStartedAt
 import com.jollydoddger.waymark.shared.Prefs.routeColour
 import com.jollydoddger.waymark.shared.Prefs.routeHidden
 import com.jollydoddger.waymark.shared.Prefs.routeReversed
+import com.jollydoddger.waymark.shared.Prefs.tempEnabled
+import com.jollydoddger.waymark.shared.Prefs.tempShown
+import com.jollydoddger.waymark.shared.Prefs.tracesEnabled
+import com.jollydoddger.waymark.shared.Prefs.tracesShown
 import com.jollydoddger.waymark.shared.Prefs.trailColour
 import com.jollydoddger.waymark.shared.Prefs.wantRecording
+import com.jollydoddger.waymark.shared.Prefs.weatherOpacity
+import com.jollydoddger.waymark.shared.Prefs.windEnabled
+import com.jollydoddger.waymark.shared.Prefs.windShown
+import com.jollydoddger.waymark.shared.Prefs.windStyle
 import com.jollydoddger.waymark.shared.RouteStore
 import com.jollydoddger.waymark.shared.Sun
 import com.jollydoddger.waymark.shared.Sync
@@ -103,6 +112,12 @@ class MainActivity : Activity() {
     private lateinit var wxFade: SeekBar
     private lateinit var wxLegend: LinearLayout
     private var legendKey = ""
+
+    /** The row of layer toggles across the top of the map, and the reading
+     *  chips that sit beside them. */
+    private lateinit var chipRow: LinearLayout
+    private lateinit var chipScroll: HorizontalScrollView
+    private lateinit var tempChip: TextView
 
     /**
      * Whether this screen is still the one on the phone. Radar and Weather
@@ -230,6 +245,13 @@ class MainActivity : Activity() {
             background = IconDrawable(Glyph.SEND, d)
             setOnClickListener { sendAsk() }
         }
+        val chatBtn = TextView(this).apply {
+            text = "⋯"
+            textSize = 20f
+            gravity = Gravity.CENTER
+            setTextColor(Color.rgb(60, 70, 62))
+            setOnClickListener { openChat() }
+        }
         askBar = LinearLayout(this).apply {
             setBackgroundColor(Color.argb(235, 250, 250, 248))
             gravity = Gravity.CENTER_VERTICAL
@@ -237,18 +259,51 @@ class MainActivity : Activity() {
             addView(askBox, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
             addView(micBtn, LinearLayout.LayoutParams(dp(42), dp(42)).apply { leftMargin = dp(6) })
             addView(sendBtn, LinearLayout.LayoutParams(dp(42), dp(42)).apply { leftMargin = dp(6) })
+            addView(chatBtn, LinearLayout.LayoutParams(dp(34), dp(42)))
         }
 
+        // The last answer, and no more than that. It used to be a 210dp panel
+        // that stayed up until it was noticed and tapped — half the map, gone
+        // to something already read. Four lines, a cross that closes it, and
+        // the whole conversation one tap away in its own screen.
         replyText = TextView(this).apply {
             textSize = 15f
             setTextColor(Color.WHITE)
-            setPadding(dp(14), dp(10), dp(14), dp(10))
+            setPadding(dp(14), dp(10), dp(6), dp(10))
+            maxLines = 4
+            ellipsize = android.text.TextUtils.TruncateAt.END
+            setOnClickListener { openChat() }
+        }
+        val replyOpen = TextView(this).apply {
+            text = "⌃"
+            textSize = 17f
+            setTextColor(Color.argb(230, 220, 226, 220))
+            setPadding(dp(10), dp(10), dp(6), dp(10))
+            setOnClickListener { openChat() }
+        }
+        val replyClose = TextView(this).apply {
+            text = "✕"
+            textSize = 17f
+            setTextColor(Color.argb(230, 220, 226, 220))
+            setPadding(dp(8), dp(10), dp(12), dp(10))
+            setOnClickListener { replyPanel.visibility = View.GONE }
+        }
+        val replyRow = LinearLayout(this).apply {
+            gravity = Gravity.TOP
+            addView(replyText, LinearLayout.LayoutParams(
+                0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f,
+            ))
+            addView(replyOpen, LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT,
+            ))
+            addView(replyClose, LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT,
+            ))
         }
         replyPanel = ScrollView(this).apply {
             setBackgroundColor(Color.argb(225, 28, 32, 30))
             visibility = View.GONE
-            addView(replyText)
-            setOnClickListener { visibility = View.GONE }
+            addView(replyRow)
         }
 
         // --- the weather scrubber: drag time, watch the rain move ---
@@ -355,9 +410,42 @@ class MainActivity : Activity() {
             // With the scrubber, a reply and a keyboard all up at once on a
             // short screen, the reply gives way instead.
             addView(replyPanel, LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, dp(210), 1f,
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT, 1f,
             ))
             addView(askBar, LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT,
+            ))
+        }
+
+        // --- the layer toggles, on the map where they get used ---
+        //
+        // Settings decides which of these exist; this row decides which are
+        // on. A switch buried two screens away is not something anyone
+        // operates halfway up a hill, and the full list is long enough that
+        // putting all of it here would be its own clutter.
+        tempChip = TextView(this).apply {
+            textSize = 15f
+            setTextColor(Color.WHITE)
+            setBackgroundColor(Color.argb(205, 30, 34, 32))
+            setPadding(dp(10), dp(5), dp(10), dp(5))
+            visibility = View.GONE
+        }
+        chipRow = LinearLayout(this).apply {
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(2), 0, dp(2), 0)
+        }
+        chipScroll = HorizontalScrollView(this).apply {
+            isHorizontalScrollBarEnabled = false
+            visibility = View.GONE
+            addView(chipRow)
+        }
+        val topBar = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            addView(tempChip, LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT,
+            ).apply { bottomMargin = dp(6) })
+            addView(chipScroll, LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT,
             ))
         }
@@ -372,6 +460,10 @@ class MainActivity : Activity() {
                 FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT,
                 Gravity.TOP,
             ).apply { leftMargin = dp(10); rightMargin = dp(10) })
+            addView(topBar, FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT,
+                Gravity.TOP,
+            ).apply { leftMargin = dp(10); rightMargin = dp(56); topMargin = dp(44) })
             addView(bottomStack, FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT,
                 Gravity.BOTTOM,
@@ -466,6 +558,7 @@ class MainActivity : Activity() {
         if (osApiKey.isEmpty()) {
             say("No map without a key — tap here to enter your OS Maps API key")
         }
+        buildChips()
         bindOverlays()
         if (checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
             locator = Locator(this, { en, stale ->
@@ -559,31 +652,100 @@ class MainActivity : Activity() {
     // --- map overlays ---------------------------------------------------------
 
     /**
+     * One overlay: what Settings calls it, whether Settings allows it, and
+     * whether its toggle on the map is currently on.
+     */
+    private class Layer(
+        val label: String,
+        val allowed: Boolean,
+        val on: Boolean,
+        val set: (Boolean) -> Unit,
+    )
+
+    private fun layers(): List<Layer> = listOf(
+        Layer("Rain", radarEnabled, radarShown) { radarShown = it },
+        Layer("Wind", windEnabled, windShown) { windShown = it },
+        Layer("Cloud", cloudEnabled, cloudShown) { cloudShown = it },
+        Layer("Temp", tempEnabled, tempShown) { tempShown = it },
+        Layer("Paths used", tracesEnabled, tracesShown) { tracesShown = it },
+        Layer("Rights of way", prowEnabled, prowShown) { prowShown = it },
+        Layer("All paths", allPathsEnabled, allPathsShown) { allPathsShown = it },
+    )
+
+    /**
+     * The toggle row. Only layers allowed in Settings appear, so the row is
+     * as short as he has chosen to make it — and an empty row takes no space
+     * at all rather than sitting there as an empty grey strip.
+     */
+    private fun buildChips() {
+        chipRow.removeAllViews()
+        val shown = layers().filter { it.allowed }
+        chipScroll.visibility = if (shown.isEmpty()) View.GONE else View.VISIBLE
+        for (layer in shown) {
+            chipRow.addView(
+                TextView(this).apply {
+                    text = layer.label
+                    textSize = 13f
+                    // On and off have to be tellable apart at a glance in
+                    // daylight, so it is not a subtle tint: on is the app's
+                    // green with white text, off is dark and greyed.
+                    if (layer.on) {
+                        setBackgroundColor(Color.argb(235, 34, 96, 58))
+                        setTextColor(Color.WHITE)
+                    } else {
+                        setBackgroundColor(Color.argb(190, 34, 38, 36))
+                        setTextColor(Color.argb(255, 168, 172, 170))
+                    }
+                    setPadding(dp(12), dp(7), dp(12), dp(7))
+                    setOnClickListener {
+                        layer.set(!layer.on)
+                        buildChips()
+                        bindOverlays()
+                    }
+                },
+                LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                ).apply { rightMargin = dp(6) },
+            )
+        }
+    }
+
+    // Whether a layer actually draws: allowed in Settings *and* toggled on
+    // here. Read through these rather than the raw preferences, or a chip
+    // switched off would go on quietly fetching.
+    private val wantRadar: Boolean get() = radarEnabled && radarShown
+    private val wantWind: Boolean get() = windEnabled && windShown
+    private val wantCloud: Boolean get() = cloudEnabled && cloudShown
+    private val wantTemp: Boolean get() = tempEnabled && tempShown
+
+    /**
      * Wire whichever overlays are switched on to the map settling. Switched
      * off means gone and nothing fetched, not merely hidden — one settle
      * hook serves both, so neither can quietly disable the other.
      */
     private fun bindOverlays() {
-        val wantTraces = tracesEnabled
-        val wantProw = prowEnabled
-        val wantRadar = radarEnabled
+        val wantTraces = tracesEnabled && tracesShown
+        val wantProw = prowEnabled && prowShown
+        val wantAllPaths = allPathsEnabled && allPathsShown
         // Wind, temperature and cloud all come off one grid, so any of them
         // pays for all three — and the radar wants it too, for the forecast
         // hours either side of what the radar itself can see.
-        val wantGrid = windEnabled || tempEnabled || cloudEnabled
+        val wantGrid = wantWind || wantTemp || wantCloud
         val wantWeather = wantRadar || wantGrid
         if (!wantTraces) map.setTraces(emptyList())
-        if (!wantProw) map.setProw(emptyList())
+        if (!wantProw && !wantAllPaths) map.setProw(emptyList())
         if (!wantRadar) map.setRadar(emptyList())
-        if (!windEnabled) map.setWind(emptyList())
+        if (!wantWind) { map.setWind(emptyList()); map.setWind(null, windStyle == 1) }
         if (!wantGrid && !wantRadar) map.setField(null, 255)
+        if (!wantTemp) tempChip.visibility = View.GONE
         if (!wantWeather) {
             wxFrames = emptyList()
             radarFrames = emptyList()
             wxField = null
             wxBar.visibility = View.GONE
         }
-        if (!wantTraces && !wantProw && !wantWeather) {
+        if (!wantTraces && !wantProw && !wantAllPaths && !wantWeather) {
             map.onViewportSettled = null
             return
         }
@@ -602,9 +764,12 @@ class MainActivity : Activity() {
         }
         val fetch = {
             val bounds = map.viewportBounds()
-            if (wantProw) {
-                Prow.refresh(this, bounds, allPathsEnabled, { note -> sayBriefly(note) }) { lines ->
-                    map.setProw(lines)
+            if (wantProw || wantAllPaths) {
+                Prow.refresh(this, bounds, wantAllPaths, { note -> sayBriefly(note) }) { lines ->
+                    // Rights of way switched off but every path switched on
+                    // is a real combination: the physical network without the
+                    // legal one drawn over it.
+                    map.setProw(if (wantProw) lines else lines.filter { it.kind == Prow.ALL_PATH })
                 }
             }
             if (wantTraces) {
@@ -653,7 +818,7 @@ class MainActivity : Activity() {
      */
     private fun rebuildWxFrames() {
         val keep = wxFrames.getOrNull(wxIndex)?.timeMs
-        val hours = if (radarEnabled || windEnabled || tempEnabled || cloudEnabled) {
+        val hours = if (wantRadar || wantWind || wantTemp || wantCloud) {
             wxField?.hours() ?: emptyList()
         } else {
             emptyList()
@@ -696,7 +861,7 @@ class MainActivity : Activity() {
             return
         }
         val bounds = map.viewportBounds()
-        if (radarEnabled) {
+        if (wantRadar) {
             Radar.tiles(bounds, frame) { tiles ->
                 if (!alive) return@tiles
                 map.setRadar(tiles)
@@ -717,6 +882,7 @@ class MainActivity : Activity() {
         val hour = field?.hourIndex(frame.timeMs) ?: -1
         drawWeatherField(field, hour, frame)
         drawWind(field, hour)
+        showTemperature(field, hour)
         wxLabel.text = frameLabel(frame) + readings(field, hour)
         showLegend(frame, field != null && hour >= 0)
     }
@@ -737,7 +903,7 @@ class MainActivity : Activity() {
         // over a temperature field — so the key names both. It used to name
         // only the radar, which left a blue-to-red field across his map with
         // nothing anywhere saying what it meant.
-        val radar = if (radarEnabled && frame.radarPath != null) Radar.schemeNow() else 0
+        val radar = if (wantRadar && frame.radarPath != null) Radar.schemeNow() else 0
         // The scale named is the one actually being fetched. If the server
         // refused his choice, the tiles are the fallback's colours and a key
         // still naming his preference is a key that describes nothing on the
@@ -753,17 +919,14 @@ class MainActivity : Activity() {
                 wxLegend.addView(legendNote("Forecast rain"))
                 for ((mm, name) in RAIN_KEY) wxLegend.addView(legendChip(name, Ramp.rain(mm)))
             }
-            "temp" -> {
-                wxLegend.addView(legendNote("Temp"))
-                for (c in intArrayOf(0, 8, 15, 22, 28)) {
-                    wxLegend.addView(legendChip("$c°", Ramp.temperature(c.toDouble())))
-                }
-            }
             "cloud" -> {
-                wxLegend.addView(legendNote("Cloud"))
-                wxLegend.addView(legendChip("clear", Ramp.cloud(0.0)))
+                // No swatch for clear sky, because clear sky has no swatch:
+                // the map is simply left alone, and saying so in words is
+                // the honest key for it.
+                wxLegend.addView(legendNote("Cloud — clear map is clear sky"))
                 wxLegend.addView(legendChip("half", Ramp.cloud(55.0)))
-                wxLegend.addView(legendChip("dull", Ramp.cloud(100.0)))
+                wxLegend.addView(legendChip("dull", Ramp.cloud(80.0)))
+                wxLegend.addView(legendChip("full", Ramp.cloud(100.0)))
             }
         }
     }
@@ -774,9 +937,8 @@ class MainActivity : Activity() {
      * on the map with no words for it.
      */
     private fun washKind(frame: WxFrame): String = when {
-        radarEnabled && frame.radarPath == null -> "rain"
-        tempEnabled -> "temp"
-        cloudEnabled -> "cloud"
+        wantRadar && frame.radarPath == null -> "rain"
+        wantCloud -> "cloud"
         else -> ""
     }
 
@@ -824,26 +986,92 @@ class MainActivity : Activity() {
         )
         when (washKind(frame)) {
             "rain" -> map.setField(tile(field.rain[hour]) { Ramp.rain(it) }, 255)
-            "temp" -> map.setField(tile(field.temp[hour]) { Ramp.temperature(it) }, 125)
             "cloud" -> map.setField(tile(field.cloud[hour]) { Ramp.cloud(it) }, 255)
             else -> map.setField(null, 255)
         }
     }
 
+    /**
+     * The wind, drawn either as lines drifting the way the air is going or
+     * as one arrow per reading.
+     *
+     * Streamlines came out of him saying the arrows were hard to understand,
+     * and they are: twenty-five separate arrows are twenty-five things to
+     * look at and join up in your head, where flow is one picture. The
+     * numbers do not go away — the reading in the bar still gives the real
+     * speed and the direction a forecast would state it in, because a moving
+     * picture is for "which way and roughly how hard", never for "18 mph".
+     */
     private fun drawWind(field: Weather.Field?, hour: Int) {
-        if (!windEnabled || field == null || hour < 0) {
+        if (!wantWind || field == null || hour < 0) {
             map.setWind(emptyList())
+            map.setWind(null, windStyle == 1)
             return
         }
-        val arrows = ArrayList<BngMapView.WindArrow>()
-        for (i in field.lat.indices) {
+        if (windStyle == 1) {
+            map.setWind(emptyList())
+            map.setWind(windGrid(field, hour), true)
+        } else {
+            map.setWind(null, false)
+            val arrows = ArrayList<BngMapView.WindArrow>()
+            for (i in field.lat.indices) {
+                val speed = field.windSpeed[hour][i]
+                val from = field.windDir[hour][i]
+                if (speed.isNaN() || from.isNaN()) continue
+                val en = Bng.fromWgs84(field.lat[i], field.lon[i])
+                arrows.add(BngMapView.WindArrow(en.e, en.n, speed, from))
+            }
+            map.setWind(arrows)
+        }
+    }
+
+    /**
+     * The forecast's wind readings as eastward and northward components on a
+     * National Grid box, which is what the animation can interpolate between.
+     *
+     * Components rather than speed and bearing, because averaging two
+     * bearings either side of north gives south. The grid is a lat/lon
+     * rectangle being treated as a grid-aligned one — a rotation of a degree
+     * or two in Wales, far under the few kilometres between readings.
+     */
+    private fun windGrid(field: Weather.Field, hour: Int): BngMapView.WindGrid? {
+        val n = Weather.GRID
+        if (field.lat.size < n * n) return null
+        var west = Double.MAX_VALUE
+        var east = -Double.MAX_VALUE
+        var south = Double.MAX_VALUE
+        var north = -Double.MAX_VALUE
+        val u = DoubleArray(n * n) { Double.NaN }
+        val v = DoubleArray(n * n) { Double.NaN }
+        for (i in 0 until n * n) {
+            val en = Bng.fromWgs84(field.lat[i], field.lon[i])
+            if (en.e < west) west = en.e
+            if (en.e > east) east = en.e
+            if (en.n < south) south = en.n
+            if (en.n > north) north = en.n
             val speed = field.windSpeed[hour][i]
             val from = field.windDir[hour][i]
             if (speed.isNaN() || from.isNaN()) continue
-            val en = Bng.fromWgs84(field.lat[i], field.lon[i])
-            arrows.add(BngMapView.WindArrow(en.e, en.n, speed, from))
+            // Metres per second, going where it is going rather than coming
+            // from where it came.
+            val ms = speed * 0.44704
+            val rad = Math.toRadians(from)
+            u[i] = -ms * kotlin.math.sin(rad)
+            v[i] = -ms * kotlin.math.cos(rad)
         }
-        map.setWind(arrows)
+        if (east <= west || north <= south) return null
+        return BngMapView.WindGrid(west, south, east, north, n, u, v)
+    }
+
+    /** Temperature as a figure. A wash of colour across the whole map said
+     *  less than two characters do, and buried the contours saying it. */
+    private fun showTemperature(field: Weather.Field?, hour: Int) {
+        if (!wantTemp || field == null || hour < 0) { tempChip.visibility = View.GONE; return }
+        val centre = (Weather.GRID / 2) * Weather.GRID + Weather.GRID / 2
+        val t = if (centre < field.lat.size) field.temp[hour][centre] else Double.NaN
+        if (t.isNaN()) { tempChip.visibility = View.GONE; return }
+        tempChip.text = "${t.roundToInt()}°C"
+        tempChip.visibility = View.VISIBLE
     }
 
     /**
@@ -856,16 +1084,22 @@ class MainActivity : Activity() {
         val centre = (Weather.GRID / 2) * Weather.GRID + Weather.GRID / 2
         if (centre >= field.lat.size) return ""
         val sb = StringBuilder()
-        val temp = field.temp[hour][centre]
-        if (!temp.isNaN()) sb.append(" · ${temp.roundToInt()}°C")
-        val speed = field.windSpeed[hour][centre]
-        val from = field.windDir[hour][centre]
-        if (!speed.isNaN() && !from.isNaN()) {
-            sb.append(" · ${Sun.compass(from)} ${speed.roundToInt()} mph")
+        // Temperature has its own figure on the map now, so it is not
+        // repeated here. Each reading appears only if its layer is on: a
+        // label describing layers he switched off is a label he stops
+        // reading.
+        if (wantWind) {
+            val speed = field.windSpeed[hour][centre]
+            val from = field.windDir[hour][centre]
+            if (!speed.isNaN() && !from.isNaN()) {
+                sb.append(" · ${Sun.compass(from)} ${speed.roundToInt()} mph")
+            }
         }
-        val cloud = field.cloud[hour][centre]
-        if (!cloud.isNaN()) {
-            sb.append(if (cloud < 20) " · sunny" else " · ${cloud.roundToInt()}% cloud")
+        if (wantCloud) {
+            val cloud = field.cloud[hour][centre]
+            if (!cloud.isNaN()) {
+                sb.append(if (cloud < 25) " · clear" else " · ${cloud.roundToInt()}% cloud")
+            }
         }
         return sb.toString()
     }
@@ -1305,11 +1539,27 @@ class MainActivity : Activity() {
 
     // --- the assistant -------------------------------------------------------
 
+    /** The whole conversation, on its own screen, with the map's fix in hand. */
+    private fun openChat(prefill: String? = null) {
+        val i = Intent(this, ChatActivity::class.java)
+        lastFix?.let {
+            i.putExtra("e", it.e)
+            i.putExtra("n", it.n)
+            i.putExtra(
+                "fixAge",
+                if (lastFixAt == 0L) Long.MAX_VALUE else System.currentTimeMillis() - lastFixAt,
+            )
+        }
+        if (!prefill.isNullOrBlank()) i.putExtra("ask", prefill)
+        startActivity(i)
+    }
+
     private fun sendAsk() {
         val question = askBox.text.toString().trim()
         if (question.isEmpty() || askBusy) return
         askBusy = true
         askBox.setText("")
+        Talk.add(this, Said(true, question))
         replyText.text = "…"
         replyPanel.visibility = View.VISIBLE
 
@@ -1319,6 +1569,10 @@ class MainActivity : Activity() {
         scope.launch {
             val reply = withContext(Dispatchers.IO) { assistant.ask(question) }
 
+            Talk.add(
+                this@MainActivity,
+                Said(false, reply.text, reply.actions.map { it.summary }),
+            )
             val sb = StringBuilder(reply.text)
             if (reply.actions.isNotEmpty()) {
                 sb.append("\n")

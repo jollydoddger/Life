@@ -37,16 +37,27 @@ class RampTest {
     }
 
     @Test
-    fun clearSkyIsMarkedGoldAndOvercastIsGrey() {
-        val clear = Ramp.cloud(0.0)
+    fun clearSkyLeavesTheMapAloneAndCloudGreysIn() {
+        // This used to assert the opposite — a gold wash marking clear sky.
+        // It was replaced because cloud is under a quarter over most of a
+        // viewport most of the time, so the gold was almost never a finding
+        // and almost always a film over the whole map, sitting on the
+        // contours and path lines being navigated by.
+        assertEquals(0L, alpha(Ramp.cloud(0.0)).toLong())
+        assertEquals(0L, alpha(Ramp.cloud(24.9)).toLong())
+        // From there it only thickens, and never becomes opaque: the map
+        // underneath is the thing he is actually walking on.
+        var last = -1
+        for (pct in intArrayOf(25, 40, 60, 80, 100)) {
+            val a = alpha(Ramp.cloud(pct.toDouble()))
+            assertTrue("cloud at $pct% should be no thinner than below it", a >= last)
+            last = a
+        }
+        assertTrue("overcast must not hide the map", last < 220)
         val dull = Ramp.cloud(100.0)
         fun red(c: Int) = (c shr 16) and 0xFF
         fun blue(c: Int) = c and 0xFF
-        assertTrue("clear sky should read warm", red(clear) > blue(clear) + 40)
         assertTrue("overcast should read neutral", kotlin.math.abs(red(dull) - blue(dull)) < 40)
-        // Nearly clear is the least ink on the map: the point is to see it.
-        assertTrue(alpha(Ramp.cloud(30.0)) < alpha(Ramp.cloud(0.0)))
-        assertTrue(alpha(Ramp.cloud(30.0)) < alpha(Ramp.cloud(100.0)))
     }
 
     @Test

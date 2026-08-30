@@ -61,6 +61,13 @@
             android:exported="false"
             android:screenOrientation="portrait" />
 
+        <!-- The whole conversation. Its own screen because a transcript over
+             a map is either too small to read or too big to see past. -->
+        <activity
+            android:name=".ChatActivity"
+            android:exported="false"
+            android:windowSoftInputMode="adjustResize" />
+
         <!-- Hands one exported GPX at a time to the share sheet. Not
              exported: targets reach it only through the temporary grant the
              share Intent carries. -->
