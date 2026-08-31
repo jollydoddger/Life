@@ -48,6 +48,9 @@ class Assistant(private val ctx: Context, private val tools: GeoTools) {
         "find_walks" -> "searching walking routes…"
         "download_gpx" -> "downloading a GPX…"
         "walk_sites" -> "checking his walking sites…"
+        "read_index_page" -> "reading the walk list…"
+        "index_walks" -> "remembering those walks…"
+        "find_indexed_walks" -> "checking his walk index…"
         "add_walk_site" -> "adding a walking site…"
         "walk_brief" -> "putting the walk brief together…"
         "weather" -> "reading the weather…"
@@ -194,6 +197,24 @@ class Assistant(private val ctx: Context, private val tools: GeoTools) {
                 result
             }
             "walk_sites" -> tools.walkSites(flag("all"))
+            "read_index_page" -> tools.readIndexPage(str("url"))
+            "find_indexed_walks" -> tools.findIndexedWalks(str("text"), num("within_km"))
+            "index_walks" -> {
+                val rows = (input["walks"] as? List<*>).orEmpty().mapNotNull { row ->
+                    val m = row as? Map<*, *> ?: return@mapNotNull null
+                    Triple(
+                        (m["name"] as? String).orEmpty(),
+                        (m["url"] as? String).orEmpty(),
+                        doubleArrayOf(
+                            (m["lat"] as? Number)?.toDouble() ?: Double.NaN,
+                            (m["lon"] as? Number)?.toDouble() ?: Double.NaN,
+                        ),
+                    )
+                }
+                val result = tools.indexWalks(str("host"), str("area"), rows)
+                if (result.startsWith("Indexed")) actions += Action(result.substringBefore('.'))
+                result
+            }
             "add_walk_site" -> {
                 val result = tools.addWalkSite(
                     str("host"), str("name"), str("finding"),
@@ -353,8 +374,13 @@ class Assistant(private val ctx: Context, private val tools: GeoTools) {
             offer to try again, never report it as "no paths here".
 
             When he wants an established, walked-and-written-up route rather
-            than a planned one, chain walk_sites with download_gpx. CALL
-            walk_sites FIRST: it is his own curated list of walking websites
+            than a planned one, START WITH find_indexed_walks — his own index
+            of walks already found, searched instantly and for nothing. If it
+            has what he wants, hand the URL to download_gpx and you are done.
+            Only when it does not, chain walk_sites with download_gpx, and
+            when you read an area page on the way, index_walks what you found
+            so the same question is instant next time. CALL walk_sites FIRST
+            in that case: it is his own curated list of walking websites
             with a recipe for each — where that site's area indexes live, how
             to reach a walk's GPX, and what the site allows. Follow the
             recipe rather than guessing at a layout, and treat each site's
@@ -573,6 +599,72 @@ class Assistant(private val ctx: Context, private val tools: GeoTools) {
                         ),
                     ),
                     emptyList(),
+                ),
+            ),
+            tool(
+                "find_indexed_walks",
+                "SEARCH HIS OWN INDEX OF WALKS FIRST, before any web search — it is " +
+                    "instant, free, and holds walks already found on his sites with the " +
+                    "page to get each one from. Hand any result straight to download_gpx. " +
+                    "Only go to the web when this comes back with nothing useful.",
+                schema(
+                    mapOf(
+                        "text" to property(
+                            "string",
+                            "Words to match against walk name and area — a place, a hill, " +
+                                "\"coast\". Empty matches on position alone.",
+                        ),
+                        "within_km" to property(
+                            "number",
+                            "How far from him to look, for walks whose position is known. " +
+                                "Default 25.",
+                        ),
+                    ),
+                    emptyList(),
+                ),
+            ),
+            tool(
+                "read_index_page",
+                "Read the links off a walking site's area index or contents page — the " +
+                    "walk names and where each one points. This is how the index gets " +
+                    "filled: read one area page, pick out the walks, then index_walks " +
+                    "them so every later search of that area is instant. One page, not " +
+                    "a site: never walk a whole site through this. It cannot run " +
+                    "scripts, so a page built by JavaScript comes back empty and he " +
+                    "gets the link instead.",
+                schema(
+                    mapOf("url" to property("string", "The index or contents page URL.")),
+                    listOf("url"),
+                ),
+            ),
+            tool(
+                "index_walks",
+                "Record walks you have just read off an index page, so they can be " +
+                    "found instantly next time. Give the position when the page tells " +
+                    "you where the walk is — a located walk answers \"near me\", a " +
+                    "named one only answers \"called this\".",
+                schema(
+                    mapOf(
+                        "host" to property("string", "Site the walks came from, e.g. walkingenglishman.com."),
+                        "area" to property("string", "What that site calls the area, e.g. Anglesey."),
+                        "walks" to JsonValue.from(
+                            mapOf(
+                                "type" to "array",
+                                "description" to "The walks found on the page.",
+                                "items" to mapOf(
+                                    "type" to "object",
+                                    "properties" to mapOf(
+                                        "name" to mapOf("type" to "string"),
+                                        "url" to mapOf("type" to "string"),
+                                        "lat" to mapOf("type" to "number"),
+                                        "lon" to mapOf("type" to "number"),
+                                    ),
+                                    "required" to listOf("name", "url"),
+                                ),
+                            ),
+                        ),
+                    ),
+                    listOf("host", "walks"),
                 ),
             ),
             tool(

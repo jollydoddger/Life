@@ -685,6 +685,112 @@ class GeoTools(
             "\u201CWalks on this map\u201D in the GPX menu finds it again any time."
     }
 
+    /**
+     * The links on an index page, with the words they were written as.
+     *
+     * The missing piece under the walk index. download_gpx can already find
+     * a .gpx link, but a contents page is a list of *walk names* pointing at
+     * walk pages, and nothing could see those — so every search started from
+     * a web search and a guess. This hands the assistant the page's links so
+     * it can read off "Rhoscolyn Headland → /walk-1702-description" and
+     * index it.
+     *
+     * Deliberately narrow rather than a general page reader: links and their
+     * text, capped, nothing else. It goes through the same host caps as a
+     * download, so a site that sells bulk access cannot be enumerated
+     * through this door either.
+     */
+    fun readIndexPage(url: String): String {
+        val lower = url.lowercase()
+        if (!lower.startsWith("http://") && !lower.startsWith("https://")) {
+            return "Failed: only an http(s) link."
+        }
+        for (banned in listOf("alltrails", "komoot", "osmaps", "ordnancesurvey")) {
+            if (banned in lower) return "Failed: $banned is off-limits (their terms)."
+        }
+        WalkSites.mayFetch(ctx, url)?.let { return "Failed: $it" }
+        progress("Reading the walk list…")
+        val html = try {
+            Net.stream(url, timeoutMs = 20_000) { input ->
+                val out = java.io.ByteArrayOutputStream()
+                val buf = ByteArray(8 * 1024)
+                while (true) {
+                    val n = input.read(buf)
+                    if (n < 0) break
+                    out.write(buf, 0, n)
+                    if (out.size() > MAX_PAGE_BYTES) break
+                }
+                String(out.toByteArray(), Charsets.UTF_8)
+            }
+        } catch (e: Exception) {
+            return "Failed: couldn't read that page (${e.message ?: "no connection"}). " +
+                handItOver(url)
+        }
+        WalkSites.noteFetch(ctx, url)
+
+        val base = runCatching { java.net.URI(url) }.getOrNull()
+        val links = LinkedHashMap<String, String>()
+        val re = Regex(
+            "<a\\s[^>]*href=[\"']([^\"'>]+)[\"'][^>]*>(.*?)</a>",
+            setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL),
+        )
+        for (m in re.findAll(html)) {
+            val href = m.groupValues[1].trim()
+            val words = m.groupValues[2]
+                .replace(Regex("<[^>]*>"), " ")
+                .replace(Regex("\\s+"), " ")
+                .trim()
+            if (words.length < 3 || href.startsWith("#") || href.startsWith("javascript:")) continue
+            val abs = runCatching { base?.resolve(href)?.toString() }.getOrNull() ?: href
+            if (!abs.lowercase().startsWith("http")) continue
+            if (abs !in links) links[abs] = words
+            if (links.size >= MAX_LINKS) break
+        }
+        if (links.isEmpty()) {
+            return "That page has no readable links — it is probably built by a script, " +
+                "which this app cannot run. " + handItOver(url)
+        }
+        return "${links.size} links on that page. Pick the ones that are walks and " +
+            "index_walks them:\n" +
+            links.entries.joinToString("\n") { "- ${it.value} → ${it.key}" }
+    }
+
+    private val MAX_PAGE_BYTES = 2_000_000
+    private val MAX_LINKS = 150
+
+    /** Record walks read off an index page, so the next search is instant. */
+    fun indexWalks(host: String, area: String, walks: List<Triple<String, String, DoubleArray>>): String {
+        val entries = walks.mapNotNull { (name, url, point) ->
+            if (name.isBlank() || url.isBlank()) return@mapNotNull null
+            IndexedWalk(
+                host = host.lowercase().removePrefix("www."),
+                name = name.trim(),
+                area = area.trim(),
+                url = url.trim(),
+                lat = point.getOrElse(0) { Double.NaN },
+                lon = point.getOrElse(1) { Double.NaN },
+            )
+        }
+        if (entries.isEmpty()) return "Nothing to index — every entry was missing a name or a URL."
+        val fresh = WalkIndex.add(ctx, entries)
+        return "Indexed ${entries.size} walks from $host (${fresh} new). " +
+            WalkIndex.summary(ctx)
+    }
+
+    /** The index, searched. Never listed — it holds thousands. */
+    fun findIndexedWalks(text: String, withinKm: Double): String {
+        val near = fix()
+        val within = if (withinKm <= 0) 25.0 else withinKm
+        val hits = WalkIndex.search(ctx, text, near, within)
+        if (hits.isEmpty()) {
+            return "Nothing indexed matches. " + WalkIndex.summary(ctx) +
+                " Read an area index page with read_index_page and index_walks it, " +
+                "and the next search of that area is instant."
+        }
+        return "From his own index:\n" + WalkIndex.render(ctx, hits) +
+            "\nHand any of these to download_gpx."
+    }
+
     /** His walking sites and how each one works — the assistant reads this
      *  before going looking, so it navigates rather than guesses. */
     fun walkSites(everywhere: Boolean): String {
