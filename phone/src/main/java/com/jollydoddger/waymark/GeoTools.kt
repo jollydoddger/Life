@@ -615,6 +615,12 @@ class GeoTools(
             for (banned in listOf("alltrails", "komoot", "osmaps", "ordnancesurvey")) {
                 if (banned in lower) return "Failed: $banned links are off-limits (their terms)."
             }
+            // What his own site list says about this host. Only checked on
+            // the first hop: the second is following a link found on a page
+            // already fetched, which is one download, not two.
+            if (hop == 0) {
+                WalkSites.mayFetch(ctx, target)?.let { return "Failed: $it" }
+            }
             progress(if (hop == 0) "Downloading…" else "Following the GPX link on that page…")
             val got = try {
                 Net.stream(target, timeoutMs = 20_000) { input ->
@@ -662,6 +668,7 @@ class GeoTools(
         val name = route.name.ifBlank { "Downloaded route" }
         // Kept as a file, not just a picker entry: the queue expires, the
         // folder doesn't, and every walk search reads it from now on.
+        WalkSites.noteFetch(ctx, url)
         val saved = runCatching { Downloads.save(ctx, name, data) }.getOrNull()
         val walk = RouteFinder.FoundWalk(
             name = name,
@@ -676,6 +683,45 @@ class GeoTools(
             (fix()?.let { ", line ${km(walk.closestM)} from him" } ?: "") +
             ". Queued on the map picker and saved to his downloads — " +
             "\u201CWalks on this map\u201D in the GPX menu finds it again any time."
+    }
+
+    /** His walking sites and how each one works — the assistant reads this
+     *  before going looking, so it navigates rather than guesses. */
+    fun walkSites(): String = WalkSites.render(ctx)
+
+    /**
+     * Add a site to the list. The rule is the load-bearing field: it is what
+     * stops the next search treating a site that sells bulk access the same
+     * as one giving files away.
+     */
+    fun addWalkSite(
+        host: String,
+        name: String,
+        finding: String,
+        getting: String,
+        rule: String,
+        note: String,
+    ): String {
+        val cleaned = host.trim().lowercase()
+            .removePrefix("https://").removePrefix("http://")
+            .removePrefix("www.").substringBefore('/')
+        if (cleaned.isBlank() || '.' !in cleaned) {
+            return "Failed: \"$host\" is not a hostname."
+        }
+        val parsed = runCatching { Rule.valueOf(rule.trim().uppercase()) }.getOrNull()
+            ?: return "Failed: rule must be OPEN, GATED or SELLS_BULK — got \"$rule\"."
+        WalkSites.add(
+            ctx,
+            SiteGuide(
+                host = cleaned,
+                name = name.ifBlank { cleaned },
+                finding = finding,
+                getting = getting,
+                rule = parsed,
+                note = note,
+            ),
+        )
+        return "Added $cleaned as ${parsed.short}. It is in the list from now on."
     }
 
     /**

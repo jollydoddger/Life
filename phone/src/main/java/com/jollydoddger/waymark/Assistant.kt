@@ -47,6 +47,8 @@ class Assistant(private val ctx: Context, private val tools: GeoTools) {
         "plan_route" -> "planning a route on the path network…"
         "find_walks" -> "searching walking routes…"
         "download_gpx" -> "downloading a GPX…"
+        "walk_sites" -> "checking his walking sites…"
+        "add_walk_site" -> "adding a walking site…"
         "walk_brief" -> "putting the walk brief together…"
         "weather" -> "reading the weather…"
         "find_places" -> "searching the map for places…"
@@ -189,6 +191,15 @@ class Assistant(private val ctx: Context, private val tools: GeoTools) {
                 if ("queued on the map" in result) {
                     actions += Action("Queued walks on the map's picker")
                 }
+                result
+            }
+            "walk_sites" -> tools.walkSites()
+            "add_walk_site" -> {
+                val result = tools.addWalkSite(
+                    str("host"), str("name"), str("finding"),
+                    str("getting"), str("rule"), str("note"),
+                )
+                if (result.startsWith("Added")) actions += Action(result.substringBefore('.'))
                 result
             }
             "download_gpx" -> {
@@ -342,11 +353,22 @@ class Assistant(private val ctx: Context, private val tools: GeoTools) {
             offer to try again, never report it as "no paths here".
 
             When he wants an established, walked-and-written-up route rather
-            than a planned one, chain web_search with download_gpx: search the
-            free walking sites (gps-routes.co.uk, walkingclub.org.uk,
-            walkingbritain.co.uk, and council or national-park walk pages all
-            offer free GPX downloads), then hand download_gpx the walk's own
-            page — it digs the GPX link out itself. Several candidates beat
+            than a planned one, chain walk_sites with download_gpx. CALL
+            walk_sites FIRST: it is his own curated list of walking websites
+            with a recipe for each — where that site's area indexes live, how
+            to reach a walk's GPX, and what the site allows. Follow the
+            recipe rather than guessing at a layout, and treat each site's
+            rule as binding: a GATED site's download sits behind a
+            click-through, so give him the page link and never go hunting for
+            the file URL behind the gate; a SELLS_BULK site charges for bulk
+            access, so fetch the one walk he asked about and never enumerate
+            an area. For a host with no recipe, web_search still works
+            (gps-routes.co.uk, walkingclub.org.uk, and council or
+            national-park walk pages all offer free GPX downloads) — and if
+            it turns out to be a good one, add_walk_site records how it
+            works so the next search is not starting cold. Either way, hand
+            download_gpx the walk's own page — it digs the GPX link out
+            itself. Several candidates beat
             one: download the plausible ones and they all land on the map's
             picker for him to flick through. When download_gpx cannot get a
             file — a login, a script-only button, a refused site — do not
@@ -530,14 +552,55 @@ class Assistant(private val ctx: Context, private val tools: GeoTools) {
                 ),
             ),
             tool(
+                "walk_sites",
+                "His curated list of free walking websites and how each one works — " +
+                    "where its area indexes are, how to reach a walk's GPX, and what " +
+                    "that site allows. CALL THIS FIRST whenever he asks for walks in an " +
+                    "area: the recipes save guessing at a site's layout, and the rule on " +
+                    "each one is not advice. A GATED site's download is behind a " +
+                    "click-through: give him the page link and never hunt for the file " +
+                    "URL behind it. A SELLS_BULK site charges for bulk access: fetch the " +
+                    "one walk he asked about and never enumerate an area.",
+                schema(emptyMap(), emptyList()),
+            ),
+            tool(
+                "add_walk_site",
+                "Add a walking website to his list so future searches know how to use " +
+                    "it. Look at the site first and describe what you actually found.",
+                schema(
+                    mapOf(
+                        "host" to property("string", "Bare hostname, e.g. walkingenglishman.com."),
+                        "name" to property("string", "Readable name of the site."),
+                        "finding" to property(
+                            "string",
+                            "How to find walks for an area there — index page URL patterns.",
+                        ),
+                        "getting" to property(
+                            "string",
+                            "How to get from a walk page to its GPX file.",
+                        ),
+                        "rule" to property(
+                            "string",
+                            "OPEN (free plain .gpx links), GATED (download behind a " +
+                                "click-through or script), or SELLS_BULK (free per walk, " +
+                                "but bulk download is a paid membership).",
+                        ),
+                        "note" to property("string", "Anything else worth knowing. May be empty."),
+                    ),
+                    listOf("host", "name", "finding", "getting", "rule"),
+                ),
+            ),
+            tool(
                 "download_gpx",
                 "Download a GPX route and queue it on the map's picker for him to " +
                     "flick through, preview and take — never loaded straight onto the " +
                     "route. Give it either the .gpx file's own URL or the WALK'S PAGE " +
                     "from a walking website: a page is read for its .gpx links, one is " +
                     "followed automatically, several are returned for you to pick from. " +
-                    "Free-download sites are fine; NEVER AllTrails, komoot or OS Maps " +
-                    "links — their terms forbid it and the tool refuses them.",
+                    "Check walk_sites first for a recipe covering the host — it saves " +
+                    "guessing, and it says what that site allows. Free-download sites " +
+                    "are fine; NEVER AllTrails, komoot or OS Maps links — their terms " +
+                    "forbid it and the tool refuses them.",
                 schema(
                     mapOf(
                         "url" to property(
