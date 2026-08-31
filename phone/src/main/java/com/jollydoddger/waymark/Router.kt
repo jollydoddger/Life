@@ -658,26 +658,7 @@ object Router {
     private const val GOOD_REPEAT = 0.10
 
     /**
-     * A circular walk of about [targetM], starting and finishing at [start].
-     *
-     * "Circular" is the word he used, and it has to mean a circuit — not a
-     * line with branches hanging off it. Three things make it one. Corners
-     * are hung on **junctions**, because a waypoint at a dead end can only be
-     * reached and left the same way. Re-walking an edge costs ten times what
-     * walking it fresh does, so coming home round the other side beats
-     * turning round. And whatever still doubles back is [prune]d out
-     * afterwards — the only one of the three that is a guarantee rather than
-     * an incentive.
-     *
-     * Candidates are scored on shape as well as length: a loop 15% long but
-     * clean beats one that measures exactly right and retraces a quarter of
-     * itself. He said the distance can give; the shape cannot.
-     *
-     * The search itself is deliberately broad — three circle sizes, two
-     * starting bearings, three and four corners, clockwise and anticlockwise
-     * — because on a thin network most of those come back with nothing. It
-     * stops at the first candidate that is good on both counts, so the breadth
-     * costs nothing on the ordinary day when the first shape fits.
+     * A circular walk of about [targetM] — the best of [loops].
      */
     fun loop(
         g: Graph,
@@ -688,17 +669,116 @@ object Router {
         startSlackM: Double = START_SLACK_M,
         isCancelled: () -> Boolean = { false },
         onProgress: (String) -> Unit = {},
-    ): Planned? {
+    ): Planned? =
+        loops(g, start, targetM, deadlineMs, avoidRoads, startSlackM, 1, isCancelled, onProgress)
+            .firstOrNull()
+
+    /** How alike two circuits may be and still both be offered: share more
+     *  ground than this and the second is the first wearing a hat. */
+    private const val DISTINCT_OVERLAP = 0.5
+
+    /** Near-identical: the same candidate found again down a different
+     *  branch of the search, kept once at its better score. */
+    private const val SAME_OVERLAP = 0.9
+
+    private class Candidate(val planned: Planned, val edges: HashSet<Long>, val score: Double)
+
+    /**
+     * Up to [wanted] genuinely different circular walks of about [targetM],
+     * best first.
+     *
+     * Two changes of heart over the single-answer version, both his.
+     *
+     * "Doesn't quite hit the mark" was partly the scoring: a candidate was
+     * judged on its length and how much it doubled back, and on nothing
+     * else — so a loop that measured right but spent a third of itself on
+     * lanes beat a prettier one 10% long. The score now reads the ground
+     * off the walk itself: road metres count against it, waymarked-trail
+     * metres count for it, both measured the way the road summary already
+     * is, never estimated.
+     *
+     * And it used to stop at the first candidate that cleared the bar, with
+     * most of its ninety seconds unspent, throwing away every other circuit
+     * it had closed on the way. Now everything that closes is kept, scored,
+     * and deduplicated by the ground it covers — two loops sharing most of
+     * their edges are one loop found twice — and the search only stops
+     * early once it holds [wanted] good ones that are genuinely different
+     * walks. "Go to an area and have loads of walks" starts here: one
+     * network fetch, several answers.
+     *
+     * Corners still hang on junctions, re-walked edges still cost tenfold,
+     * and whatever doubles back is still pruned — the things that make
+     * "circular" mean a circuit are unchanged.
+     */
+    fun loops(
+        g: Graph,
+        start: En,
+        targetM: Double,
+        deadlineMs: Long = Long.MAX_VALUE,
+        avoidRoads: Boolean = true,
+        startSlackM: Double = START_SLACK_M,
+        wanted: Int = 3,
+        isCancelled: () -> Boolean = { false },
+        onProgress: (String) -> Unit = {},
+    ): List<Planned> {
         val startNodes = startsFor(g, start, startSlackM)
-        if (startNodes.isEmpty()) return null
+        if (startNodes.isEmpty()) return emptyList()
 
         var base = targetM / (2 * Math.PI)
-        var best: Planned? = null
-        var bestScore = Double.MAX_VALUE
+        val kept = ArrayList<Candidate>()
         var tried = 0
-        var closed = 0
 
         fun outOfTime() = System.currentTimeMillis() > deadlineMs || isCancelled()
+
+        fun overlap(a: HashSet<Long>, b: HashSet<Long>): Double {
+            val small = if (a.size < b.size) a else b
+            val large = if (a.size < b.size) b else a
+            if (small.isEmpty()) return 0.0
+            var both = 0
+            for (k in small) if (k in large) both++
+            return both.toDouble() / small.size
+        }
+
+        fun isGood(c: Candidate): Boolean {
+            val err = abs(c.planned.metres - targetM) / targetM
+            return err < GOOD_ERROR && c.planned.repeatFraction < GOOD_REPEAT
+        }
+
+        /** Best-first greedy pick of circuits that share under half their
+         *  ground — the list that is actually returned. */
+        fun distinct(): List<Candidate> {
+            val ranked = kept.sortedBy { it.score }
+            val out = ArrayList<Candidate>()
+            for (c in ranked) {
+                if (out.size >= wanted) break
+                if (out.none { overlap(it.edges, c.edges) > DISTINCT_OVERLAP }) out.add(c)
+            }
+            return out
+        }
+
+        fun keep(planned: Planned, edges: HashSet<Long>): Candidate {
+            val err = abs(planned.metres - targetM) / targetM
+            // The ground, read off the walk: roads count against a
+            // candidate, a waymarked trail counts for it. The weights are
+            // stated here because they are a judgement — a loop would give
+            // up ~8% of length accuracy to lose 10% of itself from roads.
+            val score = err +
+                planned.repeatFraction * 1.5 +
+                (planned.roadMetres() / planned.metres) * 0.8 -
+                (planned.trailM / planned.metres) * 0.3
+            val c = Candidate(planned, edges, score)
+            val twin = kept.firstOrNull { overlap(it.edges, edges) > SAME_OVERLAP }
+            if (twin != null) {
+                if (score < twin.score) { kept.remove(twin); kept.add(c) }
+            } else {
+                kept.add(c)
+            }
+            if (kept.size > 40) {
+                kept.sortBy { it.score }
+                while (kept.size > 24) kept.removeAt(kept.size - 1)
+            }
+            return c
+        }
 
         for (attempt in 0 until 3) {
             if (outOfTime()) break
@@ -751,40 +831,49 @@ object Router {
                                 // reported finding nothing at all — a worse
                                 // answer than the loop it was holding.
                                 if (planned.metres < MIN_LOOP_M) continue
-                                closed++
-                                val err = kotlin.math.abs(planned.metres - targetM) / targetM
-                                val score = err + planned.repeatFraction * 1.5
-                                if (score < roundScore) { roundScore = score; round = planned }
-                                if (score < bestScore) { bestScore = score; best = planned }
-                                if (err < GOOD_ERROR && planned.repeatFraction < GOOD_REPEAT) {
-                                    enough = true
-                                    break
+                                val keys = HashSet<Long>(circuit.size)
+                                for (i in 1 until circuit.size) {
+                                    keys.add(edgeKey(circuit[i - 1], circuit[i]))
+                                }
+                                val c = keep(planned, keys)
+                                if (c.score < roundScore) { roundScore = c.score; round = planned }
+                                // Early out only once there are enough GOOD
+                                // circuits that are genuinely different
+                                // walks — one nearly-right answer no longer
+                                // ends a search with a minute in hand.
+                                if (isGood(c)) {
+                                    val goodDistinct = distinct().count { isGood(it) }
+                                    if (goodDistinct >= wanted) {
+                                        enough = true
+                                        break
+                                    }
                                 }
                             }
                         }
                     }
                 }
             }
+            if (enough) break
             val r = round
             if (r == null) {
                 onProgress("Round ${attempt + 1}: nothing closed yet, trying a different shape…")
                 base *= 0.8
                 continue
             }
-            val err = kotlin.math.abs(r.metres - targetM) / targetM
+            val err = abs(r.metres - targetM) / targetM
             onProgress(
                 "Round ${attempt + 1}: ${"%.1f".format(r.metres / 1000)} km" +
                     (if (r.repeatFraction > 0.12) ", still doubling back…" else "…"),
             )
-            if (err < GOOD_ERROR && r.repeatFraction < GOOD_REPEAT) return best
+            if (err < GOOD_ERROR && r.repeatFraction < GOOD_REPEAT && kept.size >= wanted) break
             base *= (targetM / r.metres).coerceIn(0.55, 1.8)
         }
-        if (best == null && tried > 0) {
+        if (kept.isEmpty() && tried > 0) {
             onProgress("Tried $tried shapes; none of them came home.")
         }
-        // Best seen, always — a loop of the wrong length, stated honestly,
-        // beats two minutes ending in "couldn't".
-        return best
+        // Best seen, always — loops of the wrong length, stated honestly,
+        // beat two minutes ending in "couldn't".
+        return distinct().map { it.planned }
     }
 
     /** Loops shorter than this are noise, not walks. */

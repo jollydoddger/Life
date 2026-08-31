@@ -397,11 +397,13 @@ class GeoTools(
 
         progress("Building a loop…")
         val deadline = System.currentTimeMillis() + PLAN_BUDGET_MS
-        val loop = Router.loop(
-            graph, here, target, deadline, avoidRoads, isCancelled = cancelled,
+        // Two genuinely different circuits when the ground allows it — the
+        // picker exists to be flicked through, and one answer to "a
+        // circular round here" was always a guess about his taste.
+        val planned = Router.loops(
+            graph, here, target, deadline, avoidRoads,
+            wanted = 2, isCancelled = cancelled,
         ) { note -> progress(note) }
-
-        val planned = listOfNotNull(loop)
         if (planned.isEmpty() && real.isEmpty()) {
             return "Couldn't close a loop from here on " +
                 (if (avoidRoads) "paths and quiet lanes" else "the walkable network round here") +

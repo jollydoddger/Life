@@ -1537,7 +1537,7 @@ class MainActivity : Activity() {
     private fun routeMenu() {
         val hideLabel = if (routeHidden) "Show the route" else "Hide the route"
         val items = arrayOf(
-            "Plan a walk…", "Import a GPX file", "Walks near me",
+            "Plan a walk…", "Walk picker ‹ ›", "Import a GPX file", "Walks near me",
             "Walks on this map ‹ ›", "Saved walks", "Drive to the start",
             hideLabel, "GPX library folder…",
         )
@@ -1545,18 +1545,19 @@ class MainActivity : Activity() {
             .setItems(items) { _, i ->
                 when (i) {
                     0 -> walkSpecifier()
-                    1 -> pickGpx()
-                    2 -> walksNearMe()
-                    3 -> walksOnScreen()
-                    4 -> savedWalksDialog()
-                    5 -> {
+                    1 -> reopenPicker()
+                    2 -> pickGpx()
+                    3 -> walksNearMe()
+                    4 -> walksOnScreen()
+                    5 -> savedWalksDialog()
+                    6 -> {
                         // Present even with no route, saying so — a menu item
                         // that comes and goes is a menu you can't learn.
                         val start = RouteStore.load(this)?.points?.firstOrNull()
                         if (start == null) say("No route loaded — import or find one first.")
                         else openParking(start)
                     }
-                    6 -> {
+                    7 -> {
                         routeHidden = !routeHidden
                         map.setRoute(if (routeHidden) null else RouteStore.load(this))
                         say(
@@ -1565,7 +1566,7 @@ class MainActivity : Activity() {
                             else "Route back on the map.",
                         )
                     }
-                    7 -> libraryDialog()
+                    8 -> libraryDialog()
                 }
             }
             .show()
@@ -2140,13 +2141,13 @@ class MainActivity : Activity() {
                         "region you gave reaches further than that.",
                 )
             }
-            val planned = withContext(Dispatchers.IO) {
+            val plannedAll: List<Router.Planned> = withContext(Dispatchers.IO) {
                 runCatching {
                     // The network has to cover the start region as well as
                     // the walk: a loop beginning at the far edge of the map
                     // needs the paths out there to be in the graph.
                     val graph = Router.buildCached(here, askedGraphM)
-                    if (graph.nodes.size < 20) return@runCatching null
+                    if (graph.nodes.size < 20) return@runCatching emptyList<Router.Planned>()
                     // His idea: use the confirmed path and work out the rest.
                     // The named routes already fetched above are laid onto
                     // the graph, and the ways under them become cheap to
@@ -2157,17 +2158,30 @@ class MainActivity : Activity() {
                     graph.markTrails(trails.flatMap { it.lines })
                     val deadline = System.currentTimeMillis() + specBudgetMs
                     if (spec.shape == Shape.OUT_AND_BACK) {
-                        Router.outAndBack(
-                            graph, here, target, deadline, startSlackM = slackM,
-                        ) { note -> runOnUiThread { if (alive) sayBriefly(note) } }
+                        listOfNotNull(
+                            Router.outAndBack(
+                                graph, here, target, deadline, startSlackM = slackM,
+                            ) { note -> runOnUiThread { if (alive) sayBriefly(note) } },
+                        )
                     } else {
-                        Router.loop(
+                        // Several genuinely different circuits, not one
+                        // nearly-right one — "go to an area and have loads
+                        // of walks" is answered by the search keeping what
+                        // it closes instead of discarding all but the best.
+                        Router.loops(
                             graph, here, target, deadline, startSlackM = slackM,
+                            wanted = 3,
                         ) { note -> runOnUiThread { if (alive) sayBriefly(note) } }
                     }
-                }.getOrNull()
+                }.getOrDefault(emptyList())
             }
-            if (planned == null) {
+            // Offered if anywhere near the asked range; the best one is
+            // kept whatever its length, because "6.1 km against 10 asked,
+            // said plainly" beats an empty answer.
+            val offered = plannedAll.filterIndexed { i, p ->
+                i == 0 || p.metres in (minM * 0.7)..(maxM * 1.3)
+            }
+            if (offered.isEmpty()) {
                 if (real.isEmpty()) {
                     // Nothing of his on the picker, so nothing on it was
                     // specified: a later search from anywhere else must not
@@ -2187,41 +2201,47 @@ class MainActivity : Activity() {
                 return@launch
             }
             val shapeWord = if (spec.shape == Shape.OUT_AND_BACK) "there and back" else "circular"
-            // Named for the ground it actually used, and only when it used
-            // enough of it to be worth saying. One trail near here can be
-            // named; several and it would be a guess which one it ran along,
-            // so it says what it can stand behind.
-            val onTrail = if (planned.trailM >= 400) {
-                if (trails.size == 1) " via ${trails.first().name}" else " on waymarked paths"
-            } else {
-                ""
+            for (planned in offered) {
+                // Named for the ground it actually used, and only when it
+                // used enough of it to be worth saying. One trail near here
+                // can be named; several and it would be a guess which one it
+                // ran along, so it says what it can stand behind.
+                val onTrail = if (planned.trailM >= 400) {
+                    if (trails.size == 1) " via ${trails.first().name}" else " on waymarked paths"
+                } else {
+                    ""
+                }
+                WalkPicks.append(
+                    this@MainActivity,
+                    RouteFinder.FoundWalk(
+                        name = "Planned ${Brief.fmtKm(planned.metres)} $shapeWord$onTrail",
+                        source = "Planned",
+                        lines = listOf(planned.points),
+                        closestM = 0.0,
+                        lengthM = planned.metres,
+                    ),
+                )
             }
-            val invented = RouteFinder.FoundWalk(
-                name = "Planned ${Brief.fmtKm(planned.metres)} $shapeWord$onTrail",
-                source = "Planned",
-                lines = listOf(planned.points),
-                closestM = 0.0,
-                lengthM = planned.metres,
-            )
-            // Only onto a picker that is still open: dismissing cancels this
-            // job, but a Use that landed a moment ago has already consumed
-            // the file, and appending would quietly build a new one.
-            if (!pickerShowing && real.isNotEmpty()) return@launch
-            WalkPicks.append(this@MainActivity, invented)
             // Re-stated rather than assumed: a picker dismissed while this
-            // was searching cleared the day, and the loop landing is a fresh
-            // picker full of walks specified for it.
+            // was searching cleared the day, and the loops landing are a
+            // fresh picker full of walks specified for it.
             picksFromSpec = true
             pickDayOffset = spec.dayOffset
             showSpecPicks()
-            val roads = planned.roadSummary()
-            val trailNote = if (planned.trailM >= 400) {
-                ", ${Brief.fmtKm(planned.trailM)} of it on waymarked routes"
+            val best = offered.first()
+            val roads = best.roadSummary()
+            val trailNote = if (best.trailM >= 400) {
+                ", ${Brief.fmtKm(best.trailM)} of it on waymarked routes"
             } else {
                 ""
             }
             say(
-                "Planned a ${Brief.fmtKm(planned.metres)} $shapeWord from here" + trailNote +
+                (if (offered.size > 1) {
+                    "Planned ${offered.size} different $shapeWord walks from here \u2014 " +
+                        "best is ${Brief.fmtKm(best.metres)}$trailNote"
+                } else {
+                    "Planned a ${Brief.fmtKm(best.metres)} $shapeWord from here" + trailNote
+                }) +
                     (roads?.let { ", including $it" } ?: ", off the roads") +
                     ". ${picks.size} to choose from \u2014 \u2039 \u203a to flick through, " +
                     "Brief for the day\u2019s plan.",
@@ -2512,9 +2532,32 @@ class MainActivity : Activity() {
      * the map — and after the map's own ask bar answers, which triggers no
      * resume. The store's TTL means a stale batch never haunts the map.
      */
+    /**
+     * The way back to a picker he closed. Reads the batch dismissal and all
+     * — closing the picker keeps it for six hours — and says plainly when
+     * there is nothing waiting rather than doing nothing.
+     */
+    private fun reopenPicker() {
+        val pending = WalkPicks.pending(this)
+        if (pending.isEmpty()) {
+            say(
+                "No walks waiting on the picker. \u201CWalks on this map\u201D fills it " +
+                    "from everything crossing the map in view; \u201CPlan a walk\u201D " +
+                    "fills it for a length and a day.",
+            )
+            return
+        }
+        picks = pending
+        pickIndex = 0
+        pickerShowing = true
+        pickerBar.visibility = View.VISIBLE
+        wxBar.visibility = View.GONE
+        showPick(0)
+    }
+
     private fun maybeShowPicker() {
         if (pickerShowing) return
-        val pending = WalkPicks.pending(this)
+        val pending = WalkPicks.freshPending(this)
         if (pending.isEmpty()) return
         picks = pending
         pickIndex = 0
@@ -2547,7 +2590,8 @@ class MainActivity : Activity() {
         pickerShowing = false
         pickerBar.visibility = View.GONE
         map.setPreview(emptyList())
-        WalkPicks.consume(this)
+        // Kept, not deleted: the GPX menu's picker entry brings it back.
+        WalkPicks.dismiss(this)
         picks = emptyList()
         // A loop still being worked out has nowhere to land once the picker
         // is gone, and letting it finish would re-create the file this line

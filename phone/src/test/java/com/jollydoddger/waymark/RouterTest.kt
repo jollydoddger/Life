@@ -189,6 +189,32 @@ class RouterTest {
     }
 
     @Test
+    fun `several loops offered are genuinely different walks, best first`() {
+        // "Go to an area and have loads of walks": the search now keeps what
+        // it closes instead of discarding all but one. What it returns must
+        // be worth keeping — real circuits, not one circuit three times.
+        val g = awkwardNetwork(1)
+        val out = Router.loops(g, centre(), 5_000.0, wanted = 3)
+        assertTrue("found at least one", out.isNotEmpty())
+        for (p in out) {
+            assertEquals("each comes home", p.points.first(), p.points.last())
+            assertTrue("each is a real walk", p.metres >= 300.0)
+            assertNoReversals(p.points)
+        }
+        // Pairwise different: two loops must not share most of their ground.
+        for (i in out.indices) {
+            for (j in i + 1 until out.size) {
+                val a = out[i].points.toHashSet()
+                val b = out[j].points.toHashSet()
+                val shared = a.count { it in b }.toDouble() / minOf(a.size, b.size)
+                assertTrue("loops $i and $j share ${(shared * 100).toInt()}%", shared < 0.8)
+            }
+        }
+        // And loop() is the best of loops(), so the old contract holds.
+        assertTrue(Router.loop(g, centre(), 5_000.0) != null)
+    }
+
+    @Test
     fun `there and back goes out and comes home down its own line`() {
         // The shape no loop-finder will ever offer, because the best turning
         // points are dead ends and a circuit search refuses those on purpose.

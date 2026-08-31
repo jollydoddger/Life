@@ -70,6 +70,43 @@ object WalkPicks {
         }
     }
 
+    /**
+     * He closed the picker — remember that, without losing the batch.
+     *
+     * "If I close it I can't get back to it": dismissal used to delete the
+     * file, so a mis-tap on ✕ threw away a search he had just waited ninety
+     * seconds for. Now the batch stays (until the TTL, or the next search
+     * replaces it) and only the *auto-opening* is silenced: [freshPending]
+     * skips a dismissed batch so the picker stops popping back up on every
+     * resume, and the GPX menu's picker entry reads [pending], which
+     * ignores the mark — that is the way back.
+     */
+    fun dismiss(c: Context) {
+        val f = file(c)
+        if (!f.exists()) return
+        try {
+            val o = JSONObject(f.readText())
+            o.put("dismissedAt", System.currentTimeMillis())
+            val tmp = File(f.parentFile, "picks.json.tmp")
+            tmp.writeText(o.toString())
+            tmp.renameTo(f)
+        } catch (e: Exception) {
+            f.delete()
+        }
+    }
+
+    /** The batch, unless he has already closed it once — for the auto-open
+     *  paths, which must not haunt him with a picker he dismissed. */
+    fun freshPending(c: Context): List<RouteFinder.FoundWalk> {
+        val f = file(c)
+        if (!f.exists()) return emptyList()
+        val dismissed = runCatching {
+            val o = JSONObject(f.readText())
+            o.optLong("dismissedAt") >= o.optLong("at")
+        }.getOrDefault(false)
+        return if (dismissed) emptyList() else pending(c)
+    }
+
     fun consume(c: Context) {
         file(c).delete()
     }
