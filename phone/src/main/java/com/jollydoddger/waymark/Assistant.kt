@@ -197,7 +197,7 @@ class Assistant(private val ctx: Context, private val tools: GeoTools) {
             "add_walk_site" -> {
                 val result = tools.addWalkSite(
                     str("host"), str("name"), str("finding"),
-                    str("getting"), str("rule"), str("note"),
+                    str("getting"), str("rule"), str("covers"), str("note"),
                 )
                 if (result.startsWith("Added")) actions += Action(result.substringBefore('.'))
                 result
@@ -581,13 +581,20 @@ class Assistant(private val ctx: Context, private val tools: GeoTools) {
                         ),
                         "rule" to property(
                             "string",
-                            "OPEN (free plain .gpx links), GATED (download behind a " +
-                                "click-through or script), or SELLS_BULK (free per walk, " +
-                                "but bulk download is a paid membership).",
+                            "OPEN (free plain .gpx links), GATED (behind a click-through, " +
+                                "a script or a paywall), SELLS_BULK (free per walk, but " +
+                                "bulk download is a paid membership) or DIRECTORY (a list " +
+                                "of other sites, nothing to download).",
+                        ),
+                        "covers" to property(
+                            "string",
+                            "Which part of the country the site actually has walks for. " +
+                                "Say so plainly if it is one region — he is on Anglesey, " +
+                                "and a Scotland-only site is a wasted search from there.",
                         ),
                         "note" to property("string", "Anything else worth knowing. May be empty."),
                     ),
-                    listOf("host", "name", "finding", "getting", "rule"),
+                    listOf("host", "name", "finding", "getting", "rule", "covers"),
                 ),
             ),
             tool(

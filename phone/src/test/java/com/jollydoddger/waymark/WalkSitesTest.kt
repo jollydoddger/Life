@@ -55,6 +55,7 @@ class WalkSitesTest {
         finding = "index at /walks",
         getting = "plain .gpx on the page",
         rule = rule,
+        covers = "Gwynedd and Anglesey",
         note = "",
     )
 
@@ -65,6 +66,23 @@ class WalkSitesTest {
         assertTrue("carries how to find walks", "index at /walks" in text)
         assertTrue("carries how to get the file", "plain .gpx" in text)
         assertTrue("and states the rule where it cannot be missed", "membership" in text)
+    }
+
+    @Test
+    fun `a directory offers nothing to download`() {
+        // GPS Training's directory is a list of other people's sites. A
+        // search that spends a fetch on it waiting for a GPX to fall out
+        // has wasted a minute of his morning.
+        assertEquals(0, Rule.DIRECTORY.perSession)
+        assertTrue("says what it is", "directory" in Rule.DIRECTORY.short)
+    }
+
+    @Test
+    fun `a rendered guide says where the site actually has walks`() {
+        // Load-bearing from Anglesey: three of the sites he sent are
+        // excellent and cover Scotland, London and Yorkshire.
+        val text = guide("example.co.uk").render()
+        assertTrue("coverage must be visible", "Gwynedd and Anglesey" in text)
     }
 
     @Test

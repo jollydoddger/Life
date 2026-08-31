@@ -700,6 +700,7 @@ class GeoTools(
         finding: String,
         getting: String,
         rule: String,
+        covers: String,
         note: String,
     ): String {
         val cleaned = host.trim().lowercase()
@@ -718,6 +719,7 @@ class GeoTools(
                 finding = finding,
                 getting = getting,
                 rule = parsed,
+                covers = covers.ifBlank { "UK" },
                 note = note,
             ),
         )

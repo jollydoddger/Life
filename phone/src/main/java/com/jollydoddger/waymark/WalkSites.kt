@@ -31,10 +31,18 @@ data class SiteGuide(
     /** How to get from a walk page to the GPX file. */
     val getting: String,
     val rule: Rule,
+    /**
+     * Where in the country this site actually has walks. Load-bearing from
+     * Anglesey: three of these are excellent and cover Scotland, London or
+     * Yorkshire, and searching one of them for a walk near Caergeiliog is a
+     * minute spent to find nothing.
+     */
+    val covers: String = "UK",
     val note: String = "",
 ) {
     fun render(): String = buildString {
         append("• $name ($host) — ${rule.short}\n")
+        append("    covers: $covers\n")
         append("    finding: $finding\n")
         append("    gpx: $getting\n")
         if (note.isNotBlank()) append("    note: $note\n")
@@ -70,6 +78,14 @@ enum class Rule(val short: String, val perSession: Int) {
      * work.
      */
     SELLS_BULK("free per walk; bulk is a paid membership — one at a time", 3),
+
+    /**
+     * Not a source of walks at all — a list of other people's walking
+     * sites. Worth reading when he wants somewhere new to look, and worth
+     * knowing about so a search does not spend a fetch on an index page
+     * expecting a GPX to fall out of it.
+     */
+    DIRECTORY("a directory of other walking sites — no GPX of its own", 0),
 }
 
 object WalkSites {
@@ -82,6 +98,7 @@ object WalkSites {
         SiteGuide(
             host = "walkingenglishman.com",
             name = "Walking Englishman",
+            covers = "England and Wales, including Snowdonia and Anglesey",
             finding = "Area index pages at /<area>.html or /<area>.htm — /wales.html, " +
                 "/snowdonia.htm, /peakdistrict.htm. Individual walks are /<area><N>.html " +
                 "(/wales15.html is Newborough Beach and Llanddwyn Island, Anglesey). " +
@@ -91,23 +108,26 @@ object WalkSites {
                 "it finds the link itself.",
             rule = Rule.OPEN,
             note = "Both .html and .htm are in use on the same site; if one 404s, try " +
-                "the other before giving up.",
+                "the other before giving up. Best first stop for anything near home.",
         ),
         SiteGuide(
             host = "walkingbritain.co.uk",
             name = "Walking Britain",
+            covers = "England, Wales and Scotland; 130+ walks in Snowdonia alone",
             finding = "Area index at /<Area>-walks, walk finder map at /map-<Area>. " +
                 "Each walk is /walk-<id>-description, /walk-<id>-map, /walk-<id>-gps.",
             getting = "The /walk-<id>-gps page is a click-through, not a file. " +
                 "download_gpx will fail on it and hand him the link — which is correct. " +
                 "Give him the page and let him tap it.",
             rule = Rule.GATED,
-            note = "Tested on walk 1702 (Rhoscolyn Headland): no plain .gpx link. Do not " +
-                "try to guess the file URL behind the gate.",
+            note = "Tested on walk 1702 (Rhoscolyn Headland, near him): no plain .gpx " +
+                "link. Do not try to guess the file URL behind the gate. Still worth " +
+                "searching for the write-up, then handing him the link.",
         ),
         SiteGuide(
             host = "hopelesswanderer.co.uk",
             name = "Hopeless Wanderer",
+            covers = "Great Britain",
             finding = "Walks are blog posts — index at /blog/category/Mapped, everything " +
                 "at /archive.",
             getting = "Each walk page offers GPX, KML, FIT and Google Maps downloads. " +
@@ -115,6 +135,88 @@ object WalkSites {
             rule = Rule.SELLS_BULK,
             note = "Bulk download of all their routes is a paid membership (/members-1). " +
                 "Fetch the single walk he asked about and nothing more.",
+        ),
+        SiteGuide(
+            host = "walkingclub.org.uk",
+            name = "Saturday Walkers Club",
+            covers = "London and South East England only — a trip, never a walk from home",
+            finding = "400+ walks, map of them at /walks/map.html. Walks are " +
+                "/walk/<slug>/ and long paths /long-distance-path/<slug>/.",
+            getting = "Every walk has /walk/<slug>/download-GPX-KML.html — the most " +
+                "regular structure of any site here. Hand that page to download_gpx.",
+            rule = Rule.OPEN,
+            note = "Public-transport-friendly walks. Material is free for " +
+                "non-commercial use only.",
+        ),
+        SiteGuide(
+            host = "haroldstreet.org.uk",
+            name = "Harold Street",
+            covers = "UK-wide — Lake District, Yorkshire, Wales, Scotland",
+            finding = "Paged listing at /routes/?page=<N>. Each entry gives start point, " +
+                "distance, ascent and time.",
+            getting = "Free GPX download per route from its listing page.",
+            rule = Rule.OPEN,
+            note = "Community-shared: many files are raw GPS tracks recorded in the " +
+                "field rather than tidied routes, so expect wobble and the odd detour.",
+        ),
+        SiteGuide(
+            host = "happyhiker.co.uk",
+            name = "Happy Hiker",
+            covers = "Mostly Yorkshire and the Lake District",
+            finding = "400+ routes, found through the Google map on the Hiking Pages — " +
+                "start points, parking and links to each route.",
+            getting = "Each route page has a free GPX download alongside a printable PDF.",
+            rule = Rule.OPEN,
+            note = "Start points include parking, which pairs well with the picker's " +
+                "Parking button.",
+        ),
+        SiteGuide(
+            host = "walkhighlands.co.uk",
+            name = "Walkhighlands",
+            covers = "SCOTLAND ONLY — 2,100+ routes. Nothing here for a walk near home",
+            finding = "Search at /walk-search.php; walks are .shtml pages; long paths " +
+                "at /long-distance-routes.shtml.",
+            getting = "GPX at /download-ge.php?w=<id>, linked from the walk page.",
+            rule = Rule.OPEN,
+            note = "Their own terms: the file data is theirs and is offered for PERSONAL " +
+                "USE ONLY and must not be republished. Downloading one for him to walk " +
+                "is exactly that; passing it on anywhere is not.",
+        ),
+        SiteGuide(
+            host = "gps-routes.co.uk",
+            name = "GPS Routes",
+            covers = "UK-wide, walking and cycling",
+            finding = "Not yet mapped out properly — search the site for the area and " +
+                "read the index page you land on.",
+            getting = "Free GPX per route from the route's own page.",
+            rule = Rule.OPEN,
+            note = "This recipe is thinner than the others because its structure has " +
+                "not been checked. First time you use it, look at how the URLs are " +
+                "actually laid out and call add_walk_site to write a proper one.",
+        ),
+        SiteGuide(
+            host = "walkingworld.com",
+            name = "Walkingworld",
+            covers = "UK-wide",
+            finding = "Walks are browsable, but the GPX is not.",
+            getting = "GPX export is a PAID subscription feature (about £18 a year) " +
+                "behind a login. The app cannot fetch it and should not try. If he " +
+                "subscribes, he downloads in his browser and shares the file to " +
+                "Waymark — one tap, and it imports straight onto the map.",
+            rule = Rule.GATED,
+            note = "Free tier is one walk at a time, kept for seven days, and no GPX. " +
+                "Tell him the cost rather than letting him hit the paywall himself.",
+        ),
+        SiteGuide(
+            host = "gpstraining.co.uk",
+            name = "GPS Training — UK GPX Walks Directory",
+            covers = "n/a — it lists other people's sites",
+            finding = "/pages/uk-gpx-walks-directory is a directory of free GPX walking " +
+                "sites across the UK.",
+            getting = "Nothing to download here. Read it to find NEW sites, check how " +
+                "one is laid out, then add_walk_site so the next search knows it.",
+            rule = Rule.DIRECTORY,
+            note = "The place to go when the sites in this list do not cover an area.",
         ),
     )
 
@@ -143,6 +245,7 @@ object WalkSites {
                     getting = o.optString("getting"),
                     rule = runCatching { Rule.valueOf(o.optString("rule")) }
                         .getOrDefault(Rule.OPEN),
+                    covers = o.optString("covers").ifBlank { "UK" },
                     note = o.optString("note"),
                 )
             }
@@ -184,6 +287,7 @@ object WalkSites {
                     .put("finding", g.finding)
                     .put("getting", g.getting)
                     .put("rule", g.rule.name)
+                    .put("covers", g.covers)
                     .put("note", g.note),
             )
         }
