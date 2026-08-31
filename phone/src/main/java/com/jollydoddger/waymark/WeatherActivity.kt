@@ -6,6 +6,7 @@ import android.graphics.Typeface
 import android.os.Bundle
 import android.view.Gravity
 import android.view.View
+import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
@@ -39,6 +40,11 @@ class WeatherActivity : Activity() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private lateinit var body: LinearLayout
     private lateinit var status: TextView
+
+    /** "Forecast for …" — the grid reference straight away, the place name
+     *  when Nominatim answers. A page that says only SH 31 78 is a page that
+     *  makes him work out where he asked about. */
+    private var placeLine: TextView? = null
 
     companion object {
         const val EXTRA_E = "e"
@@ -145,6 +151,30 @@ class WeatherActivity : Activity() {
         }
     }
 
+    /**
+     * Put a name to the place, the same way saving a walk does. Never waited
+     * on: the forecast is already on screen, and a village name arriving a
+     * second later is a bonus, not a dependency.
+     */
+    private fun namePlace(lat: Double, lon: Double, ref: String) {
+        scope.launch {
+            val named = withContext(Dispatchers.IO) {
+                runCatching {
+                    val json = Net.get(
+                        "https://nominatim.openstreetmap.org/reverse?format=json&zoom=13" +
+                            "&lat=%.5f&lon=%.5f".format(java.util.Locale.UK, lat, lon),
+                        timeoutMs = 6_000,
+                    )
+                    JSONObject(json).optString("display_name")
+                        .split(",").take(2).joinToString(",").trim()
+                }.getOrNull().orEmpty()
+            }
+            if (named.isNotBlank()) {
+                placeLine?.text = "$named · $ref"
+            }
+        }
+    }
+
     private fun fetch(lat: Double, lon: Double): JSONObject = JSONObject(
         Net.get(
             "https://api.open-meteo.com/v1/forecast?latitude=%.4f&longitude=%.4f"
@@ -211,6 +241,14 @@ class WeatherActivity : Activity() {
             } to LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, weight)
 
         cell(time, 1.1f, 15f, Color.argb(255, 200, 210, 202), bold = true).let { addView(it.first, it.second) }
+        // The picture before the numbers: running an eye down this column
+        // shows a shower building without reading a figure.
+        addView(
+            ImageView(this@WeatherActivity).apply {
+                setImageDrawable(WeatherIcon(code, resources.displayMetrics.density, rain))
+            },
+            LinearLayout.LayoutParams(dp(26), dp(26)).apply { rightMargin = dp(6) },
+        )
         cell("${temp.roundToInt()}°", 0.8f, 17f, tempColour(temp), bold = true)
             .let { addView(it.first, it.second) }
         // Feels-like only when it genuinely differs — wind chill is the
@@ -271,9 +309,12 @@ class WeatherActivity : Activity() {
         val now = System.currentTimeMillis()
 
         // --- where, and what it is doing right now --------------------------
-        val ref = Bng.gridRef(at) ?: "off the National Grid"
+        val ref = Bng.gridRef(at, 3) ?: "off the National Grid"
         addView(heading("Forecast for this map", big = true))
-        addView(quiet("$ref · %.4f, %.4f".format(java.util.Locale.UK, lat, lon)))
+        val place = quiet("$ref · %.4f, %.4f".format(java.util.Locale.UK, lat, lon))
+        placeLine = place
+        addView(place)
+        namePlace(lat, lon, ref)
 
         var nowIdx = -1
         for (i in 0 until times.length()) {
@@ -284,13 +325,30 @@ class WeatherActivity : Activity() {
             val v = vis?.optDouble(nowIdx, Double.NaN) ?: Double.NaN
             val fog = !v.isNaN() && v < 1000
             addView(
-                TextView(this).apply {
-                    text = "${temp.getDouble(nowIdx).roundToInt()}°  " +
-                        describe(code?.optInt(nowIdx) ?: -1)
-                    textSize = 34f
-                    setTypeface(typeface, Typeface.BOLD)
-                    setTextColor(Color.WHITE)
+                LinearLayout(this).apply {
+                    gravity = Gravity.CENTER_VERTICAL
                     setPadding(dp(18), dp(6), dp(18), dp(2))
+                    addView(
+                        ImageView(this@WeatherActivity).apply {
+                            setImageDrawable(
+                                WeatherIcon(
+                                    code?.optInt(nowIdx) ?: -1,
+                                    resources.displayMetrics.density,
+                                    rain.optDouble(nowIdx, 0.0),
+                                ),
+                            )
+                        },
+                        LinearLayout.LayoutParams(dp(56), dp(56)).apply { rightMargin = dp(12) },
+                    )
+                    addView(
+                        TextView(this@WeatherActivity).apply {
+                            text = "${temp.getDouble(nowIdx).roundToInt()}°  " +
+                                describe(code?.optInt(nowIdx) ?: -1)
+                            textSize = 30f
+                            setTypeface(typeface, Typeface.BOLD)
+                            setTextColor(Color.WHITE)
+                        },
+                    )
                 },
             )
             val bits = ArrayList<String>()
@@ -384,8 +442,12 @@ class WeatherActivity : Activity() {
         }
         addView(
             quiet(
-                "Open-Meteo, updated hourly. Temperatures °C, wind mph, rain mm. " +
-                    "The arrow points the way the wind is going.",
+                "Open-Meteo, hourly. °C, mph, mm; the arrow points the way the wind " +
+                    "is going.\n\nHourly is as fine as UK forecast data goes — the " +
+                    "15-minute figures some apps show here are interpolated between " +
+                    "these same hours, not extra detail. For rain in the next half " +
+                    "hour the radar on the map is the real thing, and it steps in " +
+                    "ten-minute frames.",
             ),
         )
     }

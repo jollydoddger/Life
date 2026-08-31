@@ -52,6 +52,20 @@ class WeatherPageTest {
     }
 
     @Test
+    fun `every rain code draws a rain icon, and heavier codes draw more drops`() {
+        // The icons are Canvas drawing and cannot be rendered at a desk, but
+        // the mapping from code to shape is a plain when-branch and that is
+        // where a wrong picture would come from. Drizzle, rain and heavy
+        // rain must not collapse to the same case.
+        val drizzle = WeatherActivity.describe(51)
+        val rain = WeatherActivity.describe(63)
+        val heavy = WeatherActivity.describe(65)
+        assertTrue(drizzle != rain && rain != heavy && drizzle != heavy)
+        assertTrue("drizzle" in drizzle.lowercase())
+        assertTrue("heavy" in heavy.lowercase())
+    }
+
+    @Test
     fun `rain and snow are never confused for each other`() {
         for (code in listOf(61, 63, 65, 80, 81, 82)) {
             val said = WeatherActivity.describe(code).lowercase()

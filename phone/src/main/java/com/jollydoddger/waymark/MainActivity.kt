@@ -1098,10 +1098,6 @@ class MainActivity : Activity() {
     // --- the weather timeline ------------------------------------------------
 
     /** Rain rates worth naming, in mm per hour, with the words for them. */
-    private val RAIN_KEY = listOf(
-        0.15 to "drizzle", 0.6 to "light", 3.0 to "steady", 10.0 to "heavy", 28.0 to "torrential",
-    )
-
     /** RainViewer's own scale names, for the key and for Settings. */
     private val RADAR_SCALES = mapOf(
         1 to "Radar · Original scale", 2 to "Radar · Universal Blue",
@@ -1213,7 +1209,7 @@ class MainActivity : Activity() {
         drawWeatherField(field, hour, frame)
         drawWind(field, hour)
         showTemperature(field, hour)
-        wxLabel.text = frameLabel(frame) + readings(field, hour)
+        wxLabel.text = frameLabel(frame) + rainWords(field, hour, frame) + readings(field, hour)
         showLegend(frame, field != null && hour >= 0)
     }
 
@@ -1233,18 +1229,17 @@ class MainActivity : Activity() {
         // server refused his choice, the tiles are the fallback's colours,
         // and a key naming his preference would describe nothing on screen.
         val radar = if (wantRadar && frame.radarPath != null) Radar.schemeNow() else 0
-        val rain = wantRadar && frame.radarPath == null && haveField
         val sky = wantCloud && haveField
-        val key = "$radar/$rain/$sky"
+        val key = "$radar/$sky"
         if (key == legendKey) return
         legendKey = key
         wxLegend.removeAllViews()
-        wxLegend.visibility = if (radar == 0 && !rain && !sky) View.GONE else View.VISIBLE
+        wxLegend.visibility = if (radar == 0 && !sky) View.GONE else View.VISIBLE
+        // The forecast-rain swatches went with the forecast-rain layer. They
+        // were honest while that layer existed and would describe nothing
+        // now — a key for a picture that is no longer painted is exactly the
+        // sort of thing that made this overlay hard to read.
         if (radar != 0) wxLegend.addView(legendNote(RADAR_SCALES[radar] ?: "RainViewer"))
-        if (rain) {
-            wxLegend.addView(legendNote("Rain"))
-            for ((mm, name) in RAIN_KEY) wxLegend.addView(legendChip(name, Ramp.rain(mm)))
-        }
         if (sky) {
             // No swatch for clear sky, because clear sky has no swatch: the
             // map is simply left alone, and saying so in words is the honest
@@ -1304,16 +1299,19 @@ class MainActivity : Activity() {
             Weather.renderSky(field, hour),
             field.south, field.west, field.north, field.east,
         ) else null)
-        // Forecast rain fills in wherever the radar cannot see; on a radar
-        // frame the radar itself is the rain.
-        if (wantRadar && frame.radarPath == null) {
-            map.setField(BngMapView.MeshTile(
-                Weather.render(field.rain[hour]) { Ramp.rain(it) },
-                field.south, field.west, field.north, field.east,
-            ), 255)
-        } else {
-            map.setField(null, 255)
-        }
+        // Rain is drawn one way only: the radar. It used to fill the gap
+        // beyond the radar's reach with the forecast grid, and that is what
+        // he meant by "it flicks between different types of rain overlay" —
+        // scrubbing past the nowcast swapped a sharp measured sweep in
+        // RainViewer's palette for a blurry 5x5 model grid in ours, with no
+        // warning and no way to read the two against each other.
+        //
+        // Two pictures of one quantity is worse than one picture and a
+        // sentence. Beyond the radar the rain is said in words on the label
+        // instead, so nothing is lost and nothing is disguised — and what
+        // is left on the map is a single ten-minute radar animation, which
+        // is the only genuinely sub-hourly rain there is.
+        map.setField(null, 255)
     }
 
     /**
@@ -1446,6 +1444,31 @@ class MainActivity : Activity() {
             else -> "in " + span(mins)
         }
         return "$clock · $rel · ${frame.kind}"
+    }
+
+    /**
+     * What the rain is doing on a frame the radar does not reach.
+     *
+     * Load-bearing rather than decorative: with the forecast mesh gone, a
+     * frame past the nowcast paints no rain at all, and an empty map reads
+     * as a dry hour. It is not dry, it is unmeasured — and the model has a
+     * number for it, which belongs here in words rather than as a second
+     * kind of picture.
+     */
+    private fun rainWords(field: Weather.Field?, hour: Int, frame: WxFrame): String {
+        if (!wantRadar || frame.radarPath != null) return ""
+        if (field == null || hour < 0) return " · no radar this far out"
+        val centre = (Weather.GRID / 2) * Weather.GRID + Weather.GRID / 2
+        if (centre >= field.lat.size) return " · no radar this far out"
+        val mm = field.rain[hour][centre]
+        if (mm.isNaN()) return " · no radar this far out"
+        val what = when {
+            mm >= 2.0 -> "%.1f mm — wet".format(mm)
+            mm >= 0.2 -> "%.1f mm".format(mm)
+            mm > 0.02 -> "spitting"
+            else -> "dry"
+        }
+        return " · no radar, forecast says $what"
     }
 
     // --- offline area download -----------------------------------------------
