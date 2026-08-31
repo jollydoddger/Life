@@ -340,17 +340,42 @@ object Router {
     private var cachedRadius = 0.0
 
     /**
+     * The most a graph fetch will ever be asked to cover in one Overpass
+     * query, whatever a caller's own arithmetic comes to.
+     *
+     * The route-relation search clips its geometry and caps its result
+     * count (RouteFinder.fromOsm's `out geom($clip) 40`), so it stays small
+     * at any radius. This one has no such cap — every matching way comes
+     * back in full, at whatever density the ground has — so an unbounded
+     * ask (a wide "anywhere on this map" start licence, added on top of a
+     * loop's own reach) can run to tens of megabytes on a path-dense area.
+     * A free Overpass mirror answers a request like that with a crash
+     * (500), a dead upstream (502), or a refusal before it even tries —
+     * which is what "OpenStreetMap search failed" turned out to be at
+     * Anglesey: not a bad connection, a query too heavy for the servers
+     * asked to run it. Capped here, the one choke point every caller
+     * passes through, rather than trusted to each caller's own sums.
+     */
+    const val MAX_GRAPH_RADIUS_M = 15_000.0
+
+    /**
      * The network round a point, reusing the last one when it covers the
      * ask. Fetching and parsing several megabytes of Overpass JSON is the
      * bulk of a plan, and re-planning a few hundred metres away used to pay
      * it again from scratch.
      */
     fun buildCached(centre: En, radiusM: Double): Graph {
+        // Clamped before the cache comparison, not just before the fetch —
+        // otherwise a graph actually built to the cap would still record
+        // the caller's larger ask as cachedRadius, and the next plan a
+        // little further off would wrongly read the cache as covering
+        // ground that was never fetched.
+        val r = radiusM.coerceAtMost(MAX_GRAPH_RADIUS_M)
         val c = cachedCentre
         val g = cachedGraph
         if (c != null && g != null) {
             val moved = hypot(centre.e - c.e, centre.n - c.n)
-            if (moved + radiusM <= cachedRadius) {
+            if (moved + r <= cachedRadius) {
                 // Last plan's trails are not this plan's, and a cached graph
                 // outlives both. Handing one back still carrying yesterday's
                 // discounts would quietly bend a walk toward a trail nobody
@@ -359,10 +384,10 @@ object Router {
                 return g
             }
         }
-        val fresh = build(centre, radiusM)
+        val fresh = build(centre, r)
         cachedGraph = fresh
         cachedCentre = centre
-        cachedRadius = radiusM
+        cachedRadius = r
         return fresh
     }
 
@@ -373,16 +398,29 @@ object Router {
     }
 
     fun build(centre: En, radiusM: Double): Graph {
+        // A second, cheap clamp: build() is public and GeoTools calls it
+        // directly as well as through buildCached, so the cap has to hold
+        // here too rather than only on the cached path.
+        val r = radiusM.coerceAtMost(MAX_GRAPH_RADIUS_M)
         val (lat, lon) = Bng.toWgs84(centre)
         val at = "%.5f,%.5f".format(lat, lon)
         val kinds = COST.keys.joinToString("|")
         val end = "${'$'}"
+        // Clip the geometry to the area actually being planned in — the
+        // same reasoning as RouteFinder.fromOsm's clip box. Without it a
+        // single long B-road with one node inside the radius drags its
+        // whole length, sometimes kilometres beyond the edge, into the
+        // reply: exactly the kind of oversized response a free mirror
+        // answers with a crash rather than data.
+        val (south, west) = Bng.toWgs84(En(centre.e - r, centre.n - r))
+        val (north, east) = Bng.toWgs84(En(centre.e + r, centre.n + r))
+        val clip = "%.5f,%.5f,%.5f,%.5f".format(south, west, north, east)
         val query = "[out:json][timeout:60];" +
             "way[\"highway\"~\"^($kinds)$end\"]" +
             "[\"foot\"!~\"^(no|private)$end\"]" +
             "[\"access\"!~\"^(no|private)$end\"]" +
-            "(around:${radiusM.toInt()},$at);" +
-            "out geom;"
+            "(around:${r.toInt()},$at);" +
+            "out geom($clip);"
         val json = Net.overpass(query, timeoutMs = 70_000)
 
         val nodes = ArrayList<En>()

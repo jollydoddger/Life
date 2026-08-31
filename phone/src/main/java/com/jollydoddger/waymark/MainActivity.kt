@@ -2083,14 +2083,25 @@ class MainActivity : Activity() {
             // The invented one. Its shape follows the ask: nobody wants a
             // circuit when they asked to go out to something and come back.
             val target = (minM + maxM) / 2
+            val askedGraphM = target / (2 * Math.PI) * 1.9 + 900 + slackM
+            if (askedGraphM > Router.MAX_GRAPH_RADIUS_M) {
+                // Router.buildCached clamps this silently — it has to, a
+                // free Overpass mirror crashes on a query this wide — but a
+                // silent clamp here would mean "anywhere on this map" over a
+                // wide region quietly stopped covering the far side of it,
+                // with nothing anywhere saying so.
+                sayBriefly(
+                    "The paths can only be read within " +
+                        "${Brief.fmtKm(Router.MAX_GRAPH_RADIUS_M)} of here — the start " +
+                        "region you gave reaches further than that.",
+                )
+            }
             val planned = withContext(Dispatchers.IO) {
                 runCatching {
                     // The network has to cover the start region as well as
                     // the walk: a loop beginning at the far edge of the map
                     // needs the paths out there to be in the graph.
-                    val graph = Router.buildCached(
-                        here, target / (2 * Math.PI) * 1.9 + 900 + slackM,
-                    )
+                    val graph = Router.buildCached(here, askedGraphM)
                     if (graph.nodes.size < 20) return@runCatching null
                     // His idea: use the confirmed path and work out the rest.
                     // The named routes already fetched above are laid onto
