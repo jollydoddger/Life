@@ -86,6 +86,39 @@ class WalkSitesTest {
     }
 
     @Test
+    fun `a site only covers where it actually has walks`() {
+        // From Caergeiliog, roughly. Walkhighlands is a fine site and has
+        // nothing here; offering it is a minute of his morning spent on a
+        // search that cannot succeed.
+        val anglesey = 53.26 to -4.55
+        val scotland = SiteGuide(
+            host = "walkhighlands.co.uk", name = "Walkhighlands",
+            finding = "", getting = "", rule = Rule.OPEN,
+            south = 54.5, west = -8.7, north = 61.0, east = -0.6,
+        )
+        val walesToo = SiteGuide(
+            host = "walkingenglishman.com", name = "Walking Englishman",
+            finding = "", getting = "", rule = Rule.OPEN,
+            south = 49.8, west = -6.5, north = 55.9, east = 1.9,
+        )
+        assertTrue("Scotland's site must not claim Anglesey", !scotland.covers(anglesey.first, anglesey.second))
+        assertTrue("England and Wales must", walesToo.covers(anglesey.first, anglesey.second))
+        // And Walkhighlands must still work where it does work.
+        assertTrue("Fort William", scotland.covers(56.82, -5.11))
+    }
+
+    @Test
+    fun `London walks are not offered in north Wales`() {
+        val swc = SiteGuide(
+            host = "walkingclub.org.uk", name = "SWC",
+            finding = "", getting = "", rule = Rule.OPEN,
+            south = 50.5, west = -1.9, north = 52.4, east = 1.6,
+        )
+        assertTrue(!swc.covers(53.26, -4.55))
+        assertTrue("but they are in Surrey", swc.covers(51.24, -0.57))
+    }
+
+    @Test
     fun `an empty note is left out rather than rendered blank`() {
         val text = guide("example.co.uk").render()
         assertTrue("no dangling note line", "note:" !in text)

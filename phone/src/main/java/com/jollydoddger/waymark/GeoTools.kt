@@ -687,7 +687,10 @@ class GeoTools(
 
     /** His walking sites and how each one works — the assistant reads this
      *  before going looking, so it navigates rather than guesses. */
-    fun walkSites(): String = WalkSites.render(ctx)
+    fun walkSites(everywhere: Boolean): String {
+        val at = fix()?.let { Bng.toWgs84(it) }
+        return WalkSites.render(ctx, at, everywhere)
+    }
 
     /**
      * Add a site to the list. The rule is the load-bearing field: it is what

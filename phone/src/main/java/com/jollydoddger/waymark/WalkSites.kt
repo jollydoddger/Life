@@ -32,14 +32,29 @@ data class SiteGuide(
     val getting: String,
     val rule: Rule,
     /**
-     * Where in the country this site actually has walks. Load-bearing from
-     * Anglesey: three of these are excellent and cover Scotland, London or
-     * Yorkshire, and searching one of them for a walk near Caergeiliog is a
-     * minute spent to find nothing.
+     * Where in the country this site actually has walks, in words for the
+     * model to read.
      */
     val covers: String = "UK",
     val note: String = "",
+    /**
+     * The same thing as arithmetic: rough lat/lon bounds of the site's
+     * coverage, so a search near him can drop the ones that are no use.
+     *
+     * Load-bearing once the list stops being short. Three of the best sites
+     * here cover Scotland, London and Yorkshire; from Anglesey they are a
+     * wall of text in every prompt and a minute spent finding nothing.
+     * Deliberately generous — this decides what gets *offered*, and an
+     * over-tight box silently hides a site that would have had the walk.
+     */
+    val south: Double = 49.8,
+    val west: Double = -8.7,
+    val north: Double = 61.0,
+    val east: Double = 1.9,
 ) {
+    fun covers(lat: Double, lon: Double): Boolean =
+        lat in south..north && lon in west..east
+
     fun render(): String = buildString {
         append("• $name ($host) — ${rule.short}\n")
         append("    covers: $covers\n")
@@ -109,6 +124,7 @@ object WalkSites {
             rule = Rule.OPEN,
             note = "Both .html and .htm are in use on the same site; if one 404s, try " +
                 "the other before giving up. Best first stop for anything near home.",
+            south = 49.8, west = -6.5, north = 55.9, east = 1.9,
         ),
         SiteGuide(
             host = "walkingbritain.co.uk",
@@ -123,6 +139,7 @@ object WalkSites {
             note = "Tested on walk 1702 (Rhoscolyn Headland, near him): no plain .gpx " +
                 "link. Do not try to guess the file URL behind the gate. Still worth " +
                 "searching for the write-up, then handing him the link.",
+            south = 49.8, west = -8.7, north = 61.0, east = 1.9,
         ),
         SiteGuide(
             host = "hopelesswanderer.co.uk",
@@ -135,6 +152,7 @@ object WalkSites {
             rule = Rule.SELLS_BULK,
             note = "Bulk download of all their routes is a paid membership (/members-1). " +
                 "Fetch the single walk he asked about and nothing more.",
+            south = 49.8, west = -8.7, north = 59.0, east = 1.9,
         ),
         SiteGuide(
             host = "walkingclub.org.uk",
@@ -147,6 +165,7 @@ object WalkSites {
             rule = Rule.OPEN,
             note = "Public-transport-friendly walks. Material is free for " +
                 "non-commercial use only.",
+            south = 50.5, west = -1.9, north = 52.4, east = 1.6,
         ),
         SiteGuide(
             host = "haroldstreet.org.uk",
@@ -158,6 +177,7 @@ object WalkSites {
             rule = Rule.OPEN,
             note = "Community-shared: many files are raw GPS tracks recorded in the " +
                 "field rather than tidied routes, so expect wobble and the odd detour.",
+            south = 49.8, west = -8.7, north = 61.0, east = 1.9,
         ),
         SiteGuide(
             host = "happyhiker.co.uk",
@@ -169,6 +189,7 @@ object WalkSites {
             rule = Rule.OPEN,
             note = "Start points include parking, which pairs well with the picker's " +
                 "Parking button.",
+            south = 52.9, west = -3.8, north = 55.1, east = -0.2,
         ),
         SiteGuide(
             host = "walkhighlands.co.uk",
@@ -181,6 +202,7 @@ object WalkSites {
             note = "Their own terms: the file data is theirs and is offered for PERSONAL " +
                 "USE ONLY and must not be republished. Downloading one for him to walk " +
                 "is exactly that; passing it on anywhere is not.",
+            south = 54.5, west = -8.7, north = 61.0, east = -0.6,
         ),
         SiteGuide(
             host = "gps-routes.co.uk",
@@ -193,6 +215,7 @@ object WalkSites {
             note = "This recipe is thinner than the others because its structure has " +
                 "not been checked. First time you use it, look at how the URLs are " +
                 "actually laid out and call add_walk_site to write a proper one.",
+            south = 49.8, west = -8.7, north = 61.0, east = 1.9,
         ),
         SiteGuide(
             host = "walkingworld.com",
@@ -206,6 +229,7 @@ object WalkSites {
             rule = Rule.GATED,
             note = "Free tier is one walk at a time, kept for seven days, and no GPX. " +
                 "Tell him the cost rather than letting him hit the paywall himself.",
+            south = 49.8, west = -8.7, north = 61.0, east = 1.9,
         ),
         SiteGuide(
             host = "gpstraining.co.uk",
@@ -217,54 +241,172 @@ object WalkSites {
                 "one is laid out, then add_walk_site so the next search knows it.",
             rule = Rule.DIRECTORY,
             note = "The place to go when the sites in this list do not cover an area.",
+            south = 49.8, west = -8.7, north = 61.0, east = 1.9,
+        ),
+        SiteGuide(
+            host = "ldwa.org.uk",
+            name = "Long Distance Walkers Association",
+            covers = "UK-wide — the national register of long-distance paths",
+            finding = "The LDP database: /ldp/members/show_path.php?path_name=<Path+Name>. " +
+                "It has the Isle of Anglesey Coastal Path, which is on his doorstep.",
+            getting = "GPX per path from the path's own page.",
+            rule = Rule.OPEN,
+            note = "Their terms: downloads are for personal or LDWA use only. Paths are " +
+                "long — a whole national trail, not an afternoon — so expect to want a " +
+                "section rather than the file whole.",
+            south = 49.8, west = -8.7, north = 61.0, east = 1.9,
+        ),
+        SiteGuide(
+            host = "slowways.org",
+            name = "Slow Ways",
+            covers = "Great Britain — 8,000+ routes between towns and villages",
+            finding = "Routes connect one settlement to the next, so search by the two " +
+                "place names rather than by an area.",
+            getting = "Free GPX per route from the route page.",
+            rule = Rule.OPEN,
+            note = "Free for personal, non-commercial use; the data is Crown Copyright / " +
+                "Ordnance Survey. Being settlement-to-settlement they are mostly linear " +
+                "and often lanes — good for getting somewhere, less so for a circular.",
+            south = 49.8, west = -8.7, north = 59.0, east = 1.9,
+        ),
+        SiteGuide(
+            host = "gpxwalks.co.uk",
+            name = "GPX Walks",
+            covers = "UK-wide",
+            finding = "A browse-and-download index of GPX walks; structure not checked yet.",
+            getting = "Free GPX per walk.",
+            rule = Rule.OPEN,
+            note = "Thin recipe — look at how its URLs are laid out on first use and " +
+                "call add_walk_site to replace this with a real one.",
+            south = 49.8, west = -8.7, north = 61.0, east = 1.9,
+        ),
+        SiteGuide(
+            host = "nationaltrail.co.uk",
+            name = "National Trails",
+            covers = "England and Wales — the official national trails",
+            finding = "One site per trail, with sections and route information.",
+            getting = "Route files per section where offered; structure not checked yet.",
+            rule = Rule.OPEN,
+            note = "Official source, so worth trusting over a copy elsewhere. Thin " +
+                "recipe until it has actually been used once.",
+            south = 49.8, west = -6.5, north = 55.9, east = 1.9,
+        ),
+        SiteGuide(
+            host = "naturalresources.wales",
+            name = "Natural Resources Wales",
+            covers = "Wales — official trails and local circular routes",
+            finding = "National Trails and the Wales Coast Path pages, plus their Outdoor " +
+                "Wales online mapping.",
+            getting = "Route information and files where published; structure not checked yet.",
+            rule = Rule.OPEN,
+            note = "The official Welsh source and closest to home of anything here. " +
+                "Worth checking properly next time he asks for a local walk.",
+            south = 51.2, west = -5.5, north = 53.6, east = -2.5,
+        ),
+        SiteGuide(
+            host = "britishpilgrimage.org",
+            name = "British Pilgrimage Trust",
+            covers = "England and Wales",
+            finding = "Free GPX routes listed at /download-gpx.",
+            getting = "Free GPX per route from that page.",
+            rule = Rule.OPEN,
+            note = "Pilgrimage routes — long, linear and church-to-church. A different " +
+                "kind of walk from a circular afternoon, and worth knowing exists.",
+            south = 49.8, west = -6.5, north = 55.9, east = 1.9,
+        ),
+        SiteGuide(
+            host = "go4awalk.com",
+            name = "Go4aWalk",
+            covers = "UK-wide, 6,000+ routes",
+            finding = "Browsable, but downloads need an account.",
+            getting = "Downloads are PAID — a credits system, around 12.5p a walk, behind " +
+                "a login. About fifty free samples exist but sit behind a newsletter " +
+                "signup. The app cannot fetch any of it.",
+            rule = Rule.GATED,
+            note = "Tell him the cost rather than letting him find the login himself.",
+            south = 49.8, west = -8.7, north = 61.0, east = 1.9,
         ),
     )
 
     private fun file(c: Context) = File(c.filesDir, "walksites.json")
 
     /**
-     * Seeded once and recorded as seeded — never "the list is empty, so
-     * hand the defaults back". That version returns every site he deleted
-     * on the next launch, which makes deleting one impossible and is a
-     * mistake already paid for in the other app.
+     * Bumped whenever sites are added to [SEED]. A stored list from an
+     * older version has the new ones merged in on next read.
+     *
+     * Without this, seeding-once has a second failure to go with the one it
+     * fixes: his file exists, so a release that adds seven sites reaches
+     * him with none of them, silently, for ever. The tombstone list is what
+     * lets both hold at once — new sites arrive, deleted ones stay deleted.
      */
-    fun guides(c: Context): List<SiteGuide> {
+    private const val SEED_VERSION = 2
+
+    private fun read(c: Context): Triple<List<SiteGuide>, Set<String>, Int> {
         val f = file(c)
-        if (!f.exists()) {
-            save(c, SEED)
-            return SEED
-        }
+        if (!f.exists()) return Triple(emptyList(), emptySet(), 0)
         return try {
-            val arr = JSONObject(f.readText()).getJSONArray("sites")
-            (0 until arr.length()).map { i ->
-                val o = arr.getJSONObject(i)
+            val o = JSONObject(f.readText())
+            val arr = o.getJSONArray("sites")
+            val sites = (0 until arr.length()).map { i ->
+                val g = arr.getJSONObject(i)
                 SiteGuide(
-                    host = o.getString("host"),
-                    name = o.optString("name", o.getString("host")),
-                    finding = o.optString("finding"),
-                    getting = o.optString("getting"),
-                    rule = runCatching { Rule.valueOf(o.optString("rule")) }
+                    host = g.getString("host"),
+                    name = g.optString("name", g.getString("host")),
+                    finding = g.optString("finding"),
+                    getting = g.optString("getting"),
+                    rule = runCatching { Rule.valueOf(g.optString("rule")) }
                         .getOrDefault(Rule.OPEN),
-                    covers = o.optString("covers").ifBlank { "UK" },
-                    note = o.optString("note"),
+                    covers = g.optString("covers").ifBlank { "UK" },
+                    note = g.optString("note"),
+                    south = g.optDouble("south", 49.8),
+                    west = g.optDouble("west", -8.7),
+                    north = g.optDouble("north", 61.0),
+                    east = g.optDouble("east", 1.9),
                 )
             }
+            val goneArr = o.optJSONArray("removed")
+            val gone = (0 until (goneArr?.length() ?: 0))
+                .map { goneArr!!.getString(it).lowercase() }.toSet()
+            Triple(sites, gone, o.optInt("seedVersion"))
         } catch (e: Exception) {
-            // A broken list is not worth losing a walk over.
-            emptyList()
+            // A broken list is not worth losing a walk over; start again.
+            Triple(emptyList(), emptySet(), 0)
         }
     }
 
+    /**
+     * His site list: what he has, plus any seed sites newer than the last
+     * version he saw, minus anything he has deleted.
+     */
+    fun guides(c: Context): List<SiteGuide> {
+        val (stored, gone, version) = read(c)
+        if (!file(c).exists()) {
+            save(c, SEED, gone)
+            return SEED
+        }
+        if (version >= SEED_VERSION) return stored
+        val have = stored.map { it.host.lowercase() }.toSet()
+        val fresh = SEED.filter { it.host.lowercase() !in have && it.host.lowercase() !in gone }
+        val merged = stored + fresh
+        save(c, merged, gone)
+        return merged
+    }
+
     fun add(c: Context, guide: SiteGuide) {
-        val kept = guides(c).filterNot { it.host.equals(guide.host, true) }
-        save(c, kept + guide)
+        val (stored, gone, _) = read(c)
+        val kept = stored.filterNot { it.host.equals(guide.host, true) }
+        // Adding a site he once deleted un-deletes it: he has just asked
+        // for it by name, which outranks a tombstone.
+        save(c, kept + guide, gone - guide.host.lowercase())
     }
 
     fun remove(c: Context, host: String): Boolean {
         val before = guides(c)
         val after = before.filterNot { it.host.equals(host, true) }
         if (after.size == before.size) return false
-        save(c, after)
+        val (_, gone, _) = read(c)
+        // Remembered as deleted, or the next seed bump hands it straight back.
+        save(c, after, gone + host.lowercase())
         return true
     }
 
@@ -277,7 +419,14 @@ object WalkSites {
         }
     }
 
-    private fun save(c: Context, sites: List<SiteGuide>) {
+    /**
+     * The sites worth trying at a place. Directories come too — they are
+     * where he looks when nothing here covers the ground.
+     */
+    fun covering(c: Context, lat: Double, lon: Double): List<SiteGuide> =
+        guides(c).filter { it.rule == Rule.DIRECTORY || it.covers(lat, lon) }
+
+    private fun save(c: Context, sites: List<SiteGuide>, removed: Set<String>) {
         val arr = JSONArray()
         for (g in sites) {
             arr.put(
@@ -288,12 +437,21 @@ object WalkSites {
                     .put("getting", g.getting)
                     .put("rule", g.rule.name)
                     .put("covers", g.covers)
-                    .put("note", g.note),
+                    .put("note", g.note)
+                    .put("south", g.south)
+                    .put("west", g.west)
+                    .put("north", g.north)
+                    .put("east", g.east),
             )
         }
+        val body = JSONObject()
+            .put("seedVersion", SEED_VERSION)
+            .put("sites", arr)
+            .put("removed", JSONArray().also { j -> removed.forEach { j.put(it) } })
+            .toString()
         val f = file(c)
         val tmp = File(f.parentFile, "walksites.json.tmp")
-        tmp.writeText(JSONObject().put("sites", arr).toString())
+        tmp.writeText(body)
         tmp.renameTo(f)
     }
 
@@ -342,12 +500,40 @@ object WalkSites {
     @Synchronized
     fun forgetFetches() = fetches.clear()
 
-    fun render(c: Context): String {
+    /**
+     * The list, narrowed to where he actually is unless [everywhere].
+     *
+     * Narrowing is not tidiness. Seventeen recipes is several thousand
+     * tokens on every call that asks, most of it about Scotland and the
+     * Home Counties while he is stood in Anglesey — and a model given a
+     * Scottish site alongside a Welsh one will sometimes pick the Scottish
+     * one. Fewer, right ones beat all of them.
+     */
+    fun render(c: Context, at: Pair<Double, Double>?, everywhere: Boolean = false): String {
         val all = guides(c)
         if (all.isEmpty()) {
             return "No walking sites are set up yet. add_walk_site adds one."
         }
-        return "Walking sites he has set up, and how each one works:\n" +
-            all.joinToString("") { it.render() }
+        if (everywhere || at == null) {
+            val why = if (at == null) " (no GPS fix, so nothing could be narrowed)" else ""
+            return "All ${all.size} walking sites he has$why:\n" +
+                all.joinToString("") { it.render() }
+        }
+        val (lat, lon) = at
+        val near = covering(c, lat, lon)
+        if (near.isEmpty()) {
+            return "None of his ${all.size} sites covers where he is. Ask walk_sites " +
+                "again with all=true to see the lot, or use the directory site to find " +
+                "one that does and add_walk_site it."
+        }
+        val hidden = all.size - near.size
+        val tail = if (hidden > 0) {
+            "\n$hidden more are set up but have no walks round here — ask with " +
+                "all=true if he wants them anyway."
+        } else {
+            ""
+        }
+        return "Walking sites with walks where he is, and how each one works:\n" +
+            near.joinToString("") { it.render() } + tail
     }
 }

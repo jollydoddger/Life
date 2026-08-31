@@ -193,7 +193,7 @@ class Assistant(private val ctx: Context, private val tools: GeoTools) {
                 }
                 result
             }
-            "walk_sites" -> tools.walkSites()
+            "walk_sites" -> tools.walkSites(flag("all"))
             "add_walk_site" -> {
                 val result = tools.addWalkSite(
                     str("host"), str("name"), str("finding"),
@@ -560,8 +560,20 @@ class Assistant(private val ctx: Context, private val tools: GeoTools) {
                     "each one is not advice. A GATED site's download is behind a " +
                     "click-through: give him the page link and never hunt for the file " +
                     "URL behind it. A SELLS_BULK site charges for bulk access: fetch the " +
-                    "one walk he asked about and never enumerate an area.",
-                schema(emptyMap(), emptyList()),
+                    "one walk he asked about and never enumerate an area. By default " +
+                    "it returns only the sites that have walks where he actually is — " +
+                    "several of them are excellent and cover Scotland or the Home " +
+                    "Counties, which is no use from Anglesey. Pass all=true only if he " +
+                    "is asking about somewhere else or wants the whole list.",
+                schema(
+                    mapOf(
+                        "all" to property(
+                            "boolean",
+                            "true = every site he has, ignoring where he is. Default false.",
+                        ),
+                    ),
+                    emptyList(),
+                ),
             ),
             tool(
                 "add_walk_site",
