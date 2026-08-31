@@ -575,6 +575,9 @@ class MainActivity : Activity() {
             setBackgroundColor(Color.argb(205, 30, 34, 32))
             setPadding(dp(12), dp(4), dp(12), dp(4))
             visibility = View.GONE
+            // The number on the map is the obvious thing to press when you
+            // want more than a number.
+            setOnClickListener { openWeather() }
         }
         timerChip = TextView(this).apply {
             textSize = 26f
@@ -943,6 +946,10 @@ class MainActivity : Activity() {
                 sayBriefly("Tap a point on the route — a turn, a peak — to see how far and get a buzz there.")
             }
         },
+        // Not a layer — a way through to the full forecast, sitting in the
+        // one row he already uses as a switchboard. The temperature chip
+        // opens it too, but that is only on screen when the overlay is.
+        Layer("Forecast ›", true, false) { openWeather() },
         Layer("Paths used", tracesEnabled, tracesShown) { tracesShown = it },
         Layer("Rights of way", prowEnabled, prowShown) { prowShown = it },
         Layer("All paths", allPathsEnabled, allPathsShown) { allPathsShown = it },
@@ -990,6 +997,20 @@ class MainActivity : Activity() {
     // Whether a layer actually draws: allowed in Settings *and* toggled on
     // here. Read through these rather than the raw preferences, or a chip
     // switched off would go on quietly fetching.
+    /**
+     * The full forecast for the middle of the map — not for his GPS fix.
+     * His words were "wherever my map is", and that is the useful reading:
+     * the walk he is weighing up is often an hour's drive away.
+     */
+    private fun openWeather() {
+        val b = map.viewportBounds()
+        startActivity(
+            Intent(this, WeatherActivity::class.java)
+                .putExtra(WeatherActivity.EXTRA_E, (b[0] + b[2]) / 2)
+                .putExtra(WeatherActivity.EXTRA_N, (b[1] + b[3]) / 2),
+        )
+    }
+
     private val wantRadar: Boolean get() = radarEnabled && weatherShown
     private val wantWind: Boolean get() = windEnabled && weatherShown
     private val wantCloud: Boolean get() = cloudEnabled && weatherShown

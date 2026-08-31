@@ -62,6 +62,13 @@
             android:exported="false"
             android:screenOrientation="portrait" />
 
+        <!-- Hour by hour for wherever the map is. Its own screen because a
+             column of numbers is not something a map can show: an overlay
+             answers "where is the rain", this answers "what at four". -->
+        <activity
+            android:name=".WeatherActivity"
+            android:exported="false" />
+
         <!-- The whole conversation. Its own screen because a transcript over
              a map is either too small to read or too big to see past. -->
         <activity
