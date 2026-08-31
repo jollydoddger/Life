@@ -96,7 +96,7 @@ class Assistant(private val ctx: Context, private val tools: GeoTools) {
             val response = runCatching { client.messages().create(params(wire)) }
                 .onFailure { Log.e(TAG, "assistant call failed", it) }
                 .getOrElse { failure ->
-                    return Reply(explain(failure.message ?: failure.javaClass.simpleName), actions)
+                    return Reply(explain(failure), actions)
                 }
 
             val text = response.content()
@@ -239,20 +239,70 @@ class Assistant(private val ctx: Context, private val tools: GeoTools) {
         return builder.build()
     }
 
-    private fun explain(message: String): String = when {
-        "401" in message || "authentication" in message.lowercase() ->
-            "The Anthropic key was rejected — check it in ⚙."
-        "credit" in message.lowercase() || "billing" in message.lowercase() ->
-            "The Anthropic account is out of credit."
-        "overloaded" in message.lowercase() || "529" in message ->
-            "Anthropic's servers are busy — try again in a moment."
-        "Unable to resolve host" in message || "timeout" in message.lowercase() ->
-            "No connection to Anthropic — signal?"
-        else -> "The assistant call failed: $message"
-    }
-
     companion object {
         private const val TAG = "Assistant"
+
+        /**
+         * Every layer of a failure, outermost first.
+         *
+         * This exists because of what he was actually shown: "The assistant
+         * call failed: Request failed". The Anthropic SDK wraps a network
+         * failure in an exception whose own message is that bare phrase and
+         * puts the real reason — an unresolvable host, a timeout, a 401 — in
+         * the *cause*. Reading only the top layer is both useless to him and
+         * defeats every branch of [explain], which was matching against text
+         * that was one level down all along.
+         */
+        fun chain(t: Throwable): String {
+            val parts = ArrayList<String>()
+            var cur: Throwable? = t
+            var depth = 0
+            while (cur != null && depth < 8) {
+                val c: Throwable = cur
+                val m = c.message?.trim()
+                parts.add(
+                    if (m.isNullOrBlank()) c.javaClass.simpleName
+                    else "${c.javaClass.simpleName}: $m",
+                )
+                val next = c.cause
+                cur = if (next === c) null else next
+                depth++
+            }
+            return parts.joinToString(" ← ")
+        }
+
+        fun explain(t: Throwable): String = explain(chain(t))
+
+        /**
+         * What to tell him, from whatever the chain turned up. The fallback
+         * still carries the whole chain rather than a tidy shrug: an
+         * unrecognised failure he can read out to me beats a polite one he
+         * can't.
+         */
+        fun explain(message: String): String {
+            val low = message.lowercase()
+            return when {
+                "401" in message || "authentication" in low || "invalid x-api-key" in low ->
+                    "The Anthropic key was rejected — check it in ⚙."
+                "credit" in low || "billing" in low ->
+                    "The Anthropic account is out of credit."
+                "429" in message || "rate limit" in low ->
+                    "Too many requests to Anthropic just now — wait a moment and send again."
+                "overloaded" in low || "529" in message ->
+                    "Anthropic's servers are busy — try again in a moment."
+                "unknownhost" in low || "unable to resolve host" in low ->
+                    "No connection to Anthropic — you look to be offline or on a very poor signal."
+                "timeout" in low || "timed out" in low ->
+                    "Anthropic didn't answer in time — signal, most likely. Send again."
+                "sslexception" in low || "sslhandshake" in low || "certpath" in low ->
+                    "The secure connection to Anthropic failed — a wifi login page will do this."
+                "connectexception" in low || "econnrefused" in low ||
+                    "network is unreachable" in low || "nroutetohost" in low ->
+                    "Couldn't reach Anthropic at all — no usable connection."
+                else -> "The assistant call failed: $message"
+            }
+        }
+
         const val MODEL = "claude-opus-5"
         const val MAX_STEPS = 8
         const val MAX_SEARCHES = 3L

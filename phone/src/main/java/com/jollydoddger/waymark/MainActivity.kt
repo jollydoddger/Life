@@ -2851,12 +2851,26 @@ class MainActivity : Activity() {
                 }
                 refreshMarks()
                 maybeShowPicker()
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                // Not a failure. He sent another question, or left the
+                // screen — "That went wrong: Job was cancelled" is the app
+                // reporting his own interruption back to him as a fault.
+                // Rethrown rather than swallowed: the finally below still
+                // clears askBusy, and cancellation must keep propagating or
+                // structured concurrency stops meaning anything.
+                throw e
             } catch (e: Exception) {
                 // The stuck-busy bug in person: anything escaping here used
                 // to leave askBusy true for ever, and every later send was
                 // silently ignored — "hangs and doesn't do it", exactly.
-                Talk.add(this@MainActivity, Said(false, "That went wrong: ${e.message ?: e.javaClass.simpleName}"))
-                replyText.text = "The assistant call failed: ${e.message ?: e.javaClass.simpleName} — send again to retry."
+                //
+                // The wording goes through Assistant.explain, which reads the
+                // whole cause chain: the SDK's own message for a dropped
+                // connection is the bare phrase "Request failed", which is
+                // what he was shown and told him nothing.
+                val said = Assistant.explain(e)
+                Talk.add(this@MainActivity, Said(false, said))
+                replyText.text = "$said — send again to retry."
             } finally {
                 askBusy = false
                 replyText.removeCallbacks(askTick)

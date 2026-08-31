@@ -256,10 +256,16 @@ class ChatActivity : Activity() {
                     this@ChatActivity,
                     Said(false, reply.text, reply.actions.map { it.summary }),
                 )
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                // His own interruption, not a fault — see MainActivity.
+                throw e
             } catch (e: Exception) {
                 // Anything escaping here used to leave the busy flag stuck
                 // and every later send silently ignored.
-                Talk.add(this@ChatActivity, Said(false, "That went wrong: ${e.message ?: e.javaClass.simpleName} — send again to retry."))
+                Talk.add(
+                    this@ChatActivity,
+                    Said(false, Assistant.explain(e) + " — send again to retry."),
+                )
             } finally {
                 busy = false
                 working?.removeCallbacks(tick)
