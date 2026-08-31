@@ -324,6 +324,10 @@ object WalkSites {
             Rule.OPEN ->
                 "That is ${guide.rule.perSession} files from ${guide.name} in one go — " +
                     "enough off a free site for one sitting."
+            Rule.DIRECTORY ->
+                "${guide.name} is a directory of other walking sites, not a source of " +
+                    "walks — there is no GPX here to fetch. Read it for somewhere new " +
+                    "to look, then add that site instead."
         }
     }
 
