@@ -95,6 +95,8 @@ class MainActivity : Activity() {
 
     private lateinit var map: BngMapView
     private lateinit var status: TextView
+    private lateinit var statusRow: LinearLayout
+    private lateinit var statusAction: TextView
     private lateinit var recordIcon: IconDrawable
     /** Auto-centre once per opening, then leave him alone. */
     private var centredThisOpen = false
@@ -287,11 +289,35 @@ class MainActivity : Activity() {
             setTextColor(Palette.ink)
             textSize = Ui.LABEL
             setPadding(dp(16), dp(9), dp(16), dp(9))
+            maxLines = 2
+            ellipsize = android.text.TextUtils.TruncateAt.END
             visibility = View.GONE
+            // Tap to read the rest of a long message — and only that. The
+            // pill used to double as a button (launch Settings, cancel a
+            // pending tap) depending on invisible state, which is how a
+            // status line becomes a trap: anything needing a tap now gets a
+            // real, labelled button beside it via sayAction().
             setOnClickListener {
-                if (osApiKey.isEmpty()) startActivity(Intent(this@MainActivity, SettingsActivity::class.java))
-                else visibility = View.GONE
+                maxLines = if (maxLines == 2) 12 else 2
             }
+        }
+        statusAction = TextView(this).apply {
+            textSize = Ui.CAP
+            setTextColor(Palette.ink)
+            background = Ui.ripple(Ui.pill(this@MainActivity, Palette.green, Color.TRANSPARENT))
+            setPadding(dp(14), dp(9), dp(14), dp(9))
+            visibility = View.GONE
+        }
+        statusRow = LinearLayout(this).apply {
+            gravity = Gravity.CENTER_VERTICAL
+            addView(status, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+            addView(
+                statusAction,
+                LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT,
+                ).apply { leftMargin = dp(8) },
+            )
+            visibility = View.GONE
         }
 
         // --- the ask bar: talk to the assistant without leaving the map ---
@@ -690,7 +716,7 @@ class MainActivity : Activity() {
         }
         val topBar = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            addView(status, LinearLayout.LayoutParams(
+            addView(statusRow, LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT,
             ).apply { bottomMargin = dp(6) })
             addView(readouts, LinearLayout.LayoutParams(
@@ -837,7 +863,9 @@ class MainActivity : Activity() {
             registerReceiver(trailWatcher, filter)
         }
         if (osApiKey.isEmpty()) {
-            say("No map without a key — tap here to enter your OS Maps API key")
+            sayAction("No map without a key — enter your OS Maps API key.", "Settings") {
+                startActivity(Intent(this, SettingsActivity::class.java))
+            }
         }
         // A run that outlived a trip to another screen gets its clock back.
         if (askBusy) { replyText.removeCallbacks(askTick); askTick.run() }
@@ -975,11 +1003,25 @@ class MainActivity : Activity() {
 
     private fun say(msg: String) {
         status.removeCallbacks(hideStatus)
+        status.animate().cancel()
+        status.alpha = 1f
+        status.maxLines = 2
         status.text = msg
+        // A plain message replaces an actioned one, button and all — a
+        // Cancel left beside an unrelated sentence would cancel who knows
+        // what.
+        clearSayAction()
         status.visibility = View.VISIBLE
+        statusRow.visibility = View.VISIBLE
     }
 
-    private val hideStatus = Runnable { status.visibility = View.GONE }
+    private val hideStatus = Runnable {
+        status.animate().alpha(0f).setDuration(180).withEndAction {
+            status.visibility = View.GONE
+            statusRow.visibility = View.GONE
+            status.alpha = 1f
+        }.start()
+    }
 
     /**
      * For the overlays' running commentary: useful while it is happening,
@@ -988,6 +1030,26 @@ class MainActivity : Activity() {
     private fun sayBriefly(msg: String) {
         say(msg)
         status.postDelayed(hideStatus, 5_000)
+    }
+
+    /**
+     * A message with one real button. The status pill used to *be* the
+     * button — tap-to-cancel here, tap-for-Settings there, chosen by
+     * invisible state — so a tap meant different things on different days,
+     * and clearing the wiring correctly fell to every caller. Now anything
+     * that needs a tap says so on a labelled button, and the pill itself
+     * only ever expands its own text.
+     */
+    private fun sayAction(msg: String, label: String, onTap: () -> Unit) {
+        say(msg)
+        statusAction.text = label
+        statusAction.visibility = View.VISIBLE
+        statusAction.setOnClickListener { onTap() }
+    }
+
+    private fun clearSayAction() {
+        statusAction.visibility = View.GONE
+        statusAction.setOnClickListener(null)
     }
 
     // --- map overlays ---------------------------------------------------------
@@ -1925,14 +1987,12 @@ class MainActivity : Activity() {
      */
     private fun awaitPlaceTap(spec: WalkSpec) {
         map.placeMode = true
-        say("Tap the map where the walk should start \u2014 tap this line to cancel.")
         fun leave() {
             map.placeMode = false
             map.onPlacePicked = null
-            status.isClickable = false
-            status.setOnClickListener(null)
+            clearSayAction()
         }
-        status.setOnClickListener {
+        sayAction("Tap the map where the walk should start.", "Cancel") {
             leave()
             sayBriefly("Cancelled \u2014 the map is back to normal.")
         }
@@ -2604,8 +2664,7 @@ class MainActivity : Activity() {
         // screen to say why.
         map.placeMode = false
         map.onPlacePicked = null
-        status.isClickable = false
-        status.setOnClickListener(null)
+        clearSayAction()
         picksFromSpec = false
         pickDayOffset = 0
     }
