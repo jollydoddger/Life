@@ -2448,7 +2448,10 @@ class MainActivity : Activity() {
                 RouteStore.save(this, route)
                 stopEditing(save = true)
                 say("“${route.name}” saved — ${Brief.fmtKm(Geom.length(line))}. Fetching tiles…")
-                publishRoute(route)
+                // publishRoute suspends (it prefetches a tile corridor), so
+                // it belongs in the scope, not in a dialog click.
+                importJob?.cancel()
+                importJob = scope.launch { publishRoute(route) }
             }
             .show()
     }
