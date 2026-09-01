@@ -111,23 +111,27 @@ class MainActivity : Activity() {
     private lateinit var askBox: EditText
     private lateinit var replyText: TextView
     private lateinit var replyPanel: ScrollView
-    private lateinit var bottomStack: LinearLayout
     private lateinit var askBar: LinearLayout
 
     // The bottom sheet and its panels. One surface, one panel at a time —
-    // the five separately-managed bars this replaces are being retired in
-    // stages; the edit and picker bars still live in bottomStack until
-    // their panels exist.
+    // this is what replaced five separately-managed bars whose visibility
+    // dance was a standing source of "why is the scrubber gone".
     private lateinit var sheet: SheetLayout
     private lateinit var askPeek: LinearLayout
     private lateinit var askContent: LinearLayout
     private lateinit var wxPeek: LinearLayout
     private lateinit var wxContent: LinearLayout
+    private lateinit var pickerPeek: LinearLayout
+    private lateinit var pickerContent: LinearLayout
+    private lateinit var editPeek: LinearLayout
+    private lateinit var editContent: LinearLayout
+    private lateinit var walksPeek: LinearLayout
+    private lateinit var walksContent: LinearLayout
     private lateinit var peekSummary: TextView
     private lateinit var peekMic: View
     private lateinit var wxChip: TextView
 
-    private enum class Panel { ASK, WEATHER }
+    private enum class Panel { ASK, WEATHER, PICKER, EDIT, WALKS }
     private var panel = Panel.ASK
 
     // The weather scrubber: five hours back, five forward, one moment shown.
@@ -156,7 +160,6 @@ class MainActivity : Activity() {
     private var markReadoutAt = 0L
 
     // The walk picker: candidates the assistant queued, cycled over the map.
-    private lateinit var pickerBar: LinearLayout
     private lateinit var pickerTitle: TextView
     private lateinit var pickerCount: TextView
     private var picks: List<RouteFinder.FoundWalk> = emptyList()
@@ -176,7 +179,6 @@ class MainActivity : Activity() {
     private var specJob: kotlinx.coroutines.Job? = null
 
     // --- drawing a walk by tapping ------------------------------------------
-    private lateinit var editBar: LinearLayout
     private lateinit var editStat: TextView
     private lateinit var editSnapBtn: TextView
     private lateinit var editModeBtn: TextView
@@ -256,7 +258,7 @@ class MainActivity : Activity() {
         fun iconButton(glyph: Glyph, onClick: () -> Unit): View =
             Ui.iconButton(this, glyph, onTap = onClick)
 
-        val importBtn = iconButton(Glyph.ROUTE) { routeMenu() }
+        val importBtn = iconButton(Glyph.ROUTE) { showPanel(Panel.WALKS, open = true) }
         val reverseBtn = iconButton(Glyph.REVERSE) {
             routeReversed = !routeReversed
             map.routeReversed = routeReversed
@@ -586,37 +588,63 @@ class MainActivity : Activity() {
             setPadding(dp(10), dp(8), dp(14), dp(2))
             setOnClickListener { dismissPicker() }
         }
-        val pickerTop = LinearLayout(this).apply {
+        // The picker: flicking lives on the peek — ‹ title › and the way
+        // out — and the four actions sit in the body as a grid, every one
+        // of them whole. The old bar put five buttons in a sideways scroll
+        // one wider than a phone, so "Start walk", the button he needs
+        // most, was the one that had scrolled off the end.
+        pickerPeek = LinearLayout(this).apply {
             gravity = Gravity.CENTER_VERTICAL
-            addView(pickerTitle, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
-            addView(pickerCount)
+            setPadding(dp(6), 0, dp(4), dp(4))
+            addView(pickerButton("‹") { showPick(pickIndex - 1) })
+            addView(
+                pickerTitle,
+                LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+                    .apply { leftMargin = dp(8); rightMargin = dp(8) },
+            )
+            addView(pickerCount, LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT,
+            ).apply { rightMargin = dp(8) })
+            addView(pickerButton("›") { showPick(pickIndex + 1) })
             addView(pickerClose)
         }
-        val pickerRow = LinearLayout(this).apply {
-            gravity = Gravity.CENTER_VERTICAL
-            fun space() = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT,
-            ).apply { rightMargin = dp(8) }
-            addView(pickerButton("‹") { showPick(pickIndex - 1) }, space())
-            addView(pickerButton("›") { showPick(pickIndex + 1) }, space())
-            addView(pickerButton("Brief", wide = true) { briefPick() }, space())
-            addView(pickerButton("Use", wide = true) { usePick() }, space())
-            addView(pickerButton("Start walk", wide = true) { startWalkFromPick() }, space())
-            addView(pickerButton("Parking", wide = true) { openParking() })
-        }
-        // Five buttons is one more than a phone's width holds, and a squashed
-        // "Start walk" reading "Start w…" is the button he needs most. The
-        // row scrolls instead: nothing is ever cut off, only out of sight,
-        // and the two that move off the end are the two used least.
-        val pickerScroll = HorizontalScrollView(this).apply {
-            isHorizontalScrollBarEnabled = false
-            setPadding(dp(10), dp(6), dp(10), dp(10))
-            addView(pickerRow)
-        }
+        fun actionGrid(vararg rows: List<View>): LinearLayout =
+            LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(dp(12), dp(2), dp(12), dp(10))
+                for (row in rows) {
+                    addView(
+                        LinearLayout(this@MainActivity).apply {
+                            for ((i, v) in row.withIndex()) {
+                                addView(
+                                    v,
+                                    LinearLayout.LayoutParams(
+                                        0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f,
+                                    ).apply { if (i > 0) leftMargin = dp(8) },
+                                )
+                            }
+                        },
+                        LinearLayout.LayoutParams(
+                            LinearLayout.LayoutParams.MATCH_PARENT,
+                            LinearLayout.LayoutParams.WRAP_CONTENT,
+                        ).apply { topMargin = dp(8) },
+                    )
+                }
+            }
+        pickerContent = actionGrid(
+            listOf(
+                Ui.button(this, "Start walk", filled = true) { startWalkFromPick() },
+                Ui.button(this, "Use") { usePick() },
+            ),
+            listOf(
+                Ui.button(this, "Brief") { briefPick() },
+                Ui.button(this, "Parking") { openParking() },
+            ),
+        )
         editStat = TextView(this).apply {
-            textSize = 14f
-            setTextColor(Color.WHITE)
-            setPadding(dp(14), dp(8), dp(10), dp(2))
+            textSize = Ui.LABEL
+            setTextColor(Palette.ink)
+            setPadding(dp(16), dp(2), dp(10), dp(8))
         }
         fun editButton(label: String, onTap: () -> Unit) = TextView(this).apply {
             text = label
@@ -629,60 +657,103 @@ class MainActivity : Activity() {
         }
         editSnapBtn = editButton("Paths") { cycleSnap() }
         editModeBtn = editButton("Placing") { toggleEditMode() }
-        val editRow = LinearLayout(this).apply {
+        // What is under the thumb while drawing: the stat and the two
+        // mode buttons on the peek, the rarer actions in the body.
+        editPeek = LinearLayout(this).apply {
             gravity = Gravity.CENTER_VERTICAL
-            fun gap() = LinearLayout.LayoutParams(
+            setPadding(0, 0, dp(10), dp(4))
+            addView(editStat, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+            addView(editModeBtn, LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT,
-            ).apply { rightMargin = dp(7) }
-            addView(editModeBtn, gap())
-            addView(editSnapBtn, gap())
-            addView(editButton("Undo") { undoEdit() }, gap())
-            addView(editButton("Close loop") { closeEditLoop() }, gap())
-            addView(editButton("Save") { saveEdit() }, gap())
-            addView(editButton("✕") { stopEditing(save = false) })
+            ).apply { rightMargin = dp(7) })
+            addView(editSnapBtn)
         }
-        editBar = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setBackgroundColor(Palette.sheet)
-            visibility = View.GONE
-            addView(editStat, LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT,
-            ))
+        editContent = actionGrid(
+            listOf(
+                Ui.button(this, "Undo") { undoEdit() },
+                Ui.button(this, "Close loop") { closeEditLoop() },
+            ),
+            listOf(
+                Ui.button(this, "Save", filled = true) { saveEdit() },
+                Ui.button(this, "Discard") { stopEditing(save = false) },
+            ),
+        )
+
+        // --- the walks panel: everything that finds or makes a route ---
+        // It replaces an eleven-item dialog list. Each action first hands
+        // the sheet back to the ask panel, because every one of them leads
+        // somewhere else — a dialog, the editor, the picker.
+        fun walksAction(label: String, filled: Boolean = false, run: () -> Unit) =
+            Ui.button(this, label, filled) {
+                showPanel(Panel.ASK)
+                run()
+            }
+        walksPeek = LinearLayout(this).apply {
+            gravity = Gravity.CENTER_VERTICAL
             addView(
-                HorizontalScrollView(this@MainActivity).apply {
-                    isHorizontalScrollBarEnabled = false
-                    setPadding(dp(10), dp(4), dp(10), dp(10))
-                    addView(editRow)
+                Ui.label(this@MainActivity, "Walks", Ui.TITLE).apply {
+                    setPadding(dp(16), dp(2), 0, dp(8))
                 },
+                LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f),
+            )
+            addView(TextView(this@MainActivity).apply {
+                text = "✕"
+                textSize = 17f
+                setTextColor(Palette.inkMut)
+                setPadding(dp(10), dp(6), dp(14), dp(10))
+                background = Ui.ripple(null)
+                setOnClickListener { showPanel(Panel.ASK) }
+            })
+        }
+        walksContent = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(12), 0, dp(12), dp(10))
+            fun grid(vararg rows: List<View>) = addView(
+                actionGrid(*rows).apply { setPadding(0, 0, 0, 0) },
                 LinearLayout.LayoutParams(
                     LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT,
                 ),
             )
-        }
-
-        pickerBar = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setBackgroundColor(Palette.sheet)
-            visibility = View.GONE
-            addView(pickerTop, LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT,
-            ))
-            addView(pickerScroll, LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT,
-            ))
-        }
-
-        // The edit and picker bars, still hand-stacked: they migrate into
-        // the sheet as panels next; until then the sheet stands down while
-        // either is showing, so exactly one thing owns the bottom edge.
-        bottomStack = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            addView(editBar, LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT,
-            ))
-            addView(pickerBar, LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT,
-            ))
+            addView(Ui.heading(this@MainActivity, "Find"))
+            grid(
+                listOf(
+                    walksAction("Plan a walk\u2026", filled = true) { walkSpecifier() },
+                    walksAction("All walks") { openWalks() },
+                    walksAction("Picker \u2039 \u203a") { reopenPicker() },
+                ),
+            )
+            addView(Ui.heading(this@MainActivity, "Make"))
+            grid(
+                listOf(
+                    walksAction("Draw a walk") { startEditing() },
+                    walksAction("Edit loaded route") {
+                        val loaded = RouteStore.load(this@MainActivity)?.points
+                        if (loaded == null || loaded.size < 2) {
+                            say("No route loaded to edit \u2014 draw one, or import one first.")
+                        } else {
+                            startEditing(loaded)
+                        }
+                    },
+                ),
+            )
+            addView(Ui.heading(this@MainActivity, "Files"))
+            grid(
+                listOf(
+                    walksAction("Import GPX") { pickGpx() },
+                    walksAction("Saved walks") { savedWalksDialog() },
+                    walksAction("Library\u2026") { libraryDialog() },
+                ),
+            )
+            addView(Ui.heading(this@MainActivity, "Go"))
+            grid(
+                listOf(
+                    walksAction("Drive to the start") {
+                        val start = RouteStore.load(this@MainActivity)?.points?.firstOrNull()
+                        if (start == null) say("No route loaded \u2014 import or find one first.")
+                        else openParking(start)
+                    },
+                ),
+            )
         }
 
         // --- the sheet's ask panel: summary + mic peeking, talk on open ---
@@ -823,10 +894,6 @@ class MainActivity : Activity() {
                 FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT,
                 Gravity.TOP,
             ).apply { leftMargin = dp(10); rightMargin = dp(10) })
-            addView(bottomStack, FrameLayout.LayoutParams(
-                FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT,
-                Gravity.BOTTOM,
-            ))
             addView(sheet, FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT,
                 Gravity.BOTTOM,
@@ -867,7 +934,6 @@ class MainActivity : Activity() {
                 @Suppress("DEPRECATION")
                 bottom = insets.systemWindowInsetBottom
             }
-            bottomStack.setPadding(0, 0, 0, bottom)
             sheet.setBottomInset(bottom)
             // The whole top column clears the system status bar. This margin
             // used to be set on the status line directly, from when it was
@@ -1094,6 +1160,9 @@ class MainActivity : Activity() {
         val (peek, body) = when (p) {
             Panel.ASK -> askPeek to askContent
             Panel.WEATHER -> wxPeek to wxContent
+            Panel.PICKER -> pickerPeek to pickerContent
+            Panel.EDIT -> editPeek to editContent
+            Panel.WALKS -> walksPeek to walksContent
         }
         sheet.peekRow.addView(
             peek,
@@ -1218,10 +1287,6 @@ class MainActivity : Activity() {
                 sayBriefly("Tap a point on the route — a turn, a peak — to see how far and get a buzz there.")
             }
         },
-        // Not a layer — a way through to the full forecast, sitting in the
-        // one row he already uses as a switchboard. The temperature chip
-        // opens it too, but that is only on screen when the overlay is.
-        Layer("Forecast ›", true, false) { openWeather() },
         Layer("Paths used", tracesEnabled, tracesShown) { tracesShown = it },
         Layer("Rights of way", prowEnabled, prowShown) { prowShown = it },
         Layer("All paths", allPathsEnabled, allPathsShown) { allPathsShown = it },
@@ -1235,7 +1300,9 @@ class MainActivity : Activity() {
     private fun buildChips() {
         chipRow.removeAllViews()
         val shown = layers().filter { it.allowed }
-        chipScroll.visibility = if (shown.isEmpty()) View.GONE else View.VISIBLE
+        // The row always exists now: the Map chip at its end carries the
+        // display toggles that used to hide in the walks dialog.
+        chipScroll.visibility = View.VISIBLE
         for (layer in shown) {
             // On and off have to be tellable apart at a glance in daylight,
             // which Ui.chip's green-on / scrim-off already is.
@@ -1251,6 +1318,15 @@ class MainActivity : Activity() {
                 ).apply { rightMargin = dp(6) },
             )
         }
+        lateinit var mapChip: TextView
+        mapChip = Ui.chip(this, "Map \u22ef", false) { mapOptions(mapChip) }
+        chipRow.addView(
+            mapChip,
+            LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+            ),
+        )
     }
 
     // Whether a layer actually draws: allowed in Settings *and* toggled on
@@ -1795,79 +1871,64 @@ class MainActivity : Activity() {
     // --- routes in: import, walks near me, the library -----------------------
 
     /**
-     * The GPX button's small menu. Everything here works with the ask bar
-     * switched off — none of it is the assistant's.
+     * Show/hide and route-line weight, off the walks panel and into a small
+     * popover on the chip row — they are display toggles, not walk actions,
+     * and an eleven-item dialog was where both went to be lost.
      */
-    private fun routeMenu() {
-        val hideLabel = if (routeHidden) "Show the route" else "Hide the route"
-        // Named for what tapping it gives you, not for the state it is in:
-        // a menu line that reads "See-through" leaves you guessing whether
-        // that is what it is or what it would become.
-        val weightLabel = "Route line: " + when (BngMapView.RouteWeight.of(routeWeight)) {
-            BngMapView.RouteWeight.SOLID -> "solid \u2014 tap for see-through"
-            BngMapView.RouteWeight.SEE_THROUGH -> "see-through \u2014 tap for faint"
-            BngMapView.RouteWeight.FAINT -> "faint \u2014 tap for solid"
-        }
-        val items = arrayOf(
-            "Find walks…", "All walks…", "Draw a walk on the map",
-            "Edit the loaded route", "Walk picker ‹ ›", "Import a GPX file",
-            "Saved walks", "Drive to the start", hideLabel, weightLabel,
-            "GPX library folder…",
-        )
-        AlertDialog.Builder(this)
-            .setItems(items) { _, i ->
-                when (i) {
-                    0 -> walkSpecifier()
-                    1 -> openWalks()
-                    2 -> startEditing()
-                    3 -> {
-                        val loaded = RouteStore.load(this)?.points
-                        if (loaded == null || loaded.size < 2) {
-                            say("No route loaded to edit — draw one, or import one first.")
-                        } else {
-                            startEditing(loaded)
-                        }
-                    }
-                    4 -> reopenPicker()
-                    5 -> pickGpx()
-                    6 -> savedWalksDialog()
-                    7 -> {
-                        // Present even with no route, saying so — a menu item
-                        // that comes and goes is a menu you can't learn.
-                        val start = RouteStore.load(this)?.points?.firstOrNull()
-                        if (start == null) say("No route loaded — import or find one first.")
-                        else openParking(start)
-                    }
-                    8 -> {
-                        routeHidden = !routeHidden
-                        map.setRoute(if (routeHidden) null else RouteStore.load(this))
-                        say(
-                            if (routeHidden) "Route hidden — the map underneath is all yours. " +
-                                "It is still stored, and still on the watch."
-                            else "Route back on the map.",
-                        )
-                    }
-                    9 -> {
-                        val next = BngMapView.RouteWeight.of(routeWeight + 1)
-                        routeWeight = next.ordinal
-                        map.setRouteWeight(next)
-                        say(
-                            when (next) {
-                                BngMapView.RouteWeight.SOLID ->
-                                    "Route line solid again."
-                                BngMapView.RouteWeight.SEE_THROUGH ->
-                                    "Route line see-through \u2014 the map reads through it, " +
-                                        "casing and all."
-                                BngMapView.RouteWeight.FAINT ->
-                                    "Route line faint \u2014 a tint over the map. Rights of way " +
-                                        "underneath should be readable now."
-                            },
-                        )
-                    }
-                    10 -> libraryDialog()
-                }
+    private fun mapOptions(anchor: View) {
+        val ctx = this
+        lateinit var pop: android.widget.PopupWindow
+        fun row(label: String, onTap: () -> Unit) = TextView(ctx).apply {
+            text = label
+            textSize = Ui.BODY
+            setTextColor(Palette.ink)
+            background = Ui.ripple(null)
+            setPadding(dp(18), dp(12), dp(18), dp(12))
+            setOnClickListener {
+                pop.dismiss()
+                onTap()
             }
-            .show()
+        }
+        val column = LinearLayout(ctx).apply {
+            orientation = LinearLayout.VERTICAL
+            background = Ui.card(ctx, Palette.raised)
+            addView(row(if (routeHidden) "Show the route" else "Hide the route") {
+                routeHidden = !routeHidden
+                map.setRoute(if (routeHidden) null else RouteStore.load(ctx))
+                sayBriefly(
+                    if (routeHidden) "Route hidden \u2014 still stored, still on the watch."
+                    else "Route back on the map.",
+                )
+            })
+            // Named for what tapping it gives you, not the state it is in.
+            val weightLabel = "Route line: " + when (BngMapView.RouteWeight.of(routeWeight)) {
+                BngMapView.RouteWeight.SOLID -> "solid \u2192 see-through"
+                BngMapView.RouteWeight.SEE_THROUGH -> "see-through \u2192 faint"
+                BngMapView.RouteWeight.FAINT -> "faint \u2192 solid"
+            }
+            addView(row(weightLabel) {
+                val next = BngMapView.RouteWeight.of(routeWeight + 1)
+                routeWeight = next.ordinal
+                map.setRouteWeight(next)
+                sayBriefly(
+                    when (next) {
+                        BngMapView.RouteWeight.SOLID -> "Route line solid again."
+                        BngMapView.RouteWeight.SEE_THROUGH ->
+                            "Route line see-through \u2014 the map reads through it."
+                        BngMapView.RouteWeight.FAINT ->
+                            "Route line faint \u2014 rights of way underneath should read now."
+                    },
+                )
+            })
+            addView(row("Forecast \u203a") { openWeather() })
+        }
+        pop = android.widget.PopupWindow(
+            column,
+            LinearLayout.LayoutParams.WRAP_CONTENT,
+            LinearLayout.LayoutParams.WRAP_CONTENT,
+            true,
+        ).apply { elevation = dp(8).toFloat() }
+        pop.showAsDropDown(anchor, 0, dp(4))
     }
 
     // --- saved walks ----------------------------------------------------------
@@ -2491,8 +2552,7 @@ class MainActivity : Activity() {
         }
         from?.takeIf { it.size >= 2 }?.let { ed.load(it) }
         editing = ed
-        editBar.visibility = View.VISIBLE
-        sheet.setState(SheetLayout.State.HIDDEN)
+        showPanel(Panel.EDIT)
         map.placeMode = true
         map.onPlacePicked = { en -> editTapped(en) }
         // Editing an existing walk starts in Adjust — the walk is already
@@ -2779,14 +2839,13 @@ class MainActivity : Activity() {
         editGraph = null
         editGraphCentre = null
         editPathsNote = ""
-        editBar.visibility = View.GONE
         map.placeMode = false
         map.onPlacePicked = null
         map.dragHandles = false
         map.onHandleDrop = null
         map.setEditHandles(emptyList())
         map.setPreview(emptyList())
-        sheet.setState(SheetLayout.State.PEEK, animate = false)
+        if (panel == Panel.EDIT) showPanel(Panel.ASK)
         if (!save) {
             map.setRoute(if (routeHidden) null else RouteStore.load(this))
             sayBriefly("Drawing cancelled — nothing saved.")
@@ -3223,8 +3282,7 @@ class MainActivity : Activity() {
         picks = pending
         pickIndex = 0
         pickerShowing = true
-        pickerBar.visibility = View.VISIBLE
-        sheet.setState(SheetLayout.State.HIDDEN)
+        showPanel(Panel.PICKER)
         showPick(0)
     }
 
@@ -3235,10 +3293,7 @@ class MainActivity : Activity() {
         picks = pending
         pickIndex = 0
         pickerShowing = true
-        pickerBar.visibility = View.VISIBLE
-        // One thing at a time down there: the sheet stands down until the
-        // picking is done.
-        sheet.setState(SheetLayout.State.HIDDEN)
+        showPanel(Panel.PICKER)
         showPick(0)
     }
 
@@ -3261,7 +3316,7 @@ class MainActivity : Activity() {
      *  here, so the dashed preview can never be left leaked on the map. */
     private fun dismissPicker() {
         pickerShowing = false
-        pickerBar.visibility = View.GONE
+        if (panel == Panel.PICKER) showPanel(Panel.ASK)
         map.setPreview(emptyList())
         // Kept, not deleted: the GPX menu's picker entry brings it back.
         WalkPicks.dismiss(this)
@@ -3274,7 +3329,6 @@ class MainActivity : Activity() {
         specJob = null
         picksFromSpec = false
         pickDayOffset = 0
-        sheet.setState(SheetLayout.State.PEEK, animate = false)
         // Use/Start may just have changed the loaded route; the peek line
         // is the first place that should say so.
         updatePeek()
