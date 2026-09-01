@@ -22,6 +22,8 @@ import com.jollydoddger.waymark.shared.En
 import com.jollydoddger.waymark.shared.Glyph
 import com.jollydoddger.waymark.shared.IconDrawable
 import com.jollydoddger.waymark.shared.Prefs.anthropicKey
+import android.Manifest
+import android.content.pm.PackageManager
 
 /**
  * The whole conversation, on its own screen.
@@ -87,6 +89,20 @@ class ChatActivity : Activity() {
 
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
 
+    // The same hold-to-talk the map has. This screen being the one place
+    // in the app that could not listen was an accident of history, not a
+    // decision.
+    private val voice by lazy {
+        Voice(this).apply {
+            onFinal = { heard ->
+                runOnUiThread {
+                    box.setText(heard)
+                    send()
+                }
+            }
+        }
+    }
+
     override fun onCreate(state: Bundle?) {
         super.onCreate(state)
 
@@ -106,21 +122,40 @@ class ChatActivity : Activity() {
                 if (id == EditorInfo.IME_ACTION_SEND) { send(); true } else false
             }
         }
+        box.setTextColor(Palette.ink)
+        box.setHintTextColor(Palette.inkFaint)
+        val mic = View(this).apply {
+            background = IconDrawable(Glyph.MIC, resources.displayMetrics.density)
+            Ui.bindHoldToTalk(
+                this,
+                start = {
+                    if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) !=
+                        PackageManager.PERMISSION_GRANTED
+                    ) {
+                        requestPermissions(arrayOf(Manifest.permission.RECORD_AUDIO), 4)
+                    } else {
+                        voice.start()
+                    }
+                },
+                stop = { voice.stop() },
+            )
+        }
         val send = View(this).apply {
             background = IconDrawable(Glyph.SEND, resources.displayMetrics.density)
             setOnClickListener { send() }
         }
         val bar = LinearLayout(this).apply {
-            setBackgroundColor(Color.argb(235, 250, 250, 248))
+            setBackgroundColor(Palette.sheet)
             gravity = Gravity.CENTER_VERTICAL
             setPadding(dp(8), dp(4), dp(6), dp(4))
             addView(box, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+            addView(mic, LinearLayout.LayoutParams(dp(42), dp(42)).apply { leftMargin = dp(6) })
             addView(send, LinearLayout.LayoutParams(dp(42), dp(42)).apply { leftMargin = dp(6) })
         }
 
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setBackgroundColor(Color.rgb(20, 24, 22))
+            setBackgroundColor(Palette.bg)
             // The list takes what is left after the ask bar, so the bar is
             // always reachable and the history is what scrolls.
             addView(scroll, LinearLayout.LayoutParams(
@@ -166,6 +201,7 @@ class ChatActivity : Activity() {
     }
 
     override fun onDestroy() {
+        voice.dispose()
         scope.cancel()
         super.onDestroy()
     }
@@ -182,8 +218,8 @@ class ChatActivity : Activity() {
 
     private fun note(text: String) = TextView(this).apply {
         this.text = text
-        textSize = 14f
-        setTextColor(Color.argb(190, 220, 224, 220))
+        textSize = Ui.LABEL
+        setTextColor(Palette.inkMut)
         setPadding(dp(6), dp(20), dp(6), dp(6))
     }
 
@@ -197,12 +233,13 @@ class ChatActivity : Activity() {
         for (a in said.actions) body.append("\n✓ ").append(a)
         return TextView(this).apply {
             text = body.toString()
-            textSize = 15f
-            setTextColor(if (said.fromHim) Color.rgb(24, 30, 26) else Color.WHITE)
-            setBackgroundColor(
-                if (said.fromHim) Color.rgb(214, 226, 214) else Color.argb(255, 38, 46, 42),
+            textSize = Ui.BODY
+            setTextColor(if (said.fromHim) Color.rgb(24, 30, 26) else Palette.ink)
+            background = Ui.card(
+                this@ChatActivity,
+                if (said.fromHim) Color.rgb(214, 226, 214) else Palette.raised,
             )
-            setPadding(dp(12), dp(9), dp(12), dp(9))
+            setPadding(dp(14), dp(10), dp(14), dp(10))
             contentDescription = clock
             // A URL in a reply is usually the assistant handing over a walk
             // page it couldn't download from; it has to be one tap, not a

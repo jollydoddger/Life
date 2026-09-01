@@ -117,9 +117,11 @@ class SettingsActivity : Activity() {
         }
 
         fun heading(text: String) = TextView(this).apply {
-            this.text = text
-            textSize = 16f
-            setPadding(0, dp(20), 0, dp(6))
+            this.text = text.uppercase()
+            textSize = Ui.MICRO
+            letterSpacing = 0.08f
+            setTextColor(Palette.inkFaint)
+            setPadding(0, dp(26), 0, dp(8))
         }
 
         // A fixed palette rather than a colour wheel: six choices are one
@@ -134,7 +136,10 @@ class SettingsActivity : Activity() {
                         shape = GradientDrawable.OVAL
                         setColor(colour)
                         // The chosen one wears a ring, so it is obvious which is on.
-                        setStroke(dp(if (colour == current()) 4 else 1), Color.DKGRAY)
+                        setStroke(
+                            dp(if (colour == current()) 4 else 1),
+                            if (colour == current()) Palette.ink else Palette.stroke,
+                        )
                     }
                 }
             }
@@ -168,10 +173,10 @@ class SettingsActivity : Activity() {
                     val on = value == current()
                     view.background = GradientDrawable().apply {
                         cornerRadius = dp(18).toFloat()
-                        setColor(if (on) Color.rgb(29, 91, 79) else Color.rgb(232, 232, 232))
-                        setStroke(dp(1), Color.DKGRAY)
+                        setColor(if (on) Palette.green else Palette.raised)
+                        setStroke(dp(1), Palette.stroke)
                     }
-                    view.setTextColor(if (on) Color.WHITE else Color.DKGRAY)
+                    view.setTextColor(if (on) Palette.ink else Palette.inkMut)
                 }
             }
             options.forEach { (label, value) ->

@@ -44,7 +44,7 @@ class WalksActivity : Activity() {
         }
         setContentView(
             ScrollView(this).apply {
-                setBackgroundColor(Color.rgb(18, 21, 19))
+                setBackgroundColor(Palette.bg)
                 addView(body)
                 setOnApplyWindowInsetsListener { v, insets ->
                     v.setPadding(0, insets.systemWindowInsetTop, 0, insets.systemWindowInsetBottom)
@@ -59,11 +59,13 @@ class WalksActivity : Activity() {
 
     private fun heading(text: String, big: Boolean = false) = TextView(this).apply {
         this.text = text
-        textSize = if (big) 21f else 14f
+        // Section names went from full-width green bars to the quiet caps
+        // the rest of the app now uses — the rows are the content here.
+        textSize = if (big) 21f else Ui.MICRO
         setTypeface(typeface, Typeface.BOLD)
-        setTextColor(Color.WHITE)
-        setBackgroundColor(if (big) Color.TRANSPARENT else Color.argb(255, 28, 54, 40))
-        setPadding(dp(18), dp(if (big) 18 else 10), dp(18), dp(if (big) 4 else 10))
+        setTextColor(if (big) Palette.ink else Palette.inkFaint)
+        if (!big) letterSpacing = 0.08f
+        setPadding(dp(18), dp(if (big) 18 else 18), dp(18), dp(if (big) 4 else 6))
     }
 
     private fun quiet(text: String) = TextView(this).apply {
@@ -87,7 +89,10 @@ class WalksActivity : Activity() {
         orientation = LinearLayout.VERTICAL
         setPadding(dp(18), dp(13), dp(18), dp(13))
         isClickable = true
-        setBackgroundColor(Color.argb(255, 26, 30, 27))
+        background = Ui.ripple(Ui.card(this@WalksActivity, Palette.surface))
+        layoutParams = LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT,
+        ).apply { leftMargin = dp(10); rightMargin = dp(10); topMargin = dp(6) }
         addView(
             TextView(this@WalksActivity).apply {
                 text = name
@@ -107,9 +112,9 @@ class WalksActivity : Activity() {
         setOnClickListener { onTap() }
     }
 
+    // Rounded cards carry their own separation now; the spacer is air.
     private fun spacer() = View(this).apply {
-        layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(1))
-        setBackgroundColor(Color.argb(255, 18, 21, 19))
+        layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(2))
     }
 
     private fun build() {

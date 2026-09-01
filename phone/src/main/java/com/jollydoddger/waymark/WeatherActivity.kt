@@ -106,7 +106,7 @@ class WeatherActivity : Activity() {
         }
         setContentView(
             ScrollView(this).apply {
-                setBackgroundColor(Color.rgb(18, 21, 19))
+                setBackgroundColor(Palette.bg)
                 addView(body)
                 setOnApplyWindowInsetsListener { v, insets ->
                     v.setPadding(0, insets.systemWindowInsetTop, 0, insets.systemWindowInsetBottom)
@@ -197,11 +197,13 @@ class WeatherActivity : Activity() {
 
     private fun heading(text: String, big: Boolean = false) = TextView(this).apply {
         this.text = text
-        textSize = if (big) 20f else 15f
+        // Day names went from full-width green bars to the quiet caps the
+        // rest of the app now uses; the hour rows are the content here.
+        textSize = if (big) 20f else Ui.MICRO
         setTypeface(typeface, Typeface.BOLD)
-        setTextColor(Color.WHITE)
-        setBackgroundColor(if (big) Color.TRANSPARENT else Color.argb(255, 28, 54, 40))
-        setPadding(dp(18), dp(if (big) 18 else 10), dp(18), dp(if (big) 6 else 10))
+        setTextColor(if (big) Palette.ink else Palette.inkFaint)
+        if (!big) letterSpacing = 0.08f
+        setPadding(dp(18), dp(if (big) 18 else 18), dp(18), dp(if (big) 6 else 6))
     }
 
     private fun quiet(text: String) = TextView(this).apply {
