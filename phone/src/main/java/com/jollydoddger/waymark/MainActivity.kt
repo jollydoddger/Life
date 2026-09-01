@@ -54,6 +54,7 @@ import com.jollydoddger.waymark.shared.Prefs.radarScheme
 import com.jollydoddger.waymark.shared.Prefs.recording
 import com.jollydoddger.waymark.shared.Prefs.recordingStartedAt
 import com.jollydoddger.waymark.shared.Prefs.routeColour
+import com.jollydoddger.waymark.shared.Prefs.routeWeight
 import com.jollydoddger.waymark.shared.Prefs.routeHidden
 import com.jollydoddger.waymark.shared.Prefs.routeReversed
 import com.jollydoddger.waymark.shared.Prefs.tempEnabled
@@ -768,6 +769,7 @@ class MainActivity : Activity() {
 
         map.routeReversed = routeReversed
         map.setColours(routeColour, arrowColour, trailColour)
+        map.setRouteWeight(BngMapView.RouteWeight.of(routeWeight))
 
         if (checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
             requestPermissions(
@@ -807,6 +809,7 @@ class MainActivity : Activity() {
         map.setTrail(TrailStore.points(this))
         map.setPois(PoiStore.load(this))
         map.setColours(routeColour, arrowColour, trailColour)
+        map.setRouteWeight(BngMapView.RouteWeight.of(routeWeight))
         // A Start pressed on the watch while this app was closed waits here.
         // The timestamp too: this path never set one, so a watch-started
         // walk showed hours-old elapsed time and saved with a wrong duration.
@@ -1598,10 +1601,19 @@ class MainActivity : Activity() {
      */
     private fun routeMenu() {
         val hideLabel = if (routeHidden) "Show the route" else "Hide the route"
+        // Named for what tapping it gives you, not for the state it is in:
+        // a menu line that reads "See-through" leaves you guessing whether
+        // that is what it is or what it would become.
+        val weightLabel = "Route line: " + when (BngMapView.RouteWeight.of(routeWeight)) {
+            BngMapView.RouteWeight.SOLID -> "solid \u2014 tap for see-through"
+            BngMapView.RouteWeight.SEE_THROUGH -> "see-through \u2014 tap for faint"
+            BngMapView.RouteWeight.FAINT -> "faint \u2014 tap for solid"
+        }
         val items = arrayOf(
             "Find walks…", "All walks…", "Draw a walk on the map",
             "Edit the loaded route", "Walk picker ‹ ›", "Import a GPX file",
-            "Saved walks", "Drive to the start", hideLabel, "GPX library folder…",
+            "Saved walks", "Drive to the start", hideLabel, weightLabel,
+            "GPX library folder…",
         )
         AlertDialog.Builder(this)
             .setItems(items) { _, i ->
@@ -1636,7 +1648,24 @@ class MainActivity : Activity() {
                             else "Route back on the map.",
                         )
                     }
-                    9 -> libraryDialog()
+                    9 -> {
+                        val next = BngMapView.RouteWeight.of(routeWeight + 1)
+                        routeWeight = next.ordinal
+                        map.setRouteWeight(next)
+                        say(
+                            when (next) {
+                                BngMapView.RouteWeight.SOLID ->
+                                    "Route line solid again."
+                                BngMapView.RouteWeight.SEE_THROUGH ->
+                                    "Route line see-through \u2014 the map reads through it, " +
+                                        "casing and all."
+                                BngMapView.RouteWeight.FAINT ->
+                                    "Route line faint \u2014 a tint over the map. Rights of way " +
+                                        "underneath should be readable now."
+                            },
+                        )
+                    }
+                    10 -> libraryDialog()
                 }
             }
             .show()

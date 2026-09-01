@@ -275,10 +275,56 @@ class BngMapView @JvmOverloads constructor(
 
     /** His colours, from Prefs on the phone and over the link on the watch. */
     fun setColours(route: Int, arrow: Int, trail: Int) {
+        routeBase = route
         routePaint.color = route
         routeArrowPaint.color = route
         herePaint.color = arrow
         trailPaint.color = trail
+        invalidate()
+    }
+
+    /**
+     * How solidly the route is painted over the map.
+     *
+     * A 1:25k Leisure tile is dense, and the green dashes of a right of way
+     * are two or three pixels wide — so a five-and-a-half-point line with a
+     * nine-point white casing under it covers the very symbol the route is
+     * being checked against. Thinning the line only reveals the map *beside*
+     * it; the question is what is *under* it, and only fading answers that.
+     *
+     * So one dial moves both, and the white casing goes first, because the
+     * casing is the part doing most of the hiding. Faint drops it entirely:
+     * at that weight the line is a tint over the map rather than something
+     * drawn on top of it.
+     */
+    enum class RouteWeight(val ink: Float, val casing: Float, val width: Float) {
+        SOLID(1f, 1f, 5.5f),
+        SEE_THROUGH(0.6f, 0.3f, 5f),
+        FAINT(0.38f, 0f, 4f),
+        ;
+
+        companion object {
+            /**
+             * A stored setting, made safe.
+             *
+             * It is kept as an ordinal, and an ordinal is the one number a
+             * saved setting can outgrow: take a step out of this list and
+             * every phone holding the last one asks for a weight that no
+             * longer exists. Wrapping rather than throwing also gives the
+             * menu its "next" for nothing.
+             */
+            fun of(i: Int): RouteWeight {
+                val all = values()
+                return all[((i % all.size) + all.size) % all.size]
+            }
+        }
+    }
+
+    private var routeBase = Colours.DEFAULT_ROUTE
+    private var routeWeight = RouteWeight.SOLID
+
+    fun setRouteWeight(w: RouteWeight) {
+        routeWeight = w
         invalidate()
     }
 
@@ -959,13 +1005,18 @@ class BngMapView @JvmOverloads constructor(
             path.moveTo(sx(line[0].e, m), sy(line[0].n, m))
             for (i in 1 until line.size) path.lineTo(sx(line[i].e, m), sy(line[i].n, m))
         }
-        previewCasing.strokeWidth = 8f * density
+        // The preview follows the same dial. It is the line he is *drawing*,
+        // so seeing the footpath under it matters more here than anywhere.
+        val w = routeWeight
+        previewCasing.alpha = (190 * w.casing).toInt()
+        previewCasing.strokeWidth = (w.width + 2.5f) * density
         previewCasing.pathEffect = android.graphics.DashPathEffect(
             floatArrayOf(10f * density, 6f * density), 0f,
         )
-        previewPaint.strokeWidth = 4.5f * density
+        previewPaint.alpha = (255 * w.ink).toInt()
+        previewPaint.strokeWidth = (w.width - 1f) * density
         previewPaint.pathEffect = previewCasing.pathEffect
-        canvas.drawPath(path, previewCasing)
+        if (w.casing > 0f) canvas.drawPath(path, previewCasing)
         canvas.drawPath(path, previewPaint)
     }
 
@@ -988,15 +1039,25 @@ class BngMapView @JvmOverloads constructor(
         path.rewind()
         path.moveTo(sx(pts[0].e, m), sy(pts[0].n, m))
         for (i in 1 until pts.size) path.lineTo(sx(pts[i].e, m), sy(pts[i].n, m))
-        casingPaint.strokeWidth = 9 * density
-        routePaint.strokeWidth = 5.5f * density
-        canvas.drawPath(path, casingPaint)
+        val w = routeWeight
+        casingPaint.alpha = (190 * w.casing).toInt()
+        casingPaint.strokeWidth = (w.width + 3.5f) * density
+        routePaint.color = routeBase
+        routePaint.alpha = (Color.alpha(routeBase) * w.ink).toInt()
+        routePaint.strokeWidth = w.width * density
+        if (w.casing > 0f) canvas.drawPath(path, casingPaint)
         canvas.drawPath(path, routePaint)
 
         // Direction arrows, one every ~140 dp of screen along the line.
         val total = cumDist.last()
         val spacing = 140.0 * density * m
         if (total < spacing / 2) return
+        routeArrowPaint.color = routeBase
+        routeArrowPaint.alpha = (Color.alpha(routeBase) * w.ink).toInt()
+        // Shared with the you-arrow and the edit handles, so it is put back
+        // to full before this method returns — a faded route must not take
+        // the arrow that says where he is standing down with it.
+        arrowOutline.alpha = (255 * w.ink).toInt()
         arrowOutline.strokeWidth = 1.5f * density
         var d = spacing / 2
         var seg = 1
@@ -1012,6 +1073,7 @@ class BngMapView @JvmOverloads constructor(
             drawArrowHead(canvas, sx(e, m), sy(n, m), bearing.toFloat(), 7f * density, routeArrowPaint)
             d += spacing
         }
+        arrowOutline.alpha = 255
     }
 
     private fun drawArrowHead(canvas: Canvas, x: Float, y: Float, bearingDeg: Float, r: Float, fill: Paint) {

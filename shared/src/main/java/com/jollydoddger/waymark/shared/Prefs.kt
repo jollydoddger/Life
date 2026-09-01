@@ -208,6 +208,17 @@ object Prefs {
         get() = p(this).getBoolean("routeReversed", false)
         set(v) = p(this).edit().putBoolean("routeReversed", v).apply()
 
+    /**
+     * How heavily the route is painted over the map — the ordinal of
+     * [BngMapView.RouteWeight]. Stored rather than mirrored: the watch
+     * screen is small and always wants the line at its most legible, and a
+     * setting made to read a 1:25k tile on a phone is not a setting for a
+     * wrist.
+     */
+    var Context.routeWeight: Int
+        get() = p(this).getInt("routeWeight", 0)
+        set(v) = p(this).edit().putInt("routeWeight", v).apply()
+
     // Chosen on the phone, mirrored to the watch: it is one app on two devices.
     var Context.routeColour: Int
         get() = p(this).getInt("routeColour", Colours.DEFAULT_ROUTE)
