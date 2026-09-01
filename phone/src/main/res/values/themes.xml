@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The stock-widget half of the dark look. The app's own chrome is painted
+  by hand (see Ui.kt), but every AlertDialog, Spinner, EditText and
+  RadioButton is drawn by the framework from this theme - and the theme
+  used to be Material *Light*, so each of them arrived bright white over a
+  hand-painted dark app. Framework theme only, no AppCompat: the project
+  deliberately carries no androidx.
+-->
+<resources>
+    <style name="Theme.Waymark" parent="android:Theme.Material.NoActionBar">
+        <item name="android:colorPrimary">#1A1E1B</item>
+        <item name="android:colorPrimaryDark">#121513</item>
+        <item name="android:colorAccent">#96D2AA</item>
+        <item name="android:colorControlActivated">#96D2AA</item>
+        <item name="android:colorEdgeEffect">#22603A</item>
+        <item name="android:windowBackground">#121513</item>
+    </style>
+</resources>

@@ -236,13 +236,8 @@ class MainActivity : Activity() {
         val d = resources.displayMetrics.density
         fun dp(v: Int) = (v * d).toInt()
 
-        fun iconButton(glyph: Glyph, onClick: () -> Unit): View {
-            val icon = IconDrawable(glyph, d)
-            return View(this).apply {
-                background = icon
-                setOnClickListener { onClick() }
-            }
-        }
+        fun iconButton(glyph: Glyph, onClick: () -> Unit): View =
+            Ui.iconButton(this, glyph, onTap = onClick)
 
         val importBtn = iconButton(Glyph.ROUTE) { routeMenu() }
         val reverseBtn = iconButton(Glyph.REVERSE) {
@@ -263,10 +258,7 @@ class MainActivity : Activity() {
         }
         val recentreBtn = iconButton(Glyph.LOCATE) { map.recentre() }
         recordIcon = IconDrawable(Glyph.RECORD, d)
-        val recordBtn = View(this).apply {
-            background = recordIcon
-            setOnClickListener { toggleRecording() }
-        }
+        val recordBtn = Ui.iconButton(this, recordIcon) { toggleRecording() }
         val downloadBtn = iconButton(Glyph.DOWNLOAD) { downloadArea() }
         val sunBtn = iconButton(Glyph.SUN) {
             val here = lastFix
@@ -291,10 +283,10 @@ class MainActivity : Activity() {
         }
 
         status = TextView(this).apply {
-            setBackgroundColor(Color.argb(200, 30, 30, 30))
-            setTextColor(Color.WHITE)
-            textSize = 14f
-            setPadding(dp(12), dp(8), dp(12), dp(8))
+            background = Ui.pill(this@MainActivity, Palette.scrim)
+            setTextColor(Palette.ink)
+            textSize = Ui.LABEL
+            setPadding(dp(16), dp(9), dp(16), dp(9))
             visibility = View.GONE
             setOnClickListener {
                 if (osApiKey.isEmpty()) startActivity(Intent(this@MainActivity, SettingsActivity::class.java))
@@ -325,11 +317,17 @@ class MainActivity : Activity() {
             text = "⋯"
             textSize = 20f
             gravity = Gravity.CENTER
-            setTextColor(Color.rgb(60, 70, 62))
+            setTextColor(Palette.inkMut)
+            background = Ui.ripple(null)
             setOnClickListener { openChat() }
         }
+        // Dark like everything else. It was the one cream surface in the
+        // app — the seam between "the app" and "the assistant" made
+        // literal, and it read as exactly the mismatch it was.
+        askBox.setTextColor(Palette.ink)
+        askBox.setHintTextColor(Palette.inkFaint)
         askBar = LinearLayout(this).apply {
-            setBackgroundColor(Color.argb(235, 250, 250, 248))
+            setBackgroundColor(Palette.sheet)
             gravity = Gravity.CENTER_VERTICAL
             setPadding(dp(8), dp(2), dp(4), dp(2))
             addView(askBox, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
@@ -379,7 +377,7 @@ class MainActivity : Activity() {
             ))
         }
         replyPanel = ScrollView(this).apply {
-            setBackgroundColor(Color.argb(225, 28, 32, 30))
+            setBackgroundColor(Palette.sheet)
             visibility = View.GONE
             addView(replyRow)
         }
@@ -474,7 +472,7 @@ class MainActivity : Activity() {
         }
         wxBar = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setBackgroundColor(Color.argb(215, 22, 26, 24))
+            setBackgroundColor(Palette.sheet)
             visibility = View.GONE
             addView(wxTopRow, LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT,
@@ -508,10 +506,10 @@ class MainActivity : Activity() {
         fun pickerButton(label: String, wide: Boolean = false, onTap: () -> Unit) =
             TextView(this).apply {
                 text = label
-                textSize = if (wide) 14f else 19f
+                textSize = if (wide) Ui.LABEL else 19f
                 gravity = Gravity.CENTER
-                setTextColor(Color.WHITE)
-                setBackgroundColor(Color.argb(255, 44, 52, 48))
+                setTextColor(Palette.ink)
+                background = Ui.ripple(Ui.pill(this@MainActivity, Palette.raised))
                 setPadding(dp(if (wide) 14 else 16), dp(8), dp(if (wide) 14 else 16), dp(8))
                 setOnClickListener { onTap() }
             }
@@ -556,11 +554,11 @@ class MainActivity : Activity() {
         }
         fun editButton(label: String, onTap: () -> Unit) = TextView(this).apply {
             text = label
-            textSize = 14f
+            textSize = Ui.LABEL
             gravity = Gravity.CENTER
-            setTextColor(Color.WHITE)
-            setBackgroundColor(Color.argb(255, 44, 52, 48))
-            setPadding(dp(13), dp(9), dp(13), dp(9))
+            setTextColor(Palette.ink)
+            background = Ui.ripple(Ui.pill(this@MainActivity, Palette.raised))
+            setPadding(dp(14), dp(9), dp(14), dp(9))
             setOnClickListener { onTap() }
         }
         editSnapBtn = editButton("Paths") { cycleSnap() }
@@ -579,7 +577,7 @@ class MainActivity : Activity() {
         }
         editBar = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setBackgroundColor(Color.argb(235, 22, 26, 24))
+            setBackgroundColor(Palette.sheet)
             visibility = View.GONE
             addView(editStat, LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT,
@@ -598,7 +596,7 @@ class MainActivity : Activity() {
 
         pickerBar = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setBackgroundColor(Color.argb(230, 22, 26, 24))
+            setBackgroundColor(Palette.sheet)
             visibility = View.GONE
             addView(pickerTop, LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT,
@@ -644,22 +642,22 @@ class MainActivity : Activity() {
         // the wash of colour it used to be — two characters say more than a
         // film over the whole map did, and bury nothing saying it.
         tempChip = TextView(this).apply {
-            textSize = 26f
+            textSize = Ui.BIG
             setTypeface(typeface, android.graphics.Typeface.BOLD)
-            setTextColor(Color.WHITE)
-            setBackgroundColor(Color.argb(205, 30, 34, 32))
-            setPadding(dp(12), dp(4), dp(12), dp(4))
+            setTextColor(Palette.ink)
+            background = Ui.ripple(Ui.pill(this@MainActivity, Palette.scrim))
+            setPadding(dp(14), dp(4), dp(14), dp(4))
             visibility = View.GONE
             // The number on the map is the obvious thing to press when you
             // want more than a number.
             setOnClickListener { openWeather() }
         }
         timerChip = TextView(this).apply {
-            textSize = 26f
+            textSize = Ui.BIG
             setTypeface(typeface, android.graphics.Typeface.BOLD)
-            setTextColor(Color.WHITE)
-            setBackgroundColor(Color.argb(205, 30, 34, 32))
-            setPadding(dp(12), dp(4), dp(12), dp(4))
+            setTextColor(Palette.ink)
+            background = Ui.pill(this@MainActivity, Palette.scrim)
+            setPadding(dp(14), dp(4), dp(14), dp(4))
             visibility = View.GONE
         }
         chipRow = LinearLayout(this).apply {
@@ -685,9 +683,9 @@ class MainActivity : Activity() {
         markChip = TextView(this).apply {
             textSize = 16f
             setTypeface(typeface, android.graphics.Typeface.BOLD)
-            setTextColor(Color.WHITE)
-            setBackgroundColor(Color.argb(205, 30, 34, 32))
-            setPadding(dp(12), dp(4), dp(12), dp(4))
+            setTextColor(Palette.ink)
+            background = Ui.ripple(Ui.pill(this@MainActivity, Palette.scrim))
+            setPadding(dp(14), dp(4), dp(14), dp(4))
             visibility = View.GONE
         }
         val topBar = LinearLayout(this).apply {
@@ -1043,26 +1041,13 @@ class MainActivity : Activity() {
         val shown = layers().filter { it.allowed }
         chipScroll.visibility = if (shown.isEmpty()) View.GONE else View.VISIBLE
         for (layer in shown) {
+            // On and off have to be tellable apart at a glance in daylight,
+            // which Ui.chip's green-on / scrim-off already is.
             chipRow.addView(
-                TextView(this).apply {
-                    text = layer.label
-                    textSize = 13f
-                    // On and off have to be tellable apart at a glance in
-                    // daylight, so it is not a subtle tint: on is the app's
-                    // green with white text, off is dark and greyed.
-                    if (layer.on) {
-                        setBackgroundColor(Color.argb(235, 34, 96, 58))
-                        setTextColor(Color.WHITE)
-                    } else {
-                        setBackgroundColor(Color.argb(190, 34, 38, 36))
-                        setTextColor(Color.argb(255, 168, 172, 170))
-                    }
-                    setPadding(dp(12), dp(7), dp(12), dp(7))
-                    setOnClickListener {
-                        layer.set(!layer.on)
-                        buildChips()
-                        bindOverlays()
-                    }
+                Ui.chip(this, layer.label, layer.on) {
+                    layer.set(!layer.on)
+                    buildChips()
+                    bindOverlays()
                 },
                 LinearLayout.LayoutParams(
                     LinearLayout.LayoutParams.WRAP_CONTENT,
