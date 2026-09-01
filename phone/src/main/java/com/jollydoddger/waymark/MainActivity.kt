@@ -151,6 +151,7 @@ class MainActivity : Activity() {
      *  chips that sit beside them. */
     private lateinit var chipRow: LinearLayout
     private lateinit var chipScroll: HorizontalScrollView
+    private lateinit var mapChip: TextView
     private lateinit var tempChip: TextView
     private lateinit var timerChip: TextView
     private lateinit var markChip: TextView
@@ -854,8 +855,41 @@ class MainActivity : Activity() {
         }
         chipScroll = HorizontalScrollView(this).apply {
             isHorizontalScrollBarEnabled = false
+            // A row that overflows must look like one. Without this it was
+            // indistinguishable from a full row, which is half the reason
+            // nobody found what had scrolled off the end of it.
+            isHorizontalFadingEdgeEnabled = true
+            setFadingEdgeLength(dp(20))
             visibility = View.GONE
             addView(chipRow)
+        }
+        // Outside the scroll, and last in a weighted row, so it holds the
+        // right-hand end whatever the layer chips do. It used to be the
+        // final child *inside* the scroll — which on his phone, with the
+        // weather and paths layers on, put it about 150dp past the edge of
+        // the screen, in a row with no scrollbar and no fading edge to
+        // suggest there was anything out there. "No hide route button": it
+        // existed, and could not be reached.
+        mapChip = TextView(this).apply {
+            text = "Map ⋯"
+            textSize = Ui.CAP
+            setTextColor(Palette.ink)
+            // Deliberately not Ui.chip's off-state: in a row whose whole
+            // grammar is green-on / grey-off, a permanently grey chip reads
+            // as a switched-off layer rather than a way in to a menu.
+            background = Ui.ripple(Ui.pill(this@MainActivity, Palette.raised))
+            setPadding(dp(14), dp(8), dp(14), dp(8))
+            setOnClickListener { mapOptions(this) }
+        }
+        val chipLine = LinearLayout(this).apply {
+            gravity = Gravity.CENTER_VERTICAL
+            addView(chipScroll, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+            addView(
+                mapChip,
+                LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT,
+                ).apply { leftMargin = dp(6) },
+            )
         }
         val readouts = LinearLayout(this).apply {
             addView(tempChip, LinearLayout.LayoutParams(
@@ -887,7 +921,7 @@ class MainActivity : Activity() {
             addView(markChip, LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT,
             ).apply { bottomMargin = dp(6) })
-            addView(chipScroll, LinearLayout.LayoutParams(
+            addView(chipLine, LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT,
             ))
         }
@@ -1029,6 +1063,17 @@ class MainActivity : Activity() {
         if (osApiKey.isEmpty()) {
             sayAction("No map without a key — enter your OS Maps API key.", "Settings") {
                 startActivity(Intent(this, SettingsActivity::class.java))
+            }
+        } else if (routeHidden && RouteStore.load(this) != null) {
+            // Hiding the route must never be a one-way door. It is set from
+            // one small menu, and when that menu was off the edge of the
+            // screen the only way back was adopting a different route
+            // altogether. Now the state offers its own undo, wherever the
+            // button that set it happens to be.
+            sayAction("Route hidden.", "Show") {
+                routeHidden = false
+                map.setRoute(RouteStore.load(this))
+                sayBriefly("Route back on the map.")
             }
         }
         // A run that outlived a trip to another screen gets its clock back.
@@ -1357,9 +1402,9 @@ class MainActivity : Activity() {
     private fun buildChips() {
         chipRow.removeAllViews()
         val shown = layers().filter { it.allowed }
-        // The row always exists now: the Map chip at its end carries the
-        // display toggles that used to hide in the walks dialog.
-        chipScroll.visibility = View.VISIBLE
+        // The scroll can be empty — the Map button lives beside it now, not
+        // in it, so the display toggles are reachable with no layers on.
+        chipScroll.visibility = if (shown.isEmpty()) View.GONE else View.VISIBLE
         for (layer in shown) {
             // On and off have to be tellable apart at a glance in daylight,
             // which Ui.chip's green-on / scrim-off already is.
@@ -1375,15 +1420,6 @@ class MainActivity : Activity() {
                 ).apply { rightMargin = dp(6) },
             )
         }
-        lateinit var mapChip: TextView
-        mapChip = Ui.chip(this, "Map \u22ef", false) { mapOptions(mapChip) }
-        chipRow.addView(
-            mapChip,
-            LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.WRAP_CONTENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT,
-            ),
-        )
     }
 
     // Whether a layer actually draws: allowed in Settings *and* toggled on
@@ -1984,7 +2020,15 @@ class MainActivity : Activity() {
             LinearLayout.LayoutParams.WRAP_CONTENT,
             LinearLayout.LayoutParams.WRAP_CONTENT,
             true,
-        ).apply { elevation = dp(8).toFloat() }
+        ).apply {
+            elevation = dp(8).toFloat()
+            // Both of these, or the popup is touch-modal: focusable with no
+            // background drawable swallows every tap outside itself and
+            // refuses to close, leaving Back as the only way out of a menu
+            // three lines long.
+            setBackgroundDrawable(android.graphics.drawable.ColorDrawable(Color.TRANSPARENT))
+            isOutsideTouchable = true
+        }
         pop.showAsDropDown(anchor, 0, dp(4))
     }
 
