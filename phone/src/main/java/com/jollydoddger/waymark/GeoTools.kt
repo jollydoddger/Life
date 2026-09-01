@@ -378,11 +378,10 @@ class GeoTools(
         // Real walks first — established, named, actually walked — gathered
         // while the network downloads costs nothing extra and answers the
         // question better than an invented loop can.
-        val real = runCatching {
+        val nearby = runCatching {
             RouteFinder.find(ctx, here, 12_000.0).walks
-        }.getOrDefault(emptyList()).let { found ->
-            WalkFilter.filter(found, here, null, target * 0.65, target * 1.35)
-        }.take(6)
+        }.getOrDefault(emptyList())
+        val real = WalkFilter.filter(nearby, here, null, target * 0.65, target * 1.35).take(6)
 
         progress("Reading the paths and lanes round here…")
         val graph = runCatching {
@@ -393,6 +392,18 @@ class GeoTools(
         }
         if (graph.nodes.size < 20) {
             return offer(real, emptyList(), target, noNetwork(avoidRoads))
+        }
+
+        // Piece the new walk together out of the ones already found. Every
+        // nearby walk is laid onto the graph — not just the ones the right
+        // length to offer whole, because a forty-kilometre coast path is
+        // perfect material for an eight-kilometre loop even though it can
+        // never be that loop. The ways beneath them become cheap, so the
+        // search runs along real walks where they go his way and works out
+        // its own connections where they don't.
+        if (nearby.isNotEmpty()) {
+            progress("Laying ${nearby.size} known walks onto the map…")
+            graph.markTrails(nearby.flatMap { it.lines })
         }
 
         progress("Building a loop…")
@@ -448,6 +459,8 @@ class GeoTools(
         val lines = StringBuilder()
         planned.forEach { p ->
             lines.append("\n- Planned ${km(p.metres)} circular (asked ${km(target)})")
+            // Say how much of it is somebody's real walk rather than ours.
+            if (p.trailM >= 400) lines.append(", ${km(p.trailM)} of it along known walks")
             if (p.repeatFraction > 0.05) {
                 lines.append(", retraces ${(p.repeatFraction * 100).roundToInt()}%")
             }

@@ -619,6 +619,15 @@ class SettingsActivity : Activity() {
             val response = client.messages().create(
                 MessageCreateParams.builder()
                     .model(Model.of(Assistant.MODEL))
+                    // "Is the key working" needs no thinking at all, and
+                    // effort defaults to high. The pinned SDK predates
+                    // Opus 5 and has no typed binding for this, so it goes
+                    // in as a raw body property — checked against the jar,
+                    // not guessed.
+                    .putAdditionalBodyProperty(
+                        "output_config",
+                        com.anthropic.core.JsonValue.from(mapOf("effort" to "low")),
+                    )
                     .maxTokens(16L)
                     .addUserMessage("Say OK and nothing else.")
                     .build(),

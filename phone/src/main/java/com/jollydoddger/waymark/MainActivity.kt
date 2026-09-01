@@ -1594,10 +1594,9 @@ class MainActivity : Activity() {
     private fun routeMenu() {
         val hideLabel = if (routeHidden) "Show the route" else "Hide the route"
         val items = arrayOf(
-            "Plan a walk…", "All walks…", "Draw a walk on the map",
-            "Edit the loaded route", "Walk picker ‹ ›", "Import a GPX file", "Walks near me",
-            "Walks on this map ‹ ›", "Saved walks", "Drive to the start",
-            hideLabel, "GPX library folder…",
+            "Find walks…", "All walks…", "Draw a walk on the map",
+            "Edit the loaded route", "Walk picker ‹ ›", "Import a GPX file",
+            "Drive to the start", hideLabel, "GPX library folder…",
         )
         AlertDialog.Builder(this)
             .setItems(items) { _, i ->
@@ -1615,17 +1614,14 @@ class MainActivity : Activity() {
                     }
                     4 -> reopenPicker()
                     5 -> pickGpx()
-                    6 -> walksNearMe()
-                    7 -> walksOnScreen()
-                    8 -> savedWalksDialog()
-                    9 -> {
+                    6 -> {
                         // Present even with no route, saying so — a menu item
                         // that comes and goes is a menu you can't learn.
                         val start = RouteStore.load(this)?.points?.firstOrNull()
                         if (start == null) say("No route loaded — import or find one first.")
                         else openParking(start)
                     }
-                    10 -> {
+                    7 -> {
                         routeHidden = !routeHidden
                         map.setRoute(if (routeHidden) null else RouteStore.load(this))
                         say(
@@ -1634,7 +1630,7 @@ class MainActivity : Activity() {
                             else "Route back on the map.",
                         )
                     }
-                    11 -> libraryDialog()
+                    8 -> libraryDialog()
                 }
             }
             .show()
@@ -1642,156 +1638,6 @@ class MainActivity : Activity() {
 
     // --- saved walks ----------------------------------------------------------
 
-    /** After ■: the walk just recorded is worth keeping, so offer, once. */
-    private fun offerToSaveWalk() {
-        val points = TrailStore.points(this)
-        if (points.size < 2) return
-        val startedAt = recordingStartedAt.takeIf { it > 0 } ?: System.currentTimeMillis()
-        val endedAt = System.currentTimeMillis()
-        val d = resources.displayMetrics.density
-        fun dp(v: Int) = (v * d).toInt()
-        val nameBox = EditText(this).apply {
-            hint = "Name"
-            setText(
-                java.text.SimpleDateFormat("'Walk,' d MMM", java.util.Locale.UK)
-                    .format(java.util.Date(startedAt)),
-            )
-        }
-        val notesBox = EditText(this).apply {
-            hint = "Notes — where, how it was…"
-            minLines = 2
-        }
-        val col = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dp(20), dp(8), dp(20), 0)
-            addView(nameBox)
-            addView(notesBox)
-        }
-        val km = Geom.length(points) / 1000
-        AlertDialog.Builder(this)
-            .setTitle("Save this walk? (%.1f km)".format(km))
-            .setView(col)
-            .setPositiveButton("Save") { _, _ ->
-                saveWalk(nameBox.text.toString().trim(), notesBox.text.toString().trim(),
-                    points, startedAt, endedAt)
-            }
-            .setNegativeButton("Not this one", null)
-            .show()
-    }
-
-    private fun saveWalk(name: String, notes: String, points: List<En>, startedAt: Long, endedAt: Long) {
-        scope.launch {
-            val walk = withContext(Dispatchers.IO) {
-                // Where it was: the grid reference always; a place name only
-                // if Nominatim answers promptly. Saving never waits on signal.
-                val grid = com.jollydoddger.waymark.shared.Bng.gridRef(points.first(), 3).orEmpty()
-                val named = runCatching {
-                    val (lat, lon) = com.jollydoddger.waymark.shared.Bng.toWgs84(points.first())
-                    val json = Net.get(
-                        "https://nominatim.openstreetmap.org/reverse?format=json&zoom=14" +
-                            "&lat=%.5f&lon=%.5f".format(lat, lon),
-                        timeoutMs = 6_000,
-                    )
-                    org.json.JSONObject(json).optString("display_name")
-                        .split(",").take(2).joinToString(",").trim()
-                }.getOrNull().orEmpty()
-                val walk = Walks.SavedWalk(
-                    id = java.util.UUID.randomUUID().toString(),
-                    name = name.ifBlank { "Walk" },
-                    notes = notes,
-                    place = listOf(named, grid).filter { it.isNotBlank() }.joinToString(" · "),
-                    startedAt = startedAt, endedAt = endedAt,
-                    distanceM = Geom.length(points),
-                    points = points,
-                )
-                Walks.save(this@MainActivity, walk)
-                walk
-            }
-            say("Saved “${walk.name}” — ${fmtDist(walk.distanceM)} in ${Walks.duration(walk)}. " +
-                "It lives under GPX → Saved walks.")
-        }
-    }
-
-    private fun savedWalksDialog() {
-        val walks = Walks.list(this)
-        if (walks.isEmpty()) {
-            say("No saved walks yet. Record one with ● and save it when you stop.")
-            return
-        }
-        val rows = walks.map {
-            "${it.name} — ${Walks.dateLine(it)} · ${fmtDist(it.distanceM)} · ${Walks.duration(it)}"
-        }
-        AlertDialog.Builder(this)
-            .setTitle("Saved walks")
-            .setItems(rows.toTypedArray()) { _, i -> savedWalkActions(walks[i]) }
-            .setNegativeButton("Cancel", null)
-            .show()
-    }
-
-    private fun savedWalkActions(walk: Walks.SavedWalk) {
-        val detail = buildString {
-            append(Walks.dateLine(walk)).append(" · ").append(fmtDist(walk.distanceM))
-                .append(" · ").append(Walks.duration(walk))
-            if (walk.place.isNotBlank()) append("\n").append(walk.place)
-            if (walk.notes.isNotBlank()) append("\n\n").append(walk.notes)
-        }
-        AlertDialog.Builder(this)
-            .setTitle(walk.name)
-            .setMessage(detail)
-            .setPositiveButton("Load as route") { _, _ ->
-                importJob?.cancel()
-                importJob = scope.launch {
-                    val route = withContext(Dispatchers.IO) {
-                        Route(walk.name, walk.points).also { RouteStore.save(this@MainActivity, it) }
-                    }
-                    say("“${walk.name}” set as the route — fetching offline tiles…")
-                    publishRoute(route)
-                }
-            }
-            .setNeutralButton("Share as GPX") { _, _ ->
-                scope.launch {
-                    val uri = withContext(Dispatchers.IO) { Walks.asGpxUri(this@MainActivity, walk) }
-                    val send = Intent(Intent.ACTION_SEND).apply {
-                        type = "application/gpx+xml"
-                        putExtra(Intent.EXTRA_STREAM, uri)
-                        putExtra(Intent.EXTRA_SUBJECT, walk.name)
-                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                    }
-                    startActivity(Intent.createChooser(send, "Share “${walk.name}”"))
-                }
-            }
-            .setNegativeButton("Delete") { _, _ ->
-                AlertDialog.Builder(this)
-                    .setMessage("Delete “${walk.name}” for good?")
-                    .setPositiveButton("Delete") { _, _ ->
-                        Walks.delete(this, walk.id)
-                        say("“${walk.name}” deleted.")
-                    }
-                    .setNegativeButton("Keep", null)
-                    .show()
-            }
-            .show()
-    }
-
-    private fun fmtDist(m: Double) =
-        if (m < 1000) "${m.roundToInt()} m" else "%.1f km".format(m / 1000)
-
-    private fun walksNearMe() {
-        val here = lastFix ?: run {
-            say("No GPS fix yet — the search is centred on where you are.")
-            return
-        }
-        val options = listOf(
-            "500 m" to 500.0, "2 km" to 2_000.0, "5 km" to 5_000.0,
-            "10 km" to 10_000.0, "25 km (a short drive)" to 25_000.0,
-        )
-        AlertDialog.Builder(this)
-            .setTitle("Walks whose line comes within…")
-            .setItems(options.map { it.first }.toTypedArray()) { _, i ->
-                findWalks(here, options[i].second)
-            }
-            .show()
-    }
 
     /**
      * The walks crossing the map as it stands — OpenStreetMap's routes, his
@@ -1904,6 +1750,8 @@ class MainActivity : Activity() {
             setSelection(spec.dayOffset.coerceIn(0, WalkSpec.MAX_DAY_OFFSET))
         }
 
+        val fromBox = number(spec.from)
+        val toBox = number(spec.to)
         val units = TextView(this).apply {
             textSize = 13f
             setTextColor(Color.argb(200, 150, 160, 152))
@@ -1916,15 +1764,21 @@ class MainActivity : Activity() {
             textSize = 16f
             setSingleLine()
         }
-        val fromBox = number(spec.from)
-        val toBox = number(spec.to)
+
 
         val byTime = RadioGroup(this).apply {
             orientation = LinearLayout.HORIZONTAL
             addView(RadioButton(this@MainActivity).apply { id = 1; text = "Distance"; textSize = 14f })
             addView(RadioButton(this@MainActivity).apply { id = 2; text = "Time"; textSize = 14f })
-            check(if (spec.byTime) 2 else 1)
-            setOnCheckedChangeListener { _, id -> units.text = if (id == 2) "hours" else "km" }
+            addView(RadioButton(this@MainActivity).apply { id = 3; text = "Any length"; textSize = 14f })
+            check(if (spec.anyLength) 3 else if (spec.byTime) 2 else 1)
+            setOnCheckedChangeListener { _, id ->
+                units.text = if (id == 2) "hours" else "km"
+                // "Any length" is the old Walks-near-me: show me what is
+                // here, never mind how long. The boxes have nothing to say.
+                fromBox.isEnabled = id != 3
+                toBox.isEnabled = id != 3
+            }
         }
         units.text = if (spec.byTime) "hours" else "km"
 
@@ -1977,6 +1831,7 @@ class MainActivity : Activity() {
                         else -> Shape.ANY
                     },
                     byTime = byTime.checkedRadioButtonId == 2,
+                    anyLength = byTime.checkedRadioButtonId == 3,
                     from = fromBox.text.toString().toDoubleOrNull() ?: spec.from,
                     to = toBox.text.toString().toDoubleOrNull() ?: spec.to,
                     dayOffset = daySpinner.selectedItemPosition.coerceIn(0, WalkSpec.MAX_DAY_OFFSET),
@@ -2122,6 +1977,19 @@ class MainActivity : Activity() {
             // forty-kilometre trail he cannot walk today is still ground the
             // planner should route along where it goes his way.
             var trails = found?.walks.orEmpty()
+            // Everything within reach, gathered once for stitching. The
+            // list above is narrowed to his start licence, which is right
+            // for what to *offer* and wrong for what to *build from*: a
+            // coast path a mile off is material for the loop even though it
+            // does not start where he does.
+            val stitchable = if (!osmFailed && searchM < 8_000.0) {
+                withContext(Dispatchers.IO) {
+                    runCatching { RouteFinder.find(this@MainActivity, here, 8_000.0).walks }
+                        .getOrDefault(emptyList())
+                }
+            } else {
+                emptyList()
+            }
             // A 500 m licence around a house in Anglesey contains no
             // published walking route at all, most days. Rather than an
             // empty picker, look once more at driving distance and say
@@ -2193,6 +2061,20 @@ class MainActivity : Activity() {
                 say("No established walk near there at all. Working one out\u2026")
             }
 
+            // Nothing to aim at, so nothing to invent — "any length" is a
+            // question about what is already here.
+            if (spec.anyLength) {
+                if (real.isEmpty()) {
+                    say("Nothing found round there at all.")
+                } else {
+                    say(
+                        "${real.size} walk${if (real.size == 1) "" else "s"} round there \u2014 " +
+                            "\u2039 \u203a to flick through, or All walks for the list.",
+                    )
+                }
+                return@launch
+            }
+
             // The invented one. Its shape follows the ask: nobody wants a
             // circuit when they asked to go out to something and come back.
             val target = (minM + maxM) / 2
@@ -2223,7 +2105,8 @@ class MainActivity : Activity() {
                     // that goes his way, and finds its own way home where it
                     // doesn't. No extra request: this is the same geometry
                     // the real-walk search just downloaded.
-                    graph.markTrails(trails.flatMap { it.lines })
+                    val lay = (trails + stitchable).distinctBy { it.name to it.lengthM }
+                    graph.markTrails(lay.flatMap { it.lines })
                     val deadline = System.currentTimeMillis() + specBudgetMs
                     if (spec.shape == Shape.OUT_AND_BACK) {
                         listOfNotNull(

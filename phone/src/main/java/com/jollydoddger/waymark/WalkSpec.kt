@@ -62,6 +62,16 @@ data class WalkSpec(
     val byTime: Boolean = false,
     val from: Double = 5.0,
     val to: Double = 10.0,
+    /**
+     * Ignore length entirely — "just show me what is round here".
+     *
+     * This is what the old "Walks near me" menu item was, and folding it in
+     * is what let three separate ways of looking for a walk become one. It
+     * also turns the planner off for that search: an invented loop needs a
+     * length to aim at, and averaging "no minimum" with "no maximum" would
+     * give it a meaningless one.
+     */
+    val anyLength: Boolean = false,
     /** 0 = today. Bounded by what a forecast can honestly cover. */
     val dayOffset: Int = 0,
     /** Where it may start. See [Origin]. */
@@ -76,6 +86,7 @@ data class WalkSpec(
      * level walking and the brief afterwards says what the hills add.
      */
     fun rangeMetres(paceMinPerKm: Double): Pair<Double, Double> {
+        if (anyLength) return 0.0 to 100_000.0
         val lo = minOf(from, to)
         val hi = maxOf(from, to)
         return if (byTime) {
@@ -89,7 +100,11 @@ data class WalkSpec(
     fun label(): String {
         val lo = minOf(from, to)
         val hi = maxOf(from, to)
-        val size = if (byTime) "${trim(lo)}–${trim(hi)} hours" else "${trim(lo)}–${trim(hi)} km"
+        val size = when {
+            anyLength -> "any length"
+            byTime -> "${trim(lo)}–${trim(hi)} hours"
+            else -> "${trim(lo)}–${trim(hi)} km"
+        }
         val kind = when (shape) {
             Shape.CIRCULAR -> "circular"
             Shape.OUT_AND_BACK -> "there and back"
@@ -109,6 +124,7 @@ data class WalkSpec(
         .put("from", from)
         .put("to", to)
         .put("dayOffset", dayOffset)
+        .put("anyLength", anyLength)
         .put("origin", origin.name)
         .toString()
 
@@ -126,6 +142,7 @@ data class WalkSpec(
                     byTime = o.optBoolean("byTime"),
                     from = o.optDouble("from", 5.0),
                     to = o.optDouble("to", 10.0),
+                    anyLength = o.optBoolean("anyLength"),
                     dayOffset = o.optInt("dayOffset").coerceIn(0, MAX_DAY_OFFSET),
                     origin = runCatching { Origin.valueOf(o.optString("origin")) }
                         .getOrDefault(Origin.HERE),
