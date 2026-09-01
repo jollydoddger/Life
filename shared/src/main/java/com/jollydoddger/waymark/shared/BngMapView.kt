@@ -131,6 +131,19 @@ class BngMapView @JvmOverloads constructor(
         return En((x - width / 2f) * m + centreE, centreN - (y - height / 2f) * m)
     }
 
+    /**
+     * The tapped points of a route being drawn, as draggable-looking
+     * handles. Distinct from marks (numbered flags on a finished route) and
+     * from the preview (a dashed line): these are the thing under his
+     * finger, so they are drawn last and drawn big enough to hit.
+     */
+    private var editHandles: List<En> = emptyList()
+
+    fun setEditHandles(points: List<En>) {
+        editHandles = points
+        invalidate()
+    }
+
     /** Numbered flags at his marked points. */
     private var marks: List<Pair<En, Int>> = emptyList()
 
@@ -223,6 +236,10 @@ class BngMapView @JvmOverloads constructor(
     var onFollowChanged: ((Boolean) -> Unit)? = null
 
     private fun mpp(z: Double) = 896.0 / 2.0.pow(z)
+
+    /** Grid metres per screen pixel at the current zoom — for turning a
+     *  thumb's width into a distance on the ground. */
+    fun metresPerPixel(): Double = mpp(zl)
 
     // --- public surface -----------------------------------------------------
 
@@ -372,6 +389,7 @@ class BngMapView @JvmOverloads constructor(
         drawPois(canvas)
         drawRouteEnds(canvas)
         drawMarks(canvas)
+        drawEditHandles(canvas)
         drawStreamlines(canvas)
         drawWind(canvas)
         drawHere(canvas)
@@ -1130,6 +1148,34 @@ class BngMapView @JvmOverloads constructor(
             path.lineTo(sxp + r * 0.55f, syp)
             path.close()
             canvas.drawPath(path, endGlyph)
+        }
+    }
+
+    private val handleFill = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.rgb(255, 214, 64) }
+    private val handleRing = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        color = Color.rgb(40, 40, 40)
+    }
+
+    /**
+     * The tapped points of a walk being drawn. Drawn last and drawn large:
+     * these are what his thumb is aiming at, and a handle he cannot hit is
+     * a point he cannot delete.
+     */
+    private fun drawEditHandles(canvas: Canvas) {
+        if (editHandles.isEmpty()) return
+        val m = mpp(zl)
+        val r = 9f * density
+        handleRing.strokeWidth = 2.5f * density
+        for ((i, en) in editHandles.withIndex()) {
+            val x = sx(en.e, m)
+            val y = sy(en.n, m)
+            if (x < -r || y < -r || x > width + r || y > height + r) continue
+            // The first point is the one worth telling apart: it is where
+            // the walk begins, and where closing the loop comes back to.
+            val big = if (i == 0) r * 1.35f else r
+            canvas.drawCircle(x, y, big, handleFill)
+            canvas.drawCircle(x, y, big, handleRing)
         }
     }
 

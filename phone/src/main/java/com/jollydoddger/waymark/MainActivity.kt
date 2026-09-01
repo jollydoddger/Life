@@ -155,6 +155,14 @@ class MainActivity : Activity() {
     private var picksFromSpec = false
     private var specJob: kotlinx.coroutines.Job? = null
 
+    // --- drawing a walk by tapping ------------------------------------------
+    private lateinit var editBar: LinearLayout
+    private lateinit var editStat: TextView
+    private lateinit var editSnapBtn: TextView
+    private var editing: RouteEdit? = null
+    private var editGraph: Router.Graph? = null
+    private var editJob: kotlinx.coroutines.Job? = null
+
     /**
      * Whether this screen is still the one on the phone. Radar and Weather
      * are process-wide objects holding a main-thread handler, and every
@@ -524,6 +532,51 @@ class MainActivity : Activity() {
             setPadding(dp(10), dp(6), dp(10), dp(10))
             addView(pickerRow)
         }
+        editStat = TextView(this).apply {
+            textSize = 14f
+            setTextColor(Color.WHITE)
+            setPadding(dp(14), dp(8), dp(10), dp(2))
+        }
+        fun editButton(label: String, onTap: () -> Unit) = TextView(this).apply {
+            text = label
+            textSize = 14f
+            gravity = Gravity.CENTER
+            setTextColor(Color.WHITE)
+            setBackgroundColor(Color.argb(255, 44, 52, 48))
+            setPadding(dp(13), dp(9), dp(13), dp(9))
+            setOnClickListener { onTap() }
+        }
+        editSnapBtn = editButton("Paths") { cycleSnap() }
+        val editRow = LinearLayout(this).apply {
+            gravity = Gravity.CENTER_VERTICAL
+            fun gap() = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT,
+            ).apply { rightMargin = dp(7) }
+            addView(editSnapBtn, gap())
+            addView(editButton("Undo") { undoEdit() }, gap())
+            addView(editButton("Close loop") { closeEditLoop() }, gap())
+            addView(editButton("Save") { saveEdit() }, gap())
+            addView(editButton("✕") { stopEditing(save = false) })
+        }
+        editBar = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundColor(Color.argb(235, 22, 26, 24))
+            visibility = View.GONE
+            addView(editStat, LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT,
+            ))
+            addView(
+                HorizontalScrollView(this@MainActivity).apply {
+                    isHorizontalScrollBarEnabled = false
+                    setPadding(dp(10), dp(4), dp(10), dp(10))
+                    addView(editRow)
+                },
+                LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT,
+                ),
+            )
+        }
+
         pickerBar = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setBackgroundColor(Color.argb(230, 22, 26, 24))
@@ -538,6 +591,9 @@ class MainActivity : Activity() {
 
         bottomStack = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
+            addView(editBar, LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT,
+            ))
             addView(pickerBar, LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT,
             ))
@@ -1537,7 +1593,8 @@ class MainActivity : Activity() {
     private fun routeMenu() {
         val hideLabel = if (routeHidden) "Show the route" else "Hide the route"
         val items = arrayOf(
-            "Plan a walk…", "Walk picker ‹ ›", "Import a GPX file", "Walks near me",
+            "Plan a walk…", "Draw a walk on the map", "Edit the loaded route",
+            "Walk picker ‹ ›", "Import a GPX file", "Walks near me",
             "Walks on this map ‹ ›", "Saved walks", "Drive to the start",
             hideLabel, "GPX library folder…",
         )
@@ -1545,19 +1602,28 @@ class MainActivity : Activity() {
             .setItems(items) { _, i ->
                 when (i) {
                     0 -> walkSpecifier()
-                    1 -> reopenPicker()
-                    2 -> pickGpx()
-                    3 -> walksNearMe()
-                    4 -> walksOnScreen()
-                    5 -> savedWalksDialog()
-                    6 -> {
+                    1 -> startEditing()
+                    2 -> {
+                        val loaded = RouteStore.load(this)?.points
+                        if (loaded == null || loaded.size < 2) {
+                            say("No route loaded to edit — draw one, or import one first.")
+                        } else {
+                            startEditing(loaded)
+                        }
+                    }
+                    3 -> reopenPicker()
+                    4 -> pickGpx()
+                    5 -> walksNearMe()
+                    6 -> walksOnScreen()
+                    7 -> savedWalksDialog()
+                    8 -> {
                         // Present even with no route, saying so — a menu item
                         // that comes and goes is a menu you can't learn.
                         val start = RouteStore.load(this)?.points?.firstOrNull()
                         if (start == null) say("No route loaded — import or find one first.")
                         else openParking(start)
                     }
-                    7 -> {
+                    9 -> {
                         routeHidden = !routeHidden
                         map.setRoute(if (routeHidden) null else RouteStore.load(this))
                         say(
@@ -1566,7 +1632,7 @@ class MainActivity : Activity() {
                             else "Route back on the map.",
                         )
                     }
-                    8 -> libraryDialog()
+                    10 -> libraryDialog()
                 }
             }
             .show()
@@ -2246,6 +2312,160 @@ class MainActivity : Activity() {
                     ". ${picks.size} to choose from \u2014 \u2039 \u203a to flick through, " +
                     "Brief for the day\u2019s plan.",
             )
+        }
+    }
+
+    // --- drawing a walk by tapping the map ---------------------------------
+
+    /**
+     * Start drawing. The path network is fetched once in the background so
+     * the first tap-to-tap leg snaps without a wait; until it lands, legs
+     * fall back to straight lines and say so rather than blocking him.
+     */
+    private fun startEditing(from: List<En>? = null) {
+        forgetSpec()
+        dismissPicker()
+        val ed = RouteEdit { a, b, snap ->
+            val g = editGraph ?: return@RouteEdit null
+            Router.between(g, a, b, avoidRoads = snap == RouteEdit.Snap.PATHS)?.points
+        }
+        from?.takeIf { it.size >= 2 }?.let { ed.load(it) }
+        editing = ed
+        editBar.visibility = View.VISIBLE
+        wxBar.visibility = View.GONE
+        map.placeMode = true
+        map.onPlacePicked = { en -> editTapped(en) }
+        refreshEdit()
+        say(
+            "Tap the map to lay the walk out. Each leg follows real paths between " +
+                "your taps; tap a point again to remove it.",
+        )
+        val centre = from?.firstOrNull() ?: lastFix ?: map.viewportBounds().let {
+            En((it[0] + it[2]) / 2, (it[1] + it[3]) / 2)
+        }
+        editJob?.cancel()
+        editJob = scope.launch {
+            val g = withContext(Dispatchers.IO) {
+                runCatching { Router.buildCached(centre, 6_000.0) }.getOrNull()
+            }
+            if (editing == null) return@launch
+            editGraph = g
+            if (g == null || g.nodes.size < 20) {
+                say(
+                    "No path network here, so legs will be straight lines. " +
+                        "That is honest, not a failure — but they will not follow paths.",
+                )
+            } else {
+                editing?.resnapAll()
+                refreshEdit()
+                sayBriefly("Paths loaded — legs will snap to them now.")
+            }
+        }
+    }
+
+    /** A tap while drawing: on a point removes it, anywhere else adds one. */
+    private fun editTapped(en: En) {
+        val ed = editing ?: return
+        // A thumb's width at this zoom, so the hit target is the drawn
+        // handle rather than a mathematical point.
+        val withinM = 22.0 * resources.displayMetrics.density * map.metresPerPixel()
+        val hit = ed.anchorNear(en, withinM)
+        scope.launch {
+            withContext(Dispatchers.IO) {
+                if (hit >= 0) ed.removeAt(hit) else ed.add(en)
+            }
+            refreshEdit()
+        }
+    }
+
+    private fun refreshEdit() {
+        val ed = editing ?: return
+        map.setPreview(if (ed.count() > 0) listOf(ed.line()) else emptyList())
+        map.setEditHandles(ed.anchorPoints())
+        val warn = if (ed.hasUnsnapped()) " · some legs straight (no path found)" else ""
+        editStat.text = when (ed.count()) {
+            0 -> "Tap to place the first point"
+            1 -> "1 point · tap the next"
+            else -> "${ed.count()} points · ${Brief.fmtKm(ed.metres())}$warn"
+        }
+    }
+
+    private fun cycleSnap() {
+        val ed = editing ?: return
+        ed.snap = when (ed.snap) {
+            RouteEdit.Snap.PATHS -> RouteEdit.Snap.ANY
+            RouteEdit.Snap.ANY -> RouteEdit.Snap.STRAIGHT
+            RouteEdit.Snap.STRAIGHT -> RouteEdit.Snap.PATHS
+        }
+        editSnapBtn.text = when (ed.snap) {
+            RouteEdit.Snap.PATHS -> "Paths"
+            RouteEdit.Snap.ANY -> "Any way"
+            RouteEdit.Snap.STRAIGHT -> "Straight"
+        }
+        sayBriefly(
+            when (ed.snap) {
+                RouteEdit.Snap.PATHS -> "Sticking to paths, tracks and bridleways where it can."
+                RouteEdit.Snap.ANY -> "Any walkable way now, lanes and roads included."
+                RouteEdit.Snap.STRAIGHT -> "Straight lines — for open ground and beaches."
+            },
+        )
+        scope.launch {
+            withContext(Dispatchers.IO) { ed.resnapAll() }
+            refreshEdit()
+        }
+    }
+
+    private fun undoEdit() {
+        val ed = editing ?: return
+        if (!ed.undo()) { sayBriefly("Nothing left to undo."); return }
+        refreshEdit()
+    }
+
+    private fun closeEditLoop() {
+        val ed = editing ?: return
+        scope.launch {
+            val ok = withContext(Dispatchers.IO) { ed.closeLoop() }
+            if (!ok) { sayBriefly("Three points at least before it can come home."); return@launch }
+            refreshEdit()
+        }
+    }
+
+    private fun saveEdit() {
+        val ed = editing ?: return
+        val line = ed.line()
+        if (line.size < 2) { sayBriefly("Nothing drawn yet."); return }
+        val box = EditText(this).apply {
+            setText("My walk")
+            setSingleLine()
+            setPadding(dp(22), dp(14), dp(22), dp(6))
+        }
+        AlertDialog.Builder(this)
+            .setTitle("Save this walk")
+            .setView(box)
+            .setNegativeButton("Cancel", null)
+            .setPositiveButton("Save") { _, _ ->
+                val route = Route(box.text.toString().ifBlank { "My walk" }, line)
+                RouteStore.save(this, route)
+                stopEditing(save = true)
+                say("“${route.name}” saved — ${Brief.fmtKm(Geom.length(line))}. Fetching tiles…")
+                publishRoute(route)
+            }
+            .show()
+    }
+
+    private fun stopEditing(save: Boolean) {
+        editJob?.cancel()
+        editJob = null
+        editing = null
+        editBar.visibility = View.GONE
+        map.placeMode = false
+        map.onPlacePicked = null
+        map.setEditHandles(emptyList())
+        map.setPreview(emptyList())
+        if (wxFrames.isNotEmpty()) wxBar.visibility = View.VISIBLE
+        if (!save) {
+            map.setRoute(if (routeHidden) null else RouteStore.load(this))
+            sayBriefly("Drawing cancelled — nothing saved.")
         }
     }
 
