@@ -1,9 +1,11 @@
 package com.jollydoddger.waymark
 
 import com.jollydoddger.waymark.shared.En
+import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
+import org.junit.Before
 import org.junit.Test
 import kotlin.math.hypot
 import kotlin.random.Random
@@ -21,6 +23,22 @@ import kotlin.random.Random
  * runner, and the thing worth testing is the loop-finding, not the parsing.
  */
 class RouterTest {
+
+    /**
+     * The search starts each attempt at a random bearing, which is right in
+     * the app and impossible to assert about here. Pinned to a fixed spread
+     * — the golden angle, so successive attempts still aim somewhere
+     * genuinely different rather than all at one place — and put back
+     * afterwards so nothing else inherits it.
+     */
+    @Before fun pinTheSpin() {
+        var i = 0
+        Router.spinSource = { (i++) * 2.399963229728653 }
+    }
+
+    @After fun unpinTheSpin() {
+        Router.spinSource = { Math.random() * 2 * Math.PI }
+    }
 
     private val step = 300.0
     private val side = 9
@@ -217,12 +235,37 @@ class RouterTest {
             assertNoReversals(p.points)
         }
         // Pairwise different: two loops must not share most of their ground.
+        //
+        // Measured on the ground *walked* — the segments between consecutive
+        // points — because that is what the search itself compares, and it
+        // is the only thing it promises. This once counted shared points at
+        // an eyeballed 80%, which is a different and stricter claim: two
+        // circuits can pass through most of the same junctions while walking
+        // between them by different ways, and nothing in the code forbids
+        // that. Every attempt starts at a random bearing (deliberately, so
+        // asking twice does not hand back the same walk), so the difference
+        // showed up as a test that passed on one CI runner and failed on the
+        // next from the same commit — worse than no test at all.
+        fun legs(p: Router.Planned): HashSet<Pair<En, En>> {
+            val out = HashSet<Pair<En, En>>()
+            for (i in 1 until p.points.size) {
+                val a = p.points[i - 1]
+                val b = p.points[i]
+                // Unordered: a leg walked the other way is the same ground.
+                out.add(if (a.e < b.e || (a.e == b.e && a.n <= b.n)) a to b else b to a)
+            }
+            return out
+        }
         for (i in out.indices) {
             for (j in i + 1 until out.size) {
-                val a = out[i].points.toHashSet()
-                val b = out[j].points.toHashSet()
+                val a = legs(out[i])
+                val b = legs(out[j])
+                if (a.isEmpty() || b.isEmpty()) continue
                 val shared = a.count { it in b }.toDouble() / minOf(a.size, b.size)
-                assertTrue("loops $i and $j share ${(shared * 100).toInt()}%", shared < 0.8)
+                assertTrue(
+                    "loops $i and $j share ${(shared * 100).toInt()}% of their ground",
+                    shared <= Router.DISTINCT_OVERLAP + 1e-9,
+                )
             }
         }
         // And loop() is the best of loops(), so the old contract holds.

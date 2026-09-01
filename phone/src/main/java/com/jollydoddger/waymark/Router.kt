@@ -774,7 +774,23 @@ object Router {
 
     /** How alike two circuits may be and still both be offered: share more
      *  ground than this and the second is the first wearing a hat. */
-    private const val DISTINCT_OVERLAP = 0.5
+    /**
+     * Where each attempt aims its first corner, as a bearing in radians.
+     *
+     * Random on purpose — asking for a walk twice should not hand back the
+     * same circuit — and replaceable for exactly that reason. A search that
+     * starts somewhere different on every run cannot be asserted about: the
+     * loop test passed on one CI runner and failed on the next from the
+     * same commit, which is worse than having no test. A test pins this to
+     * a fixed spread and gets the same answer every time; nothing in the
+     * app touches it.
+     */
+    var spinSource: () -> Double = { Math.random() * 2 * Math.PI }
+
+    /** The most ground two offered circuits may share and still count
+     *  as different walks. Public because it is the contract the picker
+     *  rests on, and a contract nothing can read is not one. */
+    const val DISTINCT_OVERLAP = 0.5
 
     /** Near-identical: the same candidate found again down a different
      *  branch of the search, kept once at its better score. */
@@ -881,7 +897,7 @@ object Router {
 
         for (attempt in 0 until 3) {
             if (outOfTime()) break
-            val spin = Math.random() * 2 * Math.PI
+            val spin = spinSource()
             var round: Planned? = null
             var roundScore = Double.MAX_VALUE
             var enough = false
