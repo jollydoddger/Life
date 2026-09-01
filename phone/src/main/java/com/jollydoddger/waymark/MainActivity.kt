@@ -2025,6 +2025,7 @@ class MainActivity : Activity() {
             // outright that these are further out than he asked — the
             // widening is offered, never slipped in. Pointless when the
             // servers are down: the same servers answer the wider question.
+            var joinedCount = 0
             var widened = 0.0
             if (real.isEmpty() && !osmFailed && bounds == null && searchM < widerSearchM &&
                 wide != null && wide.note == null
@@ -2055,6 +2056,28 @@ class MainActivity : Activity() {
                 return@launch
             }
 
+            // Official routes that merely *pass* nearby. The search finds
+            // them already — it asks by geometry, so a walk qualifies for
+            // where its line goes rather than for where its pin sits — but
+            // nothing could offer one, because a fifty-kilometre trail
+            // three hundred metres away fails a "eight to fifteen" filter
+            // and could only be handed over whole. Joined where it goes
+            // past instead, out along it and back, which is what anybody
+            // actually does with a long-distance path near their house.
+            //
+            // Not for a circular ask: a section of a linear route is a
+            // there-and-back whatever else is claimed for it, and the loop
+            // planner already walks these trails by laying them on the
+            // graph.
+            if (!spec.anyLength && spec.shape != Shape.CIRCULAR) {
+                val joined = Sections.near(trails, here, minM, maxM, searchM)
+                    .filter { j -> real.none { it.name == j.name } }
+                if (joined.isNotEmpty()) {
+                    joinedCount = joined.size
+                    real = (real + joined).take(10)
+                }
+            }
+
             // Walks were found, but none of the right shape or length. An
             // empty picker reads as "there is nothing here", which around
             // Snowdonia is a lie: a national trail is real walking ground
@@ -2080,6 +2103,16 @@ class MainActivity : Activity() {
                                 "${real.size} within ${Brief.fmtKm(widened)} \u2014 a drive, " +
                                 "not a walk from the door. Working out one of our own " +
                                 "alongside\u2026"
+                        joinedCount > 0 && joinedCount == real.size ->
+                            "$joinedCount official route${if (joinedCount == 1) "" else "s"} " +
+                                "pass${if (joinedCount == 1) "es" else ""} near you \u2014 join " +
+                                "where it goes by, out and back. Working out one of our own " +
+                                "alongside\u2026"
+                        joinedCount > 0 ->
+                            "${real.size - joinedCount} real walk" +
+                                "${if (real.size - joinedCount == 1) "" else "s"} matching, plus " +
+                                "$joinedCount you can join where they pass \u2014 working out " +
+                                "one of our own alongside\u2026"
                         else ->
                             "${real.size} real walk${if (real.size == 1) "" else "s"} matching " +
                                 "\u2014 working out one of our own alongside\u2026"

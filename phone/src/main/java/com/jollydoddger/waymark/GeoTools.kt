@@ -381,7 +381,19 @@ class GeoTools(
         val nearby = runCatching {
             RouteFinder.find(ctx, here, 12_000.0).walks
         }.getOrDefault(emptyList())
-        val real = WalkFilter.filter(nearby, here, null, target * 0.65, target * 1.35).take(6)
+        val whole = WalkFilter.filter(nearby, here, null, target * 0.65, target * 1.35).take(6)
+        // Long routes that merely pass nearby, joined where they go by.
+        // The Pennine Way going past the door is not a walk until somebody
+        // cuts a piece of it the right size; this cuts one.
+        // 1.5 km is how far a long route may pass and still be worth
+        // joining on foot. Wider than the specifier's own start licence,
+        // because the assistant is usually asked about an area rather than
+        // a doorstep — but not so wide that "join it where it passes" means
+        // a mile of pavement first. The distance is printed against every
+        // offer below, so he can judge it himself.
+        val joinable = Sections.near(nearby, here, target * 0.85, target * 1.15, 1_500.0)
+            .filter { j -> whole.none { it.name == j.name } }
+        val real = (whole + joinable).take(8)
 
         progress("Reading the paths and lanes round here…")
         val graph = runCatching {
