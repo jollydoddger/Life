@@ -254,4 +254,69 @@ class RouteEditTest {
         assertTrue(!e.heal { En(0.0, 0.0) })
         assertEquals(3.0, e.anchorPoints()[0].n, 1e-9)
     }
+
+    // --- adjust mode's model: insert on the line, move a handle ------------
+
+    @Test
+    fun `a tap on a leg inserts a point there, not at the end`() {
+        val e = editor()
+        e.add(En(0.0, 0.0))
+        e.add(En(100.0, 0.0))
+        e.add(En(200.0, 0.0))
+        assertTrue(e.insertAt(En(50.0, 1.0), withinM = 10.0))
+        assertEquals(4, e.count())
+        assertEquals("between the first two, where the tap was",
+            En(50.0, 1.0), e.anchorPoints()[1])
+        assertEquals("the end is still the end", En(200.0, 0.0), e.anchorPoints().last())
+    }
+
+    @Test
+    fun `a tap nowhere near the line inserts nothing`() {
+        // The whole reason Adjust is its own mode: a stray tap must not
+        // quietly append a point half a field away.
+        val e = editor()
+        e.add(En(0.0, 0.0))
+        e.add(En(100.0, 0.0))
+        assertTrue(!e.insertAt(En(500.0, 500.0), withinM = 10.0))
+        assertEquals(2, e.count())
+    }
+
+    @Test
+    fun `insert picks the leg by the raw tap but lands on the snapped place`() {
+        // The tap says which leg was meant; the caller's way-snap says where
+        // the point actually goes — which can be metres off the drawn line.
+        val e = editor()
+        e.add(En(0.0, 0.0))
+        e.add(En(100.0, 0.0))
+        assertTrue(e.insertAt(En(50.0, 1.0), withinM = 10.0, place = En(50.0, 20.0)))
+        assertEquals(En(50.0, 20.0), e.anchorPoints()[1])
+    }
+
+    @Test
+    fun `moving a point re-routes only the two legs touching it`() {
+        var routed = 0
+        val e = RouteEdit { a, b, _ ->
+            routed++
+            listOf(a, b)
+        }
+        e.add(En(0.0, 0.0))
+        e.add(En(100.0, 0.0))
+        e.add(En(200.0, 0.0))
+        e.add(En(300.0, 0.0))
+        routed = 0
+        e.moveTo(1, En(100.0, 50.0))
+        assertEquals("the arriving and leaving legs, nothing else", 2, routed)
+        assertEquals(En(100.0, 50.0), e.anchorPoints()[1])
+    }
+
+    @Test
+    fun `undo takes back an insert`() {
+        val e = editor()
+        e.add(En(0.0, 0.0))
+        e.add(En(100.0, 0.0))
+        val before = e.line()
+        e.insertAt(En(50.0, 1.0), withinM = 10.0)
+        assertTrue(e.undo())
+        assertEquals(before, e.line())
+    }
 }

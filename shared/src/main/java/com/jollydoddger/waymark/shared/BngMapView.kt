@@ -144,6 +144,109 @@ class BngMapView @JvmOverloads constructor(
         invalidate()
     }
 
+    /**
+     * Adjust mode: a touch that lands on an edit handle drags it instead of
+     * panning the map.
+     *
+     * The whole difficulty is that the map already owns every gesture — a
+     * finger moving is a pan, unconditionally — so the drag is decided at
+     * ACTION_DOWN, before the gesture detectors see the stream, and the
+     * stream is withheld from them until the finger lifts. While dragging,
+     * only the handle's dot follows the finger; the line is re-routed on
+     * drop, by the owner, because routing is a network-backed search and a
+     * finger moves sixty times a second.
+     *
+     * A press that never travels past touch slop is still a tap, delivered
+     * through [onPlacePicked] like any other — so tap-a-handle-to-delete
+     * keeps working with drag enabled.
+     */
+    var dragHandles = false
+        set(v) {
+            field = v
+            if (!v) draggingHandle = -1
+            invalidate()
+        }
+
+    /** The handle index and the ground under the finger when it lifted. */
+    var onHandleDrop: ((Int, En) -> Unit)? = null
+
+    private var draggingHandle = -1
+    private var dragAt: En? = null
+    private var dragMoved = false
+    private var dragDownX = 0f
+    private var dragDownY = 0f
+
+    private fun handleNearScreen(x: Float, y: Float): Int {
+        val m = mpp(zl)
+        val hit = 24f * density
+        var best = -1
+        var bestD = hit
+        for ((i, en) in editHandles.withIndex()) {
+            val d = kotlin.math.hypot(sx(en.e, m) - x, sy(en.n, m) - y)
+            if (d < bestD) { bestD = d; best = i }
+        }
+        return best
+    }
+
+    /** True while a handle owns the touch stream. */
+    private fun dragTouch(event: MotionEvent): Boolean {
+        when (event.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                if (!dragHandles || editHandles.isEmpty()) return false
+                val i = handleNearScreen(event.x, event.y)
+                if (i < 0) return false
+                draggingHandle = i
+                dragAt = null
+                dragMoved = false
+                dragDownX = event.x
+                dragDownY = event.y
+                parent?.requestDisallowInterceptTouchEvent(true)
+                return true
+            }
+            MotionEvent.ACTION_MOVE -> {
+                if (draggingHandle < 0) return false
+                val slop = android.view.ViewConfiguration.get(context).scaledTouchSlop
+                if (!dragMoved &&
+                    kotlin.math.hypot(event.x - dragDownX, event.y - dragDownY) > slop
+                ) {
+                    dragMoved = true
+                }
+                if (dragMoved) {
+                    dragAt = enAt(event.x, event.y)
+                    invalidate()
+                }
+                return true
+            }
+            MotionEvent.ACTION_UP -> {
+                if (draggingHandle < 0) return false
+                val i = draggingHandle
+                val moved = dragMoved
+                draggingHandle = -1
+                dragAt = null
+                dragMoved = false
+                if (moved) {
+                    performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK)
+                    onHandleDrop?.invoke(i, enAt(event.x, event.y))
+                } else {
+                    // A press that never travelled: an ordinary tap on the
+                    // handle, which is how deleting one already works.
+                    onPlacePicked?.invoke(enAt(event.x, event.y))
+                }
+                invalidate()
+                return true
+            }
+            MotionEvent.ACTION_CANCEL -> {
+                if (draggingHandle < 0) return false
+                draggingHandle = -1
+                dragAt = null
+                dragMoved = false
+                invalidate()
+                return true
+            }
+        }
+        return draggingHandle >= 0
+    }
+
     /** Numbered flags at his marked points. */
     private var marks: List<Pair<En, Int>> = emptyList()
 
@@ -1230,8 +1333,11 @@ class BngMapView @JvmOverloads constructor(
         val r = 9f * density
         handleRing.strokeWidth = 2.5f * density
         for ((i, en) in editHandles.withIndex()) {
-            val x = sx(en.e, m)
-            val y = sy(en.n, m)
+            // The one under a finger follows the finger, not the model —
+            // the model catches up on drop, when the leg is re-routed.
+            val at = if (i == draggingHandle) dragAt ?: en else en
+            val x = sx(at.e, m)
+            val y = sy(at.n, m)
             if (x < -r || y < -r || x > width + r || y > height + r) continue
             // The first point is the one worth telling apart: it is where
             // the walk begins, and where closing the loop comes back to.
@@ -1328,6 +1434,9 @@ class BngMapView @JvmOverloads constructor(
 
     @SuppressLint("ClickableViewAccessibility")
     override fun onTouchEvent(event: MotionEvent): Boolean {
+        // A drag claimed at DOWN owns the whole stream: the detectors never
+        // see it, so the map cannot pan out from under a moving handle.
+        if (dragTouch(event)) return true
         val a = scaler.onTouchEvent(event)
         val b = gestures.onTouchEvent(event)
         return a || b || super.onTouchEvent(event)

@@ -158,6 +158,42 @@ class RouteEdit(
         return true
     }
 
+    /**
+     * Add a point *on* the walk — between the two anchors whose leg passes
+     * nearest the tap — rather than at the end of it.
+     *
+     * "It will only add to the end" was the whole complaint: a route with a
+     * wrong middle could not be given a better middle. The tap is matched
+     * to a leg by distance to the drawn line itself, so it works on a
+     * routed leg, a straight one, and the verbatim geometry of a loaded
+     * file alike — with the honest consequence that inserting into a
+     * loaded leg re-routes that one leg through our network, because the
+     * file has nothing to say about the point he just invented.
+     *
+     * [place] is where the new anchor actually goes (the tap, snapped onto
+     * a way by the caller); [p] is the raw tap, used only to decide which
+     * leg was meant — the snapped point can sit metres off the drawn line.
+     */
+    fun insertAt(p: En, withinM: Double, place: En = p): Boolean {
+        var bestLeg = -1
+        var bestD = withinM
+        for (i in 1 until anchors.size) {
+            val leg = anchors[i].from
+            val pts = if (leg.size >= 2) leg else listOf(anchors[i - 1].at, anchors[i].at)
+            val d = Geom.closestApproach(p, pts)
+            if (d < bestD) {
+                bestD = d
+                bestLeg = i
+            }
+        }
+        if (bestLeg < 0) return false
+        snapshot()
+        anchors.add(bestLeg, Anchor(place))
+        route(bestLeg)
+        route(bestLeg + 1)
+        return true
+    }
+
     fun moveTo(i: Int, p: En): Boolean {
         if (i < 0 || i >= anchors.size) return false
         snapshot()

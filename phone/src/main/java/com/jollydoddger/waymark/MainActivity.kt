@@ -162,6 +162,17 @@ class MainActivity : Activity() {
     private lateinit var editBar: LinearLayout
     private lateinit var editStat: TextView
     private lateinit var editSnapBtn: TextView
+    private lateinit var editModeBtn: TextView
+
+    /**
+     * Which of the two editing hands is active. Placing: a tap lays the
+     * next point at the end of the walk. Adjusting: a handle drags, a tap
+     * on the line adds a point *there*, and a stray tap on open ground does
+     * nothing at all — his ask, near verbatim: "a mode where I can only
+     * place them, and a mode where I can drag them and add new ones by
+     * clicking the line". Tapping a handle deletes it in both.
+     */
+    private var editAdjust = false
     private var editing: RouteEdit? = null
     private var editGraph: Router.Graph? = null
     private var editGraphCentre: En? = null
@@ -553,11 +564,13 @@ class MainActivity : Activity() {
             setOnClickListener { onTap() }
         }
         editSnapBtn = editButton("Paths") { cycleSnap() }
+        editModeBtn = editButton("Placing") { toggleEditMode() }
         val editRow = LinearLayout(this).apply {
             gravity = Gravity.CENTER_VERTICAL
             fun gap() = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT,
             ).apply { rightMargin = dp(7) }
+            addView(editModeBtn, gap())
             addView(editSnapBtn, gap())
             addView(editButton("Undo") { undoEdit() }, gap())
             addView(editButton("Close loop") { closeEditLoop() }, gap())
@@ -2298,10 +2311,20 @@ class MainActivity : Activity() {
         wxBar.visibility = View.GONE
         map.placeMode = true
         map.onPlacePicked = { en -> editTapped(en) }
+        // Editing an existing walk starts in Adjust — the walk is already
+        // laid out and the likely intent is to reshape it. Drawing from
+        // nothing starts in Place, because there is nothing to adjust yet.
+        setEditMode(adjust = from != null && from.size >= 2)
+        map.onHandleDrop = { i, en -> handleDropped(i, en) }
         refreshEdit()
         say(
-            "Tap the map to lay the walk out. Each leg follows real paths between " +
-                "your taps; tap a point again to remove it.",
+            if (editAdjust) {
+                "Adjusting: drag a point to move it, tap the line to add one " +
+                    "there, tap a point to remove it."
+            } else {
+                "Tap the map to lay the walk out. Each leg follows real paths " +
+                    "between your taps; tap a point again to remove it."
+            },
         )
         // Centred on what he is looking at and sized to cover it, not on a
         // fixed 6 km around his fix: he draws across the map in front of
@@ -2377,7 +2400,9 @@ class MainActivity : Activity() {
         }
     }
 
-    /** A tap while drawing: on a point removes it, anywhere else adds one. */
+    /** A tap while drawing. Placing: on a point removes it, anywhere else
+     *  appends one. Adjusting: on a point removes it, on the line inserts
+     *  one there, on open ground does nothing. */
     private fun editTapped(en: En) {
         val ed = editing ?: return
         // A thumb's width at this zoom, so the hit target is the drawn
@@ -2397,11 +2422,29 @@ class MainActivity : Activity() {
         } else {
             en
         }
+        val adjust = editAdjust
         scope.launch {
-            withContext(Dispatchers.IO) {
-                if (hit >= 0) ed.removeAt(hit) else ed.add(place)
+            val did = withContext(Dispatchers.IO) {
+                when {
+                    hit >= 0 -> {
+                        ed.removeAt(hit)
+                        true
+                    }
+                    adjust -> ed.insertAt(en, withinM, place)
+                    else -> {
+                        ed.add(place)
+                        true
+                    }
+                }
             }
             refreshEdit()
+            if (!did) {
+                // Adjust mode swallowed a tap on open ground on purpose —
+                // that is the whole point of the mode — but silence reads
+                // as a broken screen.
+                sayBriefly("Adjusting: tap the line to add a point there, or drag one. Placing adds to the end.")
+                return@launch
+            }
             // Drawn past the edge of what was fetched: widen and re-snap,
             // rather than quietly drawing the rest of the walk straight.
             val c = editGraphCentre
@@ -2412,6 +2455,45 @@ class MainActivity : Activity() {
                 }
             }
         }
+    }
+
+    /**
+     * A handle let go somewhere new. The dot followed the finger; the walk
+     * catches up here — snapped onto a way like any tap, and only the two
+     * legs touching the moved point re-routed.
+     */
+    private fun handleDropped(i: Int, en: En) {
+        val ed = editing ?: return
+        scope.launch {
+            withContext(Dispatchers.IO) {
+                val g = editGraph
+                val place = if (g != null && ed.snap != RouteEdit.Snap.STRAIGHT) {
+                    g.onWay(en, Router.TAP_SNAP_M)?.at ?: en
+                } else {
+                    en
+                }
+                ed.moveTo(i, place)
+            }
+            refreshEdit()
+        }
+    }
+
+    private fun setEditMode(adjust: Boolean) {
+        editAdjust = adjust
+        map.dragHandles = adjust
+        editModeBtn.text = if (adjust) "Adjusting" else "Placing"
+    }
+
+    private fun toggleEditMode() {
+        setEditMode(!editAdjust)
+        sayBriefly(
+            if (editAdjust) {
+                "Adjusting: drag a point to move it, tap the line to add one there, " +
+                    "tap a point to remove it."
+            } else {
+                "Placing: each tap adds the next point to the end of the walk."
+            },
+        )
     }
 
     private fun refreshEdit() {
@@ -2516,6 +2598,8 @@ class MainActivity : Activity() {
         editBar.visibility = View.GONE
         map.placeMode = false
         map.onPlacePicked = null
+        map.dragHandles = false
+        map.onHandleDrop = null
         map.setEditHandles(emptyList())
         map.setPreview(emptyList())
         if (wxFrames.isNotEmpty()) wxBar.visibility = View.VISIBLE
