@@ -114,8 +114,23 @@ class MainActivity : Activity() {
     private lateinit var bottomStack: LinearLayout
     private lateinit var askBar: LinearLayout
 
+    // The bottom sheet and its panels. One surface, one panel at a time —
+    // the five separately-managed bars this replaces are being retired in
+    // stages; the edit and picker bars still live in bottomStack until
+    // their panels exist.
+    private lateinit var sheet: SheetLayout
+    private lateinit var askPeek: LinearLayout
+    private lateinit var askContent: LinearLayout
+    private lateinit var wxPeek: LinearLayout
+    private lateinit var wxContent: LinearLayout
+    private lateinit var peekSummary: TextView
+    private lateinit var peekMic: View
+    private lateinit var wxChip: TextView
+
+    private enum class Panel { ASK, WEATHER }
+    private var panel = Panel.ASK
+
     // The weather scrubber: five hours back, five forward, one moment shown.
-    private lateinit var wxBar: LinearLayout
     private lateinit var wxLabel: TextView
     private lateinit var wxSeek: SeekBar
     private lateinit var wxFade: SeekBar
@@ -353,14 +368,13 @@ class MainActivity : Activity() {
         askBox.setTextColor(Palette.ink)
         askBox.setHintTextColor(Palette.inkFaint)
         askBar = LinearLayout(this).apply {
-            setBackgroundColor(Palette.sheet)
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(8), dp(2), dp(4), dp(2))
+            setPadding(dp(12), dp(2), dp(8), dp(6))
             addView(askBox, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
-            addView(micBtn, LinearLayout.LayoutParams(dp(42), dp(42)).apply { leftMargin = dp(6) })
             addView(sendBtn, LinearLayout.LayoutParams(dp(42), dp(42)).apply { leftMargin = dp(6) })
             addView(chatBtn, LinearLayout.LayoutParams(dp(34), dp(42)))
         }
+        peekMic = micBtn
 
         // The last answer, and no more than that. It used to be a 210dp panel
         // that stayed up until it was noticed and tapped — half the map, gone
@@ -387,7 +401,12 @@ class MainActivity : Activity() {
             setTextColor(Color.argb(230, 220, 226, 220))
             setPadding(dp(8), dp(10), dp(12), dp(10))
             setOnClickListener {
-                if (askBusy) stopAsk() else replyPanel.visibility = View.GONE
+                if (askBusy) {
+                    stopAsk()
+                } else {
+                    replyPanel.visibility = View.GONE
+                    sheet.setState(SheetLayout.State.PEEK)
+                }
             }
         }
         val replyRow = LinearLayout(this).apply {
@@ -403,7 +422,6 @@ class MainActivity : Activity() {
             ))
         }
         replyPanel = ScrollView(this).apply {
-            setBackgroundColor(Palette.sheet)
             visibility = View.GONE
             addView(replyRow)
         }
@@ -481,7 +499,19 @@ class MainActivity : Activity() {
             setPadding(dp(10), dp(2), dp(10), dp(2))
             setOnClickListener { if (wxPlaying) stopWxPlay() else startWxPlay() }
         }
-        val wxTopRow = LinearLayout(this).apply {
+        // The scrubber's peek: play and the moment being shown. Its body:
+        // the time slider, opacity, legend. A "✕" hands the sheet back to
+        // the ask panel — the scrubber is a mode you leave, not a bar that
+        // fights the others for the bottom of the screen.
+        val wxBack = TextView(this).apply {
+            text = "✕"
+            textSize = 17f
+            setTextColor(Palette.inkMut)
+            setPadding(dp(10), dp(6), dp(12), dp(6))
+            background = Ui.ripple(null)
+            setOnClickListener { showPanel(Panel.ASK) }
+        }
+        wxPeek = LinearLayout(this).apply {
             gravity = Gravity.CENTER_VERTICAL
             addView(wxPlay, LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT,
@@ -489,21 +519,31 @@ class MainActivity : Activity() {
             addView(wxLabel, LinearLayout.LayoutParams(
                 0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f,
             ))
-            addView(wxFade, LinearLayout.LayoutParams(dp(104), LinearLayout.LayoutParams.WRAP_CONTENT))
+            addView(wxBack, LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT,
+            ))
         }
         wxLegend = LinearLayout(this).apply {
             gravity = Gravity.CENTER_VERTICAL
             visibility = View.GONE
             setPadding(dp(14), 0, dp(14), dp(6))
         }
-        wxBar = LinearLayout(this).apply {
+        val wxFadeRow = LinearLayout(this).apply {
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(14), 0, dp(14), 0)
+            addView(Ui.label(this@MainActivity, "Opacity", Ui.CAP, Palette.inkMut))
+            addView(
+                wxFade,
+                LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+                    .apply { leftMargin = dp(8) },
+            )
+        }
+        wxContent = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setBackgroundColor(Palette.sheet)
-            visibility = View.GONE
-            addView(wxTopRow, LinearLayout.LayoutParams(
+            addView(wxSeek, LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT,
             ))
-            addView(wxSeek, LinearLayout.LayoutParams(
+            addView(wxFadeRow, LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT,
             ))
             addView(wxLegend, LinearLayout.LayoutParams(
@@ -632,6 +672,9 @@ class MainActivity : Activity() {
             ))
         }
 
+        // The edit and picker bars, still hand-stacked: they migrate into
+        // the sheet as panels next; until then the sheet stands down while
+        // either is showing, so exactly one thing owns the bottom edge.
         bottomStack = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             addView(editBar, LinearLayout.LayoutParams(
@@ -640,22 +683,56 @@ class MainActivity : Activity() {
             addView(pickerBar, LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT,
             ))
-            addView(wxBar, LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT,
-            ))
-            // The weight is a shrink-only lever here: the stack wraps its
-            // height, so there is never spare room to grow into, only a
-            // shortfall to take off somebody. Without it the shortfall came
-            // off the last child — the ask bar, the thing he is typing into.
-            // With the scrubber, a reply and a keyboard all up at once on a
-            // short screen, the reply gives way instead.
+        }
+
+        // --- the sheet's ask panel: summary + mic peeking, talk on open ---
+        peekSummary = TextView(this).apply {
+            textSize = Ui.BODY
+            setTextColor(Palette.inkMut)
+            setSingleLine(true)
+            ellipsize = android.text.TextUtils.TruncateAt.END
+            setPadding(dp(16), dp(8), dp(8), dp(10))
+            // The one-tap path to typing: open the sheet with the box
+            // focused and the keyboard on its way, so "tap Ask, type" costs
+            // what the old always-there bar cost.
+            setOnClickListener { openAsk() }
+        }
+        wxChip = TextView(this).apply {
+            text = "Radar ›"
+            textSize = Ui.CAP
+            setTextColor(Palette.ink)
+            background = Ui.ripple(Ui.pill(this@MainActivity, Palette.raised))
+            setPadding(dp(12), dp(6), dp(12), dp(6))
+            visibility = View.GONE
+            setOnClickListener { showPanel(Panel.WEATHER) }
+        }
+        askPeek = LinearLayout(this).apply {
+            gravity = Gravity.CENTER_VERTICAL
+            addView(peekSummary, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+            addView(
+                wxChip,
+                LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT,
+                ).apply { rightMargin = dp(8) },
+            )
+            addView(
+                peekMic,
+                LinearLayout.LayoutParams(dp(42), dp(42)).apply { rightMargin = dp(8) },
+            )
+        }
+        askContent = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
             addView(replyPanel, LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT, 1f,
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT,
             ))
             addView(askBar, LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT,
             ))
+        }
+
+        sheet = SheetLayout(this)
+        askBox.setOnFocusChangeListener { _, has ->
+            if (has) sheet.setState(SheetLayout.State.OPEN)
         }
 
         // --- the layer toggles, on the map where they get used ---
@@ -750,7 +827,12 @@ class MainActivity : Activity() {
                 FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT,
                 Gravity.BOTTOM,
             ))
+            addView(sheet, FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT,
+                Gravity.BOTTOM,
+            ))
         }
+        showPanel(Panel.ASK)
         setContentView(root)
 
         // If the last run died, its stack is the one fact worth having:
@@ -786,6 +868,7 @@ class MainActivity : Activity() {
                 bottom = insets.systemWindowInsetBottom
             }
             bottomStack.setPadding(0, 0, 0, bottom)
+            sheet.setBottomInset(bottom)
             // The whole top column clears the system status bar. This margin
             // used to be set on the status line directly, from when it was
             // the frame's own child — after it moved into the column, the
@@ -838,6 +921,7 @@ class MainActivity : Activity() {
         // scrubber above it comes and goes with the weather layers instead.
         askBar.visibility = if (assistantEnabled) View.VISIBLE else View.GONE
         if (!assistantEnabled) replyPanel.visibility = View.GONE
+        updatePeek()
         // centredThisOpen is deliberately NOT reset here: onResume also runs
         // on the way back from Settings, and re-centring there yanked the map
         // away from wherever he was planning. One centre per opening of the
@@ -999,6 +1083,56 @@ class MainActivity : Activity() {
     private fun updateTimer() {
         timerChip.removeCallbacks(timerTick)
         timerTick.run()
+    }
+
+    /** Swap which panel owns the sheet. The one arbiter — every "show this
+     *  bar, hide that one" dance this file used to do lands here. */
+    private fun showPanel(p: Panel, open: Boolean = false) {
+        panel = p
+        sheet.peekRow.removeAllViews()
+        sheet.content.removeAllViews()
+        val (peek, body) = when (p) {
+            Panel.ASK -> askPeek to askContent
+            Panel.WEATHER -> wxPeek to wxContent
+        }
+        sheet.peekRow.addView(
+            peek,
+            FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT,
+            ),
+        )
+        sheet.content.addView(
+            body,
+            FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT,
+            ),
+        )
+        when {
+            open -> sheet.setState(SheetLayout.State.OPEN)
+            sheet.state == SheetLayout.State.OPEN -> sheet.remeasureOpen()
+            else -> sheet.setState(SheetLayout.State.PEEK, animate = false)
+        }
+        updatePeek()
+    }
+
+    /** One tap from map to typing: sheet open, box focused, keyboard up. */
+    private fun openAsk() {
+        showPanel(Panel.ASK, open = true)
+        askBox.requestFocus()
+        (getSystemService(INPUT_METHOD_SERVICE) as android.view.inputmethod.InputMethodManager)
+            .showSoftInput(askBox, 0)
+    }
+
+    /** The ask peek's one line: what is loaded, and that this is where to ask. */
+    private fun updatePeek() {
+        val r = RouteStore.load(this)
+        peekSummary.text = if (r != null && r.points.size >= 2) {
+            val name = r.name.ifBlank { "Route" }
+            "$name · ${fmtDist(Geom.length(r.points))}   —   Ask\u2026"
+        } else {
+            "Ask\u2026 (find walks? toilets on the route?)"
+        }
+        peekMic.visibility = if (assistantEnabled) View.VISIBLE else View.GONE
     }
 
     private fun say(msg: String) {
@@ -1167,7 +1301,8 @@ class MainActivity : Activity() {
             wxFrames = emptyList()
             radarFrames = emptyList()
             wxField = null
-            wxBar.visibility = View.GONE
+            wxChip.visibility = View.GONE
+            if (panel == Panel.WEATHER) showPanel(Panel.ASK)
         }
         if (!wantTraces && !wantProw && !wantAllPaths && !wantWeather) {
             map.onViewportSettled = null
@@ -1251,10 +1386,14 @@ class MainActivity : Activity() {
         wxFrames = frames
         if (frames.isEmpty()) {
             stopWxPlay()
-            wxBar.visibility = View.GONE
+            wxChip.visibility = View.GONE
+            if (panel == Panel.WEATHER) showPanel(Panel.ASK)
             return
         }
-        if (!pickerShowing) wxBar.visibility = View.VISIBLE
+        // Frames arriving light the shortcut on the ask peek; the scrubber
+        // itself is one tap away. It used to force its bar onto the screen,
+        // which is how the bottom of the map became a five-bar argument.
+        wxChip.visibility = View.VISIBLE
         wxSeek.max = frames.size - 1
         val i = Timeline.indexOfNow(frames, keep ?: System.currentTimeMillis())
         wxSeek.progress = i
@@ -2353,7 +2492,7 @@ class MainActivity : Activity() {
         from?.takeIf { it.size >= 2 }?.let { ed.load(it) }
         editing = ed
         editBar.visibility = View.VISIBLE
-        wxBar.visibility = View.GONE
+        sheet.setState(SheetLayout.State.HIDDEN)
         map.placeMode = true
         map.onPlacePicked = { en -> editTapped(en) }
         // Editing an existing walk starts in Adjust — the walk is already
@@ -2647,7 +2786,7 @@ class MainActivity : Activity() {
         map.onHandleDrop = null
         map.setEditHandles(emptyList())
         map.setPreview(emptyList())
-        if (wxFrames.isNotEmpty()) wxBar.visibility = View.VISIBLE
+        sheet.setState(SheetLayout.State.PEEK, animate = false)
         if (!save) {
             map.setRoute(if (routeHidden) null else RouteStore.load(this))
             sayBriefly("Drawing cancelled — nothing saved.")
@@ -3085,7 +3224,7 @@ class MainActivity : Activity() {
         pickIndex = 0
         pickerShowing = true
         pickerBar.visibility = View.VISIBLE
-        wxBar.visibility = View.GONE
+        sheet.setState(SheetLayout.State.HIDDEN)
         showPick(0)
     }
 
@@ -3097,9 +3236,9 @@ class MainActivity : Activity() {
         pickIndex = 0
         pickerShowing = true
         pickerBar.visibility = View.VISIBLE
-        // One bar at a time down there: the scrubber comes back when the
+        // One thing at a time down there: the sheet stands down until the
         // picking is done.
-        wxBar.visibility = View.GONE
+        sheet.setState(SheetLayout.State.HIDDEN)
         showPick(0)
     }
 
@@ -3135,7 +3274,10 @@ class MainActivity : Activity() {
         specJob = null
         picksFromSpec = false
         pickDayOffset = 0
-        if (wxFrames.isNotEmpty()) wxBar.visibility = View.VISIBLE
+        sheet.setState(SheetLayout.State.PEEK, animate = false)
+        // Use/Start may just have changed the loaded route; the peek line
+        // is the first place that should say so.
+        updatePeek()
     }
 
     private fun usePick() {
@@ -3435,6 +3577,9 @@ class MainActivity : Activity() {
         askBox.setText("")
         Talk.add(this, Said(true, question))
         replyPanel.visibility = View.VISIBLE
+        if (panel != Panel.ASK) showPanel(Panel.ASK)
+        sheet.setState(SheetLayout.State.OPEN)
+        sheet.remeasureOpen()
         replyText.removeCallbacks(askTick)
         askTick.run()
 
@@ -3460,6 +3605,9 @@ class MainActivity : Activity() {
                 }
                 replyText.text = sb.toString()
                 replyPanel.visibility = View.VISIBLE
+                if (panel != Panel.ASK) showPanel(Panel.ASK)
+                sheet.setState(SheetLayout.State.OPEN)
+                sheet.remeasureOpen()
 
                 // Show what the tools did: markers, and possibly a new route.
                 map.setPois(PoiStore.load(this@MainActivity))
