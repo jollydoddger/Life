@@ -62,6 +62,12 @@
             android:exported="false"
             android:screenOrientation="portrait" />
 
+        <!-- Every walk in play, on a screen big enough to read. The map's
+             ‹ › bar is for previewing on the map; choosing is a list. -->
+        <activity
+            android:name=".WalksActivity"
+            android:exported="false" />
+
         <!-- Hour by hour for wherever the map is. Its own screen because a
              column of numbers is not something a map can show: an overlay
              answers "where is the rain", this answers "what at four". -->

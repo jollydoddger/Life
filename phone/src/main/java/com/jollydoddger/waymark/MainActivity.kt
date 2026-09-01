@@ -151,6 +151,7 @@ class MainActivity : Activity() {
      * only the form knows which day he picked. A picker filled any other
      * way briefs for today, which is the honest default.
      */
+    private val REQ_WALKS = 4271
     private var pickDayOffset = 0
     private var picksFromSpec = false
     private var specJob: kotlinx.coroutines.Job? = null
@@ -1593,8 +1594,8 @@ class MainActivity : Activity() {
     private fun routeMenu() {
         val hideLabel = if (routeHidden) "Show the route" else "Hide the route"
         val items = arrayOf(
-            "Plan a walk…", "Draw a walk on the map", "Edit the loaded route",
-            "Walk picker ‹ ›", "Import a GPX file", "Walks near me",
+            "Plan a walk…", "All walks…", "Draw a walk on the map",
+            "Edit the loaded route", "Walk picker ‹ ›", "Import a GPX file", "Walks near me",
             "Walks on this map ‹ ›", "Saved walks", "Drive to the start",
             hideLabel, "GPX library folder…",
         )
@@ -1602,8 +1603,9 @@ class MainActivity : Activity() {
             .setItems(items) { _, i ->
                 when (i) {
                     0 -> walkSpecifier()
-                    1 -> startEditing()
-                    2 -> {
+                    1 -> openWalks()
+                    2 -> startEditing()
+                    3 -> {
                         val loaded = RouteStore.load(this)?.points
                         if (loaded == null || loaded.size < 2) {
                             say("No route loaded to edit — draw one, or import one first.")
@@ -1611,19 +1613,19 @@ class MainActivity : Activity() {
                             startEditing(loaded)
                         }
                     }
-                    3 -> reopenPicker()
-                    4 -> pickGpx()
-                    5 -> walksNearMe()
-                    6 -> walksOnScreen()
-                    7 -> savedWalksDialog()
-                    8 -> {
+                    4 -> reopenPicker()
+                    5 -> pickGpx()
+                    6 -> walksNearMe()
+                    7 -> walksOnScreen()
+                    8 -> savedWalksDialog()
+                    9 -> {
                         // Present even with no route, saying so — a menu item
                         // that comes and goes is a menu you can't learn.
                         val start = RouteStore.load(this)?.points?.firstOrNull()
                         if (start == null) say("No route loaded — import or find one first.")
                         else openParking(start)
                     }
-                    9 -> {
+                    10 -> {
                         routeHidden = !routeHidden
                         map.setRoute(if (routeHidden) null else RouteStore.load(this))
                         say(
@@ -1632,7 +1634,7 @@ class MainActivity : Activity() {
                             else "Route back on the map.",
                         )
                     }
-                    10 -> libraryDialog()
+                    11 -> libraryDialog()
                 }
             }
             .show()
@@ -2755,6 +2757,38 @@ class MainActivity : Activity() {
      * the map — and after the map's own ask bar answers, which triggers no
      * resume. The store's TTL means a stale batch never haunts the map.
      */
+    /** The full-screen list of walks — the readable half of the picker. */
+    private fun openWalks() {
+        val b = map.viewportBounds()
+        startActivityForResult(
+            Intent(this, WalksActivity::class.java)
+                .putExtra("e", (b[0] + b[2]) / 2)
+                .putExtra("n", (b[1] + b[3]) / 2),
+            REQ_WALKS,
+        )
+    }
+
+    /** What the walks screen sent back: edit the loaded route, or take one. */
+    private fun walksResult(data: Intent) {
+        data.getStringExtra(WalksActivity.RESULT_EDIT)?.let {
+            RouteStore.load(this)?.points?.takeIf { p -> p.size >= 2 }?.let { p -> startEditing(p) }
+            return
+        }
+        val name = data.getStringExtra(WalksActivity.RESULT_TAKE) ?: return
+        // Matched by name against the batch the screen was showing: the
+        // walks themselves are far too big to hand through an Intent.
+        WalkPicks.pending(this).firstOrNull { it.name == name }?.let { adoptFound(it) }
+            ?: runCatching { Walks.list(this) }.getOrDefault(emptyList())
+                .firstOrNull { it.name == name }
+                ?.let { walk ->
+                    val route = Route(walk.name, walk.points)
+                    RouteStore.save(this, route)
+                    say("“${walk.name}” back on the map — fetching tiles…")
+                    importJob?.cancel()
+                    importJob = scope.launch { publishRoute(route) }
+                }
+    }
+
     /**
      * The way back to a picker he closed. Reads the batch dismissal and all
      * — closing the picker keeps it for six hours — and says plainly when
@@ -3017,6 +3051,7 @@ class MainActivity : Activity() {
     @Deprecated("Deprecated in Java")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == REQ_WALKS && resultCode == RESULT_OK && data != null) walksResult(data)
         if (requestCode == 2 && resultCode == RESULT_OK) data?.data?.let { importGpx(it) }
         if (requestCode == 5 && resultCode == RESULT_OK) data?.data?.let { tree ->
             // Keep the grant across reboots, or every rescan would need re-picking.
