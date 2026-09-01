@@ -45,7 +45,7 @@ enum class Origin {
     TAP,
 
     /** Anywhere on the map as it is currently framed. The map in front of
-     *  you is the question — the same framing "Walks on this map" uses. */
+     *  you is the question — the same framing "All walks" uses. */
     SCREEN,
 }
 

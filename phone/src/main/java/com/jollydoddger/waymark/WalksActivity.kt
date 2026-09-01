@@ -144,7 +144,7 @@ class WalksActivity : Activity() {
             addView(
                 quiet(
                     "Nothing waiting. “Plan a walk” finds some for a length and a " +
-                        "day; “Walks on this map” fills this from everything " +
+                        "day; “All walks” fills this from everything " +
                         "crossing the map in view.",
                 ),
             )

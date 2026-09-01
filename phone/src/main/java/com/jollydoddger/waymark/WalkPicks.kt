@@ -19,7 +19,7 @@ import java.io.File
  * back mid-afternoon still finds them, short enough that yesterday's
  * candidates never haunt today's map. And expiry stopped being loss the
  * moment downloads became files: the queue is a working surface, the gpx
- * folder is the keep, and "Walks on this map" in the GPX menu rebuilds a
+ * folder is the keep, and "All walks" on the walks panel rebuilds a
  * picker from the keep whenever one is wanted.
  */
 object WalkPicks {

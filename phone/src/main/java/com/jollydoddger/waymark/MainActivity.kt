@@ -87,9 +87,11 @@ import kotlinx.coroutines.withContext
 import kotlin.math.roundToInt
 
 /**
- * The whole phone app: the map, four small buttons, one status line.
- * Open → you are an arrow on an OS map; import a GPX → a line to follow,
- * offline tiles fetched, the lot pushed to the watch.
+ * The whole phone app: the map, a rail of round controls, a status pill,
+ * and one bottom sheet that holds whichever panel the moment needs — ask,
+ * picker, editor, weather, walks. Open → you are an arrow on an OS map;
+ * import a GPX → a line to follow, offline tiles fetched, the lot pushed
+ * to the watch.
  */
 class MainActivity : Activity() {
 
@@ -253,7 +255,6 @@ class MainActivity : Activity() {
 
         map = BngMapView(this)
         val d = resources.displayMetrics.density
-        fun dp(v: Int) = (v * d).toInt()
 
         fun iconButton(glyph: Glyph, onClick: () -> Unit): View =
             Ui.iconButton(this, glyph, onTap = onClick)
@@ -2140,7 +2141,7 @@ class MainActivity : Activity() {
      *
      * Three answers, and only one of them needs a satellite. "A point I'll
      * tap" hands the map over for one tap; "anywhere on this map" takes the
-     * screen as framed, which is the same question "Walks on this map"
+     * screen as framed, which is the same question "All walks"
      * already answers and the same one he asked here.
      */
     private fun startSpec(spec: WalkSpec) {
@@ -2890,8 +2891,6 @@ class MainActivity : Activity() {
         if (points.size < 2) return
         val startedAt = recordingStartedAt.takeIf { it > 0 } ?: System.currentTimeMillis()
         val endedAt = System.currentTimeMillis()
-        val d = resources.displayMetrics.density
-        fun dp(v: Int) = (v * d).toInt()
         val nameBox = EditText(this).apply {
             hint = "Name"
             setText(
@@ -3273,8 +3272,8 @@ class MainActivity : Activity() {
         val pending = WalkPicks.pending(this)
         if (pending.isEmpty()) {
             say(
-                "No walks waiting on the picker. \u201CWalks on this map\u201D fills it " +
-                    "from everything crossing the map in view; \u201CPlan a walk\u201D " +
+                "No walks waiting on the picker. \u201CAll walks\u201D fills it from " +
+                    "everything crossing the map in view; \u201CPlan a walk\u201D " +
                     "fills it for a length and a day.",
             )
             return
@@ -3486,7 +3485,7 @@ class MainActivity : Activity() {
             .setMessage(
                 if (libraryFolder.isEmpty()) {
                     "Point Waymark at a folder of GPX files — your own exports from " +
-                        "komoot, AllTrails, OS Maps and the rest — and Walks near me " +
+                        "komoot, AllTrails, OS Maps and the rest — and All walks " +
                         "searches them by how close each line comes to you."
                 } else {
                     "${Library.count(this)} routes indexed. Rescan after adding files, " +

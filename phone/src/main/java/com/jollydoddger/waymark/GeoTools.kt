@@ -583,7 +583,7 @@ class GeoTools(
     }
 
     /**
-     * The same search as the GPX button's "Walks near me" — OSM walking-route
+     * The same search as the walks panel's "All walks" — OSM walking-route
      * relations plus his indexed GPX library — but reaching a drive away, and
      * narrowable by direction and length, because "a walk south-east, four to
      * six miles" is how the question actually arrives. Survivors are queued
@@ -709,7 +709,7 @@ class GeoTools(
         return "\u201C${walk.name}\u201D downloaded: ${km(walk.lengthM)}" +
             (fix()?.let { ", line ${km(walk.closestM)} from him" } ?: "") +
             ". Queued on the map picker and saved to his downloads — " +
-            "\u201CWalks on this map\u201D in the GPX menu finds it again any time."
+            "\u201CAll walks\u201D on the walks panel finds it again any time."
     }
 
     /**
