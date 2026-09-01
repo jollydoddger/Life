@@ -109,6 +109,69 @@ object Net {
     }
 
     /**
+     * The same POST, handing the reply back as a stream.
+     *
+     * Overpass replies are the largest thing this app ever reads, and
+     * [post] holds every byte twice — once as the byte array and again as
+     * the String — before a parser has even seen them. A tree parser then
+     * turns each `{"lat":…,"lon":…}` into an object, a map and two boxed
+     * Doubles: roughly two hundred bytes for twenty-four bytes of text.
+     * That is how a phone with a 256 MB heap dies on a reply it could
+     * happily have walked through.
+     *
+     * [block] failing with an [java.io.IOException] is a transport
+     * failure — the connection died mid-reply — and is left to the caller's
+     * retry. Anything else it throws is this app's own fault and is wrapped
+     * in [Fatal], so a bug in a parser is never reported as a server
+     * refusing.
+     */
+    fun <T> postStream(
+        url: String,
+        body: String,
+        contentType: String,
+        timeoutMs: Int = 25_000,
+        block: (java.io.InputStream) -> T,
+    ): T {
+        val conn = URL(url).openConnection() as HttpURLConnection
+        conn.connectTimeout = minOf(CONNECT_MS, timeoutMs)
+        conn.readTimeout = timeoutMs
+        conn.requestMethod = "POST"
+        conn.doOutput = true
+        conn.setRequestProperty("User-Agent", UA)
+        conn.setRequestProperty("Content-Type", contentType)
+        conn.setRequestProperty("Accept-Encoding", "gzip")
+        try {
+            conn.outputStream.use { it.write(body.toByteArray()) }
+            val code = conn.responseCode
+            if (code != 200) throw HttpError(code, URL(url).host)
+            val raw = conn.inputStream
+            val stream = if (conn.contentEncoding?.contains("gzip", true) == true) {
+                java.util.zip.GZIPInputStream(raw)
+            } else {
+                raw
+            }
+            return stream.use {
+                try {
+                    block(it)
+                } catch (e: java.io.IOException) {
+                    throw e
+                } catch (e: Throwable) {
+                    throw Fatal(e)
+                }
+            }
+        } finally {
+            conn.disconnect()
+        }
+    }
+
+    /**
+     * Something that went wrong on this side of the wire. Carried through
+     * the mirror loop untouched and rethrown as its cause, because trying
+     * two more servers cannot fix it and blaming them for it is a lie.
+     */
+    class Fatal(cause: Throwable) : RuntimeException(cause)
+
+    /**
      * Overpass, with somewhere else to go when the main server says no.
      *
      * The public instance at overpass-api.de rate-limits hard and drops
@@ -170,7 +233,12 @@ object Net {
         }
     }
 
-    fun overpass(query: String, timeoutMs: Int = 70_000): String {
+    /**
+     * Ask each mirror in turn until one answers, and hand the reply to
+     * [call]. The loop is shared so the streaming and string forms cannot
+     * drift apart on which failures are worth a second go.
+     */
+    private fun <T> overpassCall(call: (String) -> T): T {
         val reasons = ArrayList<Pair<String, String>>()
         var allUnreachable = true
         overpassGate.acquire()
@@ -179,12 +247,11 @@ object Net {
                 val host = URL(url).host
                 for (attempt in 0 until 2) {
                     try {
-                        return post(
-                            url,
-                            "data=" + encode(query),
-                            "application/x-www-form-urlencoded",
-                            timeoutMs,
-                        )
+                        return call(url)
+                    } catch (f: Fatal) {
+                        // Our bug, not theirs. Two more servers will make
+                        // the same mistake and the message would name them.
+                        throw f.cause ?: f
                     } catch (e: Exception) {
                         if (attempt == 0) reasons.add(host to why(e))
                         if (!isUnreachable(e)) allUnreachable = false
@@ -205,4 +272,18 @@ object Net {
         }
         throw RuntimeException(overpassFailure(reasons, allUnreachable))
     }
+
+    fun overpass(query: String, timeoutMs: Int = 70_000): String =
+        overpassCall { url ->
+            post(url, "data=" + encode(query), "application/x-www-form-urlencoded", timeoutMs)
+        }
+
+    /**
+     * The same query, read as a stream. Prefer this for anything that can
+     * come back large — every `out geom` query in this app can.
+     */
+    fun <T> overpassStream(query: String, timeoutMs: Int = 70_000, block: (java.io.InputStream) -> T): T =
+        overpassCall { url ->
+            postStream(url, "data=" + encode(query), "application/x-www-form-urlencoded", timeoutMs, block)
+        }
 }

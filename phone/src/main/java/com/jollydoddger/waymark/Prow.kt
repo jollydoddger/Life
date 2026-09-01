@@ -6,7 +6,6 @@ import android.os.Looper
 import com.jollydoddger.waymark.shared.Bng
 import com.jollydoddger.waymark.shared.En
 import com.jollydoddger.waymark.shared.ProwLine
-import org.json.JSONObject
 import java.io.ByteArrayOutputStream
 import java.io.DataInputStream
 import java.io.DataOutputStream
@@ -161,6 +160,19 @@ object Prow {
         }
     }
 
+    /** A flat lat/lon run as the flat easting/northing floats the map draws. */
+    private fun project(run: DoubleArray): FloatArray {
+        val pts = FloatArray(run.size)
+        var i = 0
+        while (i + 1 < run.size) {
+            val en = Bng.fromWgs84(run[i], run[i + 1])
+            pts[i] = en.e.toFloat()
+            pts[i + 1] = en.n.toFloat()
+            i += 2
+        }
+        return pts
+    }
+
     /** One cell's rights of way from Overpass, as lines in grid metres. */
     private fun fetchCell(latIdx: Int, lonIdx: Int): List<ProwLine> {
         val south = latIdx * CELL_DEG
@@ -177,28 +189,16 @@ object Prow {
             "(way[\"designation\"~\"^($kinds)$end\"]($bbox);" +
             "way[\"prow_ref\"]($bbox););" +
             "out geom;"
-        val json = Net.overpass(query, timeoutMs = 70_000)
-
         val out = ArrayList<ProwLine>()
-        val elements = JSONObject(json).getJSONArray("elements")
-        for (i in 0 until elements.length()) {
-            val el = elements.getJSONObject(i)
-            val geom = el.optJSONArray("geometry") ?: continue
-            val kind = when (el.optJSONObject("tags")?.optString("designation")) {
+        // Streamed; see Overpass.kt for why a tree is not affordable here.
+        Overpass.forEach(query, timeoutMs = 70_000) { el ->
+            val kind = when (el.tags["designation"]) {
                 "public_bridleway" -> BRIDLEWAY
                 "restricted_byway" -> RESTRICTED_BYWAY
                 "byway_open_to_all_traffic" -> BYWAY
                 else -> FOOTPATH
             }
-            val pts = FloatArray(geom.length() * 2)
-            var n = 0
-            for (g in 0 until geom.length()) {
-                val nd = geom.optJSONObject(g) ?: continue
-                val en = Bng.fromWgs84(nd.getDouble("lat"), nd.getDouble("lon"))
-                pts[n++] = en.e.toFloat()
-                pts[n++] = en.n.toFloat()
-            }
-            if (n >= 4) out.add(ProwLine(kind, if (n == pts.size) pts else pts.copyOf(n)))
+            for (run in Overpass.runs(el.geometry)) out.add(ProwLine(kind, project(run)))
         }
         return out
     }
@@ -217,20 +217,9 @@ object Prow {
         val query = "[out:json][timeout:60];" +
             "way[\"highway\"~\"^($kinds)$end\"][\"designation\"!~\".\"]($bbox);" +
             "out geom;"
-        val json = Net.overpass(query, timeoutMs = 70_000)
         val out = ArrayList<ProwLine>()
-        val elements = JSONObject(json).getJSONArray("elements")
-        for (i in 0 until elements.length()) {
-            val geom = elements.getJSONObject(i).optJSONArray("geometry") ?: continue
-            val pts = FloatArray(geom.length() * 2)
-            var n = 0
-            for (g in 0 until geom.length()) {
-                val nd = geom.optJSONObject(g) ?: continue
-                val en = Bng.fromWgs84(nd.getDouble("lat"), nd.getDouble("lon"))
-                pts[n++] = en.e.toFloat()
-                pts[n++] = en.n.toFloat()
-            }
-            if (n >= 4) out.add(ProwLine(ALL_PATH, if (n == pts.size) pts else pts.copyOf(n)))
+        Overpass.forEach(query, timeoutMs = 70_000) { el ->
+            for (run in Overpass.runs(el.geometry)) out.add(ProwLine(ALL_PATH, project(run)))
         }
         return out
     }

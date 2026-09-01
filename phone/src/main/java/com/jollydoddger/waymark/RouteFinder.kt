@@ -3,7 +3,6 @@ package com.jollydoddger.waymark
 import android.content.Context
 import com.jollydoddger.waymark.shared.Bng
 import com.jollydoddger.waymark.shared.En
-import org.json.JSONObject
 
 /**
  * "Walks whose line comes within X of me" — the thing the route-app map pins
@@ -93,51 +92,44 @@ object RouteFinder {
             "relation[\"route\"~\"^(hiking|foot|walking)$end\"]" +
             "(around:${radiusM.toInt()},$at);" +
             "out geom($clip) 40;"
-        val json = Net.overpass(query)
-
         val out = ArrayList<FoundWalk>()
-        val elements = JSONObject(json).getJSONArray("elements")
-        for (i in 0 until elements.length()) {
-            val rel = elements.getJSONObject(i)
-            if (rel.optString("type") != "relation") continue
-            val tags = rel.optJSONObject("tags")
-            val name = tags?.optString("name")?.takeIf { it.isNotBlank() }
-                ?: tags?.optString("ref")?.takeIf { it.isNotBlank() }
-                ?: continue // an unnamed relation is not offerable as "a walk"
-
-            // Member ways as separate polylines; clipping replaces out-of-box
-            // nodes with nulls, which split a way into pieces here.
-            val lines = ArrayList<List<En>>()
-            val members = rel.optJSONArray("members") ?: continue
-            for (m in 0 until members.length()) {
-                val member = members.getJSONObject(m)
-                if (member.optString("type") != "way") continue
-                val geom = member.optJSONArray("geometry") ?: continue
-                var run = ArrayList<En>()
-                for (g in 0 until geom.length()) {
-                    val nd = geom.optJSONObject(g)
-                    if (nd == null) {
-                        if (run.size >= 2) lines.add(run)
-                        run = ArrayList()
-                        continue
+        // Streamed; see Overpass.kt. Forty relations sounds small until one
+        // of them is a national trail with thirty thousand nodes in it.
+        Overpass.forEach(query) { rel ->
+            val name = rel.tags["name"]?.takeIf { it.isNotBlank() }
+                ?: rel.tags["ref"]?.takeIf { it.isNotBlank() }
+            // An unnamed relation is not offerable as "a walk".
+            if (rel.type == "relation" && name != null) {
+                // Member ways as separate polylines; clipping replaces
+                // out-of-box nodes with nulls, which split a way here.
+                val lines = ArrayList<List<En>>()
+                for (member in rel.members) {
+                    for (run in Overpass.runs(member)) {
+                        val line = ArrayList<En>(run.size / 2)
+                        var g = 0
+                        while (g + 1 < run.size) {
+                            line.add(Bng.fromWgs84(run[g], run[g + 1]))
+                            g += 2
+                        }
+                        lines.add(line)
                     }
-                    run.add(Bng.fromWgs84(nd.getDouble("lat"), nd.getDouble("lon")))
                 }
-                if (run.size >= 2) lines.add(run)
+                if (lines.isNotEmpty()) {
+                    val closest = lines.minOf { Geom.closestApproach(near, it) }
+                    // around: matched a part the clip cut off
+                    if (closest <= radiusM) {
+                        out.add(
+                            FoundWalk(
+                                name = name,
+                                source = "OSM",
+                                lines = lines,
+                                closestM = closest,
+                                lengthM = lines.sumOf { Geom.length(it) },
+                            ),
+                        )
+                    }
+                }
             }
-            if (lines.isEmpty()) continue
-
-            val closest = lines.minOf { Geom.closestApproach(near, it) }
-            if (closest > radiusM) continue // around: matched a part the clip cut off
-            out.add(
-                FoundWalk(
-                    name = name,
-                    source = "OSM",
-                    lines = lines,
-                    closestM = closest,
-                    lengthM = lines.sumOf { Geom.length(it) },
-                ),
-            )
         }
         return out
     }

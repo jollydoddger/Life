@@ -136,11 +136,35 @@ object Library {
             file(ctx).delete()
             tmp.renameTo(file(ctx))
         }
+        cached = null
+        cachedStamp = 0L
+    }
+
+    /**
+     * The parsed index, held between calls.
+     *
+     * [load] is called by every proximity search and every count, and it
+     * re-read and re-parsed the whole file each time — a `JSONArray` of a
+     * boxed Double per stored coordinate, thrown away immediately. On a
+     * library of any size that is a large allocation spike repeated on
+     * every map move, landing on the same heap a path-network fetch is
+     * trying to use. Keyed on the file's timestamp so a rescan, or the file
+     * changing underneath, is still picked up.
+     */
+    private var cached: List<Entry>? = null
+    private var cachedStamp = 0L
+
+    /** Let the index go when the system is short of memory. */
+    fun trim() {
+        cached = null
+        cachedStamp = 0L
     }
 
     private fun load(ctx: Context): List<Entry> {
         val f = file(ctx)
         if (!f.exists()) return emptyList()
+        val stamp = f.lastModified()
+        cached?.let { if (stamp == cachedStamp) return it }
         return try {
             val arr = JSONArray(f.readText())
             (0 until arr.length()).map { i ->
@@ -154,6 +178,9 @@ object Library {
                     maxE = o.getDouble("maxE"), maxN = o.getDouble("maxN"),
                     points = (0 until es.length()).map { j -> En(es.getDouble(j), ns.getDouble(j)) },
                 )
+            }.also {
+                cached = it
+                cachedStamp = stamp
             }
         } catch (e: Exception) {
             emptyList()

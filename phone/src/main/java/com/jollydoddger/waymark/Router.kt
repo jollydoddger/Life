@@ -2,7 +2,6 @@ package com.jollydoddger.waymark
 
 import com.jollydoddger.waymark.shared.Bng
 import com.jollydoddger.waymark.shared.En
-import org.json.JSONObject
 import kotlin.math.abs
 import kotlin.math.cos
 import kotlin.math.hypot
@@ -384,6 +383,13 @@ object Router {
                 return g
             }
         }
+        // Let the old network go before building the new one. Holding both
+        // at once doubles the peak for nothing — the old one is about to be
+        // replaced whatever happens — and the peak is what runs the heap
+        // out on a path-dense area.
+        cachedGraph = null
+        cachedCentre = null
+        cachedRadius = 0.0
         val fresh = build(centre, r)
         cachedGraph = fresh
         cachedCentre = centre
@@ -421,8 +427,6 @@ object Router {
             "[\"access\"!~\"^(no|private)$end\"]" +
             "(around:${r.toInt()},$at);" +
             "out geom($clip);"
-        val json = Net.overpass(query, timeoutMs = 70_000)
-
         val nodes = ArrayList<En>()
         val edges = ArrayList<ArrayList<Graph.Edge>>()
         val index = HashMap<Long, Int>()
@@ -440,36 +444,44 @@ object Router {
             return i
         }
 
-        val elements = JSONObject(json).getJSONArray("elements")
-        for (i in 0 until elements.length()) {
-            val el = elements.getJSONObject(i)
-            val kind = el.optJSONObject("tags")?.optString("highway").orEmpty()
-            if (kind in NEVER) continue
+        // Streamed rather than parsed into a tree: this reply is the
+        // largest thing the app reads, and holding it as JSONObjects is
+        // what put an OutOfMemoryError in front of him. See Overpass.kt.
+        Overpass.forEach(query, timeoutMs = 70_000) { el ->
+            val kind = el.tags["highway"].orEmpty()
             // Roads stay in the graph whatever the preference; the search
             // prices them. Dropping them here is what left the path network
             // in islands an A road wide.
-            val cost = COST[kind] ?: continue
-            val isRoad = kind in ROADS
-            val geom = el.optJSONArray("geometry") ?: continue
-
-            var prev = -1
-            var prevEn: En? = null
-            for (g in 0 until geom.length()) {
-                val nd = geom.optJSONObject(g) ?: continue
-                val en = Bng.fromWgs84(nd.getDouble("lat"), nd.getDouble("lon"))
-                val idx = nodeAt(en)
-                if (prev >= 0 && prev != idx) {
-                    val d = hypot(en.e - prevEn!!.e, en.n - prevEn.n)
-                    if (d > 0) {
-                        // Walking has no one-way streets.
-                        val plain = d * cost
-                        val avoid = if (isRoad) plain * ROAD_AVOID_FACTOR else plain
-                        edges[prev].add(Graph.Edge(idx, d, plain, kind, isRoad, avoid))
-                        edges[idx].add(Graph.Edge(prev, d, plain, kind, isRoad, avoid))
+            val cost = if (kind in NEVER) null else COST[kind]
+            if (cost != null) {
+                val isRoad = kind in ROADS
+                // Split at the clip's gaps rather than closing over them.
+                // A way that leaves the box and comes back is two pieces of
+                // path, and joining them made an edge straight across
+                // ground nobody fetched — which the router would then plan
+                // along and call a footpath.
+                for (run in Overpass.runs(el.geometry)) {
+                    var prev = -1
+                    var prevEn: En? = null
+                    var g = 0
+                    while (g + 1 < run.size) {
+                        val en = Bng.fromWgs84(run[g], run[g + 1])
+                        g += 2
+                        val idx = nodeAt(en)
+                        if (prev >= 0 && prev != idx) {
+                            val d = hypot(en.e - prevEn!!.e, en.n - prevEn.n)
+                            if (d > 0) {
+                                // Walking has no one-way streets.
+                                val plain = d * cost
+                                val avoid = if (isRoad) plain * ROAD_AVOID_FACTOR else plain
+                                edges[prev].add(Graph.Edge(idx, d, plain, kind, isRoad, avoid))
+                                edges[idx].add(Graph.Edge(prev, d, plain, kind, isRoad, avoid))
+                            }
+                        }
+                        prev = idx
+                        prevEn = en
                     }
                 }
-                prev = idx
-                prevEn = en
             }
         }
         return Graph(nodes, edges)

@@ -891,6 +891,7 @@ class MainActivity : Activity() {
             Radar.trim()
             // The cached path network is the biggest thing this app holds.
             Router.trim()
+            Library.trim()
         }
     }
 
