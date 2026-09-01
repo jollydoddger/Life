@@ -172,6 +172,22 @@ object Net {
     class Fatal(cause: Throwable) : RuntimeException(cause)
 
     /**
+     * A server that answered, and said it had given up.
+     *
+     * Overpass does not fail a slow query with a 5xx — it returns HTTP 200
+     * carrying a `remark` and no data. That is a refusal wearing the
+     * clothes of an answer, and the difference matters more than it looks:
+     * treated as an answer it means "there is nothing round here", which
+     * this app then cached and repeated all afternoon.
+     *
+     * An IOException so the mirror loop counts it as transport, and one
+     * this loop moves on from rather than retrying — a server too busy to
+     * finish in sixty seconds will be too busy again in another sixty, and
+     * the next mirror is the better question.
+     */
+    class GaveUp(val remark: String) : java.io.IOException("gave up: $remark")
+
+    /**
      * Overpass, with somewhere else to go when the main server says no.
      *
      * The public instance at overpass-api.de rate-limits hard and drops
@@ -210,6 +226,7 @@ object Net {
     /** The short form of what went wrong with one host. */
     private fun why(e: Exception): String = when (e) {
         is HttpError -> "HTTP ${e.code}"
+        is GaveUp -> "too busy to finish"
         is java.net.UnknownHostException -> "no DNS"
         is java.net.ConnectException -> "refused the connection"
         is java.net.SocketTimeoutException -> "timed out"
@@ -258,8 +275,10 @@ object Net {
                         // 429 means too fast and 504 means too big: both are
                         // worth one wait and a second go. A host that isn't
                         // there will still not be there in a second and a
-                        // half, and asking again only spends his afternoon.
-                        if (isUnreachable(e)) break
+                        // half, and asking again only spends his afternoon —
+                        // and neither will one that just spent sixty seconds
+                        // failing to finish the same query.
+                        if (isUnreachable(e) || e is GaveUp) break
                         try {
                             Thread.sleep(1_500L * (attempt + 1))
                         } catch (_: InterruptedException) {

@@ -432,6 +432,13 @@ object Router {
     const val MAX_GRAPH_RADIUS_M = 15_000.0
 
     /**
+     * Below this a graph is not worth keeping, let alone caching: it is
+     * either a genuinely bare square or an answer that never really came.
+     * The callers already treat it as nothing to plan on.
+     */
+    const val MIN_USABLE_NODES = 20
+
+    /**
      * The network round a point, reusing the last one when it covers the
      * ask. Fetching and parsing several megabytes of Overpass JSON is the
      * bulk of a plan, and re-planning a few hundred metres away used to pay
@@ -476,6 +483,16 @@ object Router {
         // of one fetch is a price; answering with nothing is a failure. The
         // real memory fix was streaming the reply, not this.
         val fresh = build(centre, r)
+        // "Succeeds" has to mean *came back with a network*, and it did
+        // not. A query Overpass abandons answers HTTP 200 with nothing in
+        // it, which used to be written into the cache with the full asked
+        // radius — so every later plan was served "there is nothing round
+        // here" out of memory, without asking any server, for the life of
+        // the process. Overpass.read now throws on that reply, but an
+        // empty result can still arrive from a genuinely bare square of
+        // sea or moor, and caching *that* over a working network is the
+        // same failure with a slower fuse. Handed back, never stored.
+        if (fresh.nodes.size < MIN_USABLE_NODES) return fresh
         synchronized(this) {
             cachedGraph = fresh
             cachedCentre = centre

@@ -2399,29 +2399,51 @@ class MainActivity : Activity() {
             // circuit when they asked to go out to something and come back.
             val target = (minM + maxM) / 2
             val askedGraphM = target / (2 * Math.PI) * 1.9 + 900 + slackM
+            var clampNote = ""
             if (askedGraphM > Router.MAX_GRAPH_RADIUS_M) {
                 // Router.buildCached clamps this silently — it has to, a
                 // free Overpass mirror crashes on a query this wide — but a
                 // silent clamp here would mean "anywhere on this map" over a
                 // wide region quietly stopped covering the far side of it,
                 // with nothing anywhere saying so.
-                sayBriefly(
-                    "The paths can only be read within " +
-                        "${Brief.fmtKm(Router.MAX_GRAPH_RADIUS_M)} of here — the start " +
-                        "region you gave reaches further than that.",
-                )
+                clampNote = " The paths can only be read within " +
+                    "${Brief.fmtKm(Router.MAX_GRAPH_RADIUS_M)} of here, and the start " +
+                    "region you gave reaches further."
             }
             // A separate wait, and a long one on a path-dense area: the bar
             // said "working one out" through both the fetch and the search,
-            // so a slow network looked like a slow planner.
-            sayBriefly("Reading the path network round here\u2026")
-            val plannedAll: List<Router.Planned> = withContext(Dispatchers.IO) {
-                runCatching {
+            // so a slow network looked like a slow planner. The clamp note
+            // rides along rather than being said a tick earlier and wiped
+            // by this line before anyone could read it.
+            sayBriefly("Reading the path network round here\u2026$clampNote")
+            // A heartbeat for the length of the search. Router.loops only
+            // reports at the end of each of its three attempts — tens of
+            // seconds apart on real ground — and sayBriefly fades after
+            // five, so the pill went blank and stayed blank through most of
+            // a ninety-second search. Nothing on screen is how "it doesn't
+            // get anything" starts, whatever the search is actually doing.
+            val searchStarted = System.currentTimeMillis()
+            var searchNote = ""
+            val beat = object : Runnable {
+                override fun run() {
+                    if (!alive) return
+                    val s = (System.currentTimeMillis() - searchStarted) / 1000
+                    say(
+                        "Working out a walk\u2026 ${s / 60}:${"%02d".format(s % 60)}" +
+                            if (searchNote.isNotBlank()) " \u00b7 $searchNote" else "",
+                    )
+                    status.postDelayed(this, 1_000)
+                }
+            }
+            status.postDelayed(beat, 4_000)
+            val attempt: Result<List<Router.Planned>> = try {
+                withContext(Dispatchers.IO) {
+                    runCatching {
                     // The network has to cover the start region as well as
                     // the walk: a loop beginning at the far edge of the map
                     // needs the paths out there to be in the graph.
                     val graph = Router.buildCached(here, askedGraphM)
-                    if (graph.nodes.size < 20) return@runCatching emptyList<Router.Planned>()
+                    if (graph.nodes.size < Router.MIN_USABLE_NODES) return@runCatching emptyList<Router.Planned>()
                     // His idea: use the confirmed path and work out the rest.
                     // The named routes already fetched above are laid onto
                     // the graph, and the ways under them become cheap to
@@ -2436,7 +2458,7 @@ class MainActivity : Activity() {
                         listOfNotNull(
                             Router.outAndBack(
                                 graph, here, target, deadline, startSlackM = slackM,
-                            ) { note -> runOnUiThread { if (alive) sayBriefly(note) } },
+                            ) { note -> searchNote = note },
                         )
                     } else {
                         // Several genuinely different circuits, not one
@@ -2446,10 +2468,36 @@ class MainActivity : Activity() {
                         Router.loops(
                             graph, here, target, deadline, startSlackM = slackM,
                             wanted = 3,
-                        ) { note -> runOnUiThread { if (alive) sayBriefly(note) } }
+                        ) { note -> searchNote = note }
                     }
-                }.getOrDefault(emptyList())
+                }
+                }
+            } finally {
+                // Cancellation walks out through here too — ✕ on the picker
+                // kills this job, and a heartbeat left ticking afterwards
+                // would sit there claiming to be working on nothing.
+                status.removeCallbacks(beat)
             }
+            // runCatching swallows Throwable, and this used to end
+            // `.getOrDefault(emptyList())` — so a dead network, a parser
+            // fault, anything at all, arrived as "nothing plannable round
+            // here" with not a word about why. The assistant's copy of this
+            // same call has always said; the map's never did.
+            attempt.exceptionOrNull()?.let { e ->
+                if (e is kotlinx.coroutines.CancellationException) throw e
+                picksFromSpec = real.isNotEmpty()
+                if (real.isNotEmpty()) {
+                    WalkPicks.replace(this@MainActivity, real)
+                    showSpecPicks()
+                }
+                say(
+                    "Couldn\u2019t read the paths round there, so nothing of our own " +
+                        "could be worked out. " + Assistant.explain(e) +
+                        if (real.isNotEmpty()) " The walks found above are still good." else "",
+                )
+                return@launch
+            }
+            val plannedAll = attempt.getOrDefault(emptyList())
             // Offered if anywhere near the asked range; the best one is
             // kept whatever its length, because "6.1 km against 10 asked,
             // said plainly" beats an empty answer.
@@ -2458,11 +2506,14 @@ class MainActivity : Activity() {
             // In range, or short of it and honest about that; never a walk
             // several times what he asked for.
             val inRange = plannedAll.filter { it.metres in (minM * 0.7)..(maxM * 1.3) }
-            val offered = if (inRange.isNotEmpty()) {
-                inRange
-            } else {
-                plannedAll.filter { it.metres < minM }.take(1)
-            }
+            // The fallback used to look only at the short side, so every
+            // circuit between maxM*1.3 and the search's own 2.2x ceiling was
+            // found, closed, and silently binned — and he was then told the
+            // paths "wouldn't close one", which was false. A real circuit of
+            // the wrong length, named honestly, beats a true statement about
+            // nothing; and it beats a false one about the ground outright.
+            val offered = if (inRange.isNotEmpty()) inRange else plannedAll.take(1)
+            val offTarget = inRange.isEmpty() && offered.isNotEmpty()
             if (offered.isEmpty()) {
                 if (real.isEmpty()) {
                     // Nothing of his on the picker, so nothing on it was
@@ -2511,11 +2562,16 @@ class MainActivity : Activity() {
             pickDayOffset = spec.dayOffset
             showSpecPicks()
             val best = offered.first()
-            val shortOf = if (best.metres < minM * 0.95) {
-                " \u2014 shorter than the ${Brief.fmtKm(minM)} you asked for, but it is a " +
-                    "real circuit and the paths round there would not make a longer one"
-            } else {
-                ""
+            val shortOf = when {
+                best.metres < minM * 0.95 ->
+                    " \u2014 shorter than the ${Brief.fmtKm(minM)} you asked for, but it is a " +
+                        "real circuit and the paths round there would not make a longer one"
+                // The long side says so too now. It used to be thrown away
+                // in silence and reported as no circuit at all.
+                offTarget && best.metres > maxM ->
+                    " \u2014 longer than the ${Brief.fmtKm(maxM)} you asked for, but it is a " +
+                        "real circuit and the paths round there would not close a shorter one"
+                else -> ""
             }
             val roads = best.roadSummary()
             val trailNote = if (best.trailM >= 400) {
@@ -2596,7 +2652,7 @@ class MainActivity : Activity() {
             }
             if (editing == null) return@launch
             val graph = g.getOrNull()
-            if (graph == null || graph.nodes.size < 20) {
+            if (graph == null || graph.nodes.size < Router.MIN_USABLE_NODES) {
                 // A failed fetch must not cost him the network he already
                 // has. This used to null editGraph unconditionally — so the
                 // widening fetch (triggered by drawing near the edge)
@@ -3323,9 +3379,17 @@ class MainActivity : Activity() {
         // A loop still being worked out has nowhere to land once the picker
         // is gone, and letting it finish would re-create the file this line
         // just deleted — the picker would reappear on the next resume with
-        // one lonely candidate in it.
+        // one lonely candidate in it. So ✕ does stop the search; it just
+        // must not do it in silence. He closed a row of walks; he did not
+        // knowingly call off the one still being worked out, and for a
+        // while the row he was closing had no buttons on it to suggest it
+        // was worth keeping.
+        val wasSearching = specJob?.isActive == true
         specJob?.cancel()
         specJob = null
+        if (wasSearching) {
+            sayBriefly("Stopped \u2014 that also called off the walk still being worked out.")
+        }
         picksFromSpec = false
         pickDayOffset = 0
         // Use/Start may just have changed the loaded route; the peek line

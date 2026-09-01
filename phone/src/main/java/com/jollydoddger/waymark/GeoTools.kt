@@ -342,7 +342,7 @@ class GeoTools(
             }
             progress("Reading the paths and lanes round here…")
             val graph = Router.buildCached(here, span + 2_000)
-            if (graph.nodes.size < 20) return noNetwork(avoidRoads)
+            if (graph.nodes.size < Router.MIN_USABLE_NODES) return noNetwork(avoidRoads)
             val points = ArrayList<En>()
             var metres = 0.0
             val byGroup = HashMap<String, Double>()
@@ -402,7 +402,7 @@ class GeoTools(
             return offer(real, emptyList(), target,
                 "Couldn't reach OpenStreetMap's servers to read the paths (${it.message ?: "no connection"}).")
         }
-        if (graph.nodes.size < 20) {
+        if (graph.nodes.size < Router.MIN_USABLE_NODES) {
             return offer(real, emptyList(), target, noNetwork(avoidRoads))
         }
 

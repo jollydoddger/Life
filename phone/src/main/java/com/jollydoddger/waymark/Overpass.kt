@@ -95,21 +95,65 @@ object Overpass {
     fun forEach(query: String, timeoutMs: Int = 70_000, onElement: (Element) -> Unit) {
         Net.overpassStream(query, timeoutMs) { input ->
             JsonReader(input.reader().buffered()).use { r ->
-                r.isLenient = true
-                r.beginObject()
-                while (r.hasNext()) {
-                    if (r.nextName() == "elements") {
-                        r.beginArray()
-                        while (r.hasNext()) onElement(readElement(r))
-                        r.endArray()
-                    } else {
-                        r.skipValue()
-                    }
-                }
-                r.endObject()
+                read(r, onElement)
             }
         }
     }
+
+    /**
+     * The parse itself, given a reader — separated from the fetch so the
+     * one decision in here that matters can be tested without a network:
+     * telling a server that gave up from ground that has nothing on it.
+     *
+     * Overpass does not fail a slow query with a 5xx. It answers **HTTP
+     * 200** carrying `{"remark":"runtime error: Query timed out…",
+     * "elements":[]}` — a well-formed reply with nothing in it. Read only
+     * for elements, that is indistinguishable from a stretch of moor with
+     * no paths on it, and this app believed the second: the empty answer
+     * went into the graph cache, and every plan afterwards was told from
+     * cache that there was nothing round here without anyone being asked.
+     * An afternoon of "the planner doesn't get anything", out of a query
+     * that was merely slow.
+     */
+    fun read(r: JsonReader, onElement: (Element) -> Unit) {
+        var remark: String? = null
+        var seen = 0
+        r.isLenient = true
+        r.beginObject()
+        while (r.hasNext()) {
+            when (r.nextName()) {
+                "elements" -> {
+                    r.beginArray()
+                    while (r.hasNext()) {
+                        seen++
+                        onElement(readElement(r))
+                    }
+                    r.endArray()
+                }
+                // Overpass says why it stopped here, and only here.
+                "remark" -> remark = if (r.peek() == JsonToken.STRING) r.nextString() else null
+                else -> r.skipValue()
+            }
+        }
+        r.endObject()
+        if (isRefusal(seen, remark)) throw Net.GaveUp(remark!!)
+    }
+
+    /**
+     * Whether a reply that parsed to [seen] elements carrying [remark] is
+     * a server refusing rather than ground being empty.
+     *
+     * A remark alongside real elements is a warning about part of a good
+     * answer, and the answer is still worth having. A remark with nothing
+     * at all is the server saying it never finished the query. No remark
+     * and nothing at all is a true answer: the sea, or a square of moor
+     * with nothing mapped on it, and the ground is allowed to be empty.
+     *
+     * Split out so the one decision in this file that cost him an
+     * afternoon can be tested — `android.util.JsonReader` is a stub under
+     * a plain JVM test, so the parse around it cannot be.
+     */
+    fun isRefusal(seen: Int, remark: String?): Boolean = seen == 0 && remark != null
 
     private fun readElement(r: JsonReader): Element {
         var type = ""
