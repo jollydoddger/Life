@@ -178,7 +178,7 @@ object Prow {
         val south = latIdx * CELL_DEG
         val west = lonIdx * CELL_DEG
         // One literal with templates; ${'$'} for the regex end anchor.
-        val bbox = "%.4f,%.4f,%.4f,%.4f".format(south, west, south + CELL_DEG, west + CELL_DEG)
+        val bbox = "%.4f,%.4f,%.4f,%.4f".format(java.util.Locale.UK, south, west, south + CELL_DEG, west + CELL_DEG)
         val kinds = "public_footpath|public_bridleway|restricted_byway|byway_open_to_all_traffic"
         val end = "${'$'}"
         // Two ways of recording the same fact: the designation tag, and a
@@ -211,7 +211,7 @@ object Prow {
     private fun fetchAllPathsCell(latIdx: Int, lonIdx: Int): List<ProwLine> {
         val south = latIdx * CELL_DEG
         val west = lonIdx * CELL_DEG
-        val bbox = "%.4f,%.4f,%.4f,%.4f".format(south, west, south + CELL_DEG, west + CELL_DEG)
+        val bbox = "%.4f,%.4f,%.4f,%.4f".format(java.util.Locale.UK, south, west, south + CELL_DEG, west + CELL_DEG)
         val kinds = "path|footway|track|bridleway|steps"
         val end = "${'$'}"
         val query = "[out:json][timeout:60];" +

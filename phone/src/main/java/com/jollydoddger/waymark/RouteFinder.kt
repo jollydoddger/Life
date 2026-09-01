@@ -92,8 +92,8 @@ object RouteFinder {
         val (north, east) = Bng.toWgs84(En(near.e + clipM, near.n + clipM))
         // One literal with templates (a .format() over concatenated literals
         // binds only to the last), and ${'$'} for the regex end.
-        val at = "%.5f,%.5f".format(lat, lon)
-        val clip = "%.5f,%.5f,%.5f,%.5f".format(south, west, north, east)
+        val at = "%.5f,%.5f".format(java.util.Locale.UK, lat, lon)
+        val clip = "%.5f,%.5f,%.5f,%.5f".format(java.util.Locale.UK, south, west, north, east)
         val end = "${'$'}"
         val query = "[out:json][timeout:30];" +
             "relation[\"route\"~\"^(hiking|foot|walking)$end\"]" +

@@ -186,6 +186,53 @@ class RouteEdit(
     }
 
     /**
+     * Snap what was placed before the network arrived — and nothing else.
+     *
+     * The path network takes seconds to fetch and the editor invites taps
+     * immediately, so the first points of a session land wherever the thumb
+     * fell, with no way onto a path and no leg between them. When the graph
+     * lands, this moves those anchors onto the way they were aimed at (via
+     * [snapper], which is the same tap-snap used at placement) and re-routes
+     * only the legs that never found a path.
+     *
+     * The restraint is the point. This used to be a blanket [resnapAll],
+     * which also re-invented every leg of a *loaded* walk — a GPX describes
+     * ground somebody actually walked, [load] promises to keep it verbatim,
+     * and the promise was broken the moment the network arrived. A snapped
+     * leg is never touched here, so a loaded walk passes through unchanged.
+     *
+     * An anchor is moved only when every leg touching it is unsnapped:
+     * moving one that a snapped leg depends on would re-route that leg too,
+     * which is the same broken promise one anchor at a time.
+     *
+     * Returns whether anything changed, so the caller knows to redraw.
+     */
+    fun heal(snapper: (En) -> En?): Boolean {
+        // In straight mode an unsnapped leg is the intended result, not a
+        // casualty of a missing graph.
+        if (snap == Snap.STRAIGHT || anchors.isEmpty()) return false
+        fun unsnapped(i: Int) = i in 1 until anchors.size && !anchors[i].snapped
+        val loose = anchors.indices.filter { i ->
+            (i == 0 || unsnapped(i)) && (i == anchors.size - 1 || unsnapped(i + 1))
+        }
+        val legsToRoute = (1 until anchors.size).filter { !anchors[it].snapped }
+        if (loose.isEmpty() && legsToRoute.isEmpty()) return false
+        snapshot()
+        for (i in loose) {
+            val to = snapper(anchors[i].at) ?: continue
+            if (to != anchors[i].at) anchors[i] = Anchor(to)
+        }
+        var changed = false
+        for (i in 1 until anchors.size) {
+            if (!anchors[i].snapped) {
+                route(i)
+                changed = changed || anchors[i].snapped
+            }
+        }
+        return changed || loose.isNotEmpty()
+    }
+
+    /**
      * Open an existing walk for editing.
      *
      * The first version made two anchors — start and end — with the whole

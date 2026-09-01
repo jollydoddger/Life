@@ -2329,7 +2329,20 @@ class MainActivity : Activity() {
             if (editing == null) return@launch
             val graph = g.getOrNull()
             if (graph == null || graph.nodes.size < 20) {
-                editGraph = null
+                // A failed fetch must not cost him the network he already
+                // has. This used to null editGraph unconditionally — so the
+                // widening fetch (triggered by drawing near the edge)
+                // failing on a weak signal threw away a *working* graph
+                // mid-drawing, and every leg after that came out straight.
+                // Now the failure only matters when there was nothing.
+                if (editGraph != null) {
+                    refreshEdit()
+                    say(
+                        "Couldn't widen the path network — still drawing on the " +
+                            "paths already loaded. Tap Paths to retry the wider area.",
+                    )
+                    return@launch
+                }
                 editPathsNote = if (graph == null) {
                     "no paths loaded (" + (g.exceptionOrNull()?.message?.take(60) ?: "failed") + ")"
                 } else {
@@ -2345,11 +2358,22 @@ class MainActivity : Activity() {
             }
             editGraph = graph
             editGraphCentre = centre
-            editGraphRadius = radiusM
+            // The clamped figure, not the ask: buildCached caps the fetch at
+            // MAX_GRAPH_RADIUS_M, and recording the larger number here made
+            // the near-the-edge test believe in coverage never fetched.
+            editGraphRadius = radiusM.coerceAtMost(Router.MAX_GRAPH_RADIUS_M)
             editPathsNote = ""
-            withContext(Dispatchers.IO) { editing?.resnapAll() }
+            // Heal, not resnapAll: snap the points placed while the network
+            // was still downloading, and leave every already-snapped leg —
+            // including the whole of a loaded GPX — exactly as it is.
+            val healed = withContext(Dispatchers.IO) {
+                editing?.heal { p -> graph.onWay(p, Router.TAP_SNAP_M)?.at } ?: false
+            }
             refreshEdit()
-            sayBriefly("${graph.nodes.size} path junctions loaded — legs snap to them now.")
+            sayBriefly(
+                "${graph.nodes.size} path junctions loaded" +
+                    (if (healed) " — your first points have been snapped on." else "."),
+            )
         }
     }
 

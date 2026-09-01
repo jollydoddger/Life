@@ -108,4 +108,42 @@ class SnapTest {
         val d = hypot(g.nodes[on.node].e - tap.e, g.nodes[on.node].n - tap.n)
         assertTrue("the node routed from is beyond the tap tolerance", d > Router.TAP_SNAP_M)
     }
+
+    // --- between(): taps on one long segment -------------------------------
+
+    @Test fun `two taps on the same stretch of footpath are a leg along it`() {
+        // Both resolve to the same node, the search collapses, and this
+        // used to come back null — a leg lying exactly on the path,
+        // reported as "no path between those points".
+        val g = graph()
+        val leg = Router.between(g, En(960.0, 50.0), En(960.0, 150.0))
+        assertNotNull(leg)
+        assertEquals(2, leg!!.points.size)
+        assertEquals(100.0, leg.metres, 0.001)
+        assertEquals("it is the path, and says so", 100.0, leg.byGroup["path"] ?: 0.0, 0.001)
+    }
+
+    @Test fun `taps near opposite ends of one segment stay between the taps`() {
+        // Resolved to different ends, the leg used to run out to one end
+        // of the segment and back past both taps to the other.
+        val g = graph()
+        val leg = Router.between(g, En(960.0, 100.0), En(960.0, 300.0))
+        assertNotNull(leg)
+        assertEquals(2, leg!!.points.size)
+        assertEquals(100.0, leg.points.first().n, 0.001)
+        assertEquals(300.0, leg.points.last().n, 0.001)
+        assertEquals(200.0, leg.metres, 0.001)
+    }
+
+    @Test fun `a leg does not set off backwards to the end of the tapped segment`() {
+        // Taps mid-segment on the lane: the routed walk starts at a node
+        // behind the first tap and ends at one past the second. Both
+        // outer vertices are doubling-back, and are trimmed.
+        val g = graph()
+        val leg = Router.between(g, En(1000.0, 120.0), En(1000.0, 330.0))
+        assertNotNull(leg)
+        val ns = leg!!.points.map { it.n }
+        assertTrue("no vertex behind the first tap: $ns", ns.min() >= 120.0 - 0.001)
+        assertTrue("no vertex past the second tap: $ns", ns.max() <= 330.0 + 0.001)
+    }
 }

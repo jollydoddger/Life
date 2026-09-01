@@ -444,37 +444,53 @@ object Router {
         // little further off would wrongly read the cache as covering
         // ground that was never fetched.
         val r = radiusM.coerceAtMost(MAX_GRAPH_RADIUS_M)
-        val c = cachedCentre
-        val g = cachedGraph
-        if (c != null && g != null) {
-            val moved = hypot(centre.e - c.e, centre.n - c.n)
-            if (moved + r <= cachedRadius) {
-                // Last plan's trails are not this plan's, and a cached graph
-                // outlives both. Handing one back still carrying yesterday's
-                // discounts would quietly bend a walk toward a trail nobody
-                // fetched — and the walk would then claim metres on it.
-                g.markTrails(emptyList())
-                return g
+        // The three cache fields are read and written under a lock — the
+        // day planner and the route editor both come through here from IO
+        // threads, and interleaved bare writes can leave the fields
+        // describing two different fetches at once. The fetch itself runs
+        // outside the lock: trim() is called from onTrimMemory on the main
+        // thread, and a lock held across a minute of Overpass would turn a
+        // low-memory nudge into an ANR.
+        synchronized(this) {
+            val c = cachedCentre
+            val g = cachedGraph
+            if (c != null && g != null) {
+                val moved = hypot(centre.e - c.e, centre.n - c.n)
+                if (moved + r <= cachedRadius) {
+                    // Last plan's trails are not this plan's, and a cached
+                    // graph outlives both. Handing one back still carrying
+                    // yesterday's discounts would quietly bend a walk toward
+                    // a trail nobody fetched — and the walk would then claim
+                    // metres on it.
+                    g.markTrails(emptyList())
+                    return g
+                }
             }
         }
-        // Let the old network go before building the new one. Holding both
-        // at once doubles the peak for nothing — the old one is about to be
-        // replaced whatever happens — and the peak is what runs the heap
-        // out on a path-dense area.
-        cachedGraph = null
-        cachedCentre = null
-        cachedRadius = 0.0
+        // The cache is replaced only after the fetch succeeds. A version of
+        // this released the old graph before fetching, to shave the memory
+        // peak — and turned every dropped connection into "no path network
+        // at all": one failed refresh on a hillside and legs that had been
+        // snapping all afternoon went straight, because a working graph had
+        // been traded for an exception. Holding both graphs for the length
+        // of one fetch is a price; answering with nothing is a failure. The
+        // real memory fix was streaming the reply, not this.
         val fresh = build(centre, r)
-        cachedGraph = fresh
-        cachedCentre = centre
-        cachedRadius = r
+        synchronized(this) {
+            cachedGraph = fresh
+            cachedCentre = centre
+            cachedRadius = r
+        }
         return fresh
     }
 
     /** Let the network go when the system is short of memory. */
     fun trim() {
-        cachedGraph = null
-        cachedCentre = null
+        synchronized(this) {
+            cachedGraph = null
+            cachedCentre = null
+            cachedRadius = 0.0
+        }
     }
 
     fun build(centre: En, radiusM: Double): Graph {
@@ -483,7 +499,7 @@ object Router {
         // here too rather than only on the cached path.
         val r = radiusM.coerceAtMost(MAX_GRAPH_RADIUS_M)
         val (lat, lon) = Bng.toWgs84(centre)
-        val at = "%.5f,%.5f".format(lat, lon)
+        val at = "%.5f,%.5f".format(java.util.Locale.UK, lat, lon)
         val kinds = COST.keys.joinToString("|")
         val end = "${'$'}"
         // Clip the geometry to the area actually being planned in — the
@@ -494,7 +510,7 @@ object Router {
         // answers with a crash rather than data.
         val (south, west) = Bng.toWgs84(En(centre.e - r, centre.n - r))
         val (north, east) = Bng.toWgs84(En(centre.e + r, centre.n + r))
-        val clip = "%.5f,%.5f,%.5f,%.5f".format(south, west, north, east)
+        val clip = "%.5f,%.5f,%.5f,%.5f".format(java.util.Locale.UK, south, west, north, east)
         // Two clauses, not one. The first is "walkable and not shut": the
         // second exists because access=private with foot=yes is how a
         // public footpath along somebody's drive is mapped, and there are a
@@ -1141,8 +1157,93 @@ object Router {
         // anywhere. Nearest-node alone is what put every leg on the road.
         val a = (g.nearestOnWay(from, TAP_SNAP_M) ?: g.nearest(from)) ?: return null
         val b = (g.nearestOnWay(to, TAP_SNAP_M) ?: g.nearest(to)) ?: return null
+        if (a == b) {
+            // Two taps on the same long segment — a field footpath with its
+            // nodes a quarter mile apart resolves both to the same end. The
+            // straight run between the taps *is* the path here, and it used
+            // to come back as "no path between those points": a leg that
+            // was on the way, flagged as a failure to find one. Described
+            // as whatever the way under it actually is, read off the edge
+            // at the shared node nearest the tap.
+            val d = hypot(to.e - from.e, to.n - from.n)
+            if (d <= 0) return null
+            val kind = g.edges[a].minByOrNull {
+                distToSegment(from, g.nodes[a], g.nodes[it.to])
+            }?.kind
+            return Planned(
+                listOf(from, to), d,
+                mapOf((kind?.let { group(it) } ?: "path") to d),
+                0.0,
+                if (kind != null) mapOf(kind to d) else emptyMap(),
+            )
+        }
         val walk = path(g, a, b, emptySet(), avoidRoads) ?: return null
-        return measure(g, walk)
+        // Both taps on the one edge the path reduced to — the same long
+        // segment, but near opposite ends, so they resolved to different
+        // nodes. Left alone the leg walks out to one end of the segment and
+        // back past both taps to the other, which on the map is a line that
+        // shoots off in both directions. The walk is the stretch between
+        // the taps.
+        if (walk.size == 2) {
+            val pA = g.nodes[walk[0]]
+            val pB = g.nodes[walk[1]]
+            if (distToSegment(from, pA, pB) < ENDPOINT_TRIM_M &&
+                distToSegment(to, pA, pB) < ENDPOINT_TRIM_M
+            ) {
+                val d = hypot(to.e - from.e, to.n - from.n)
+                if (d <= 0) return null
+                val kind = g.edges[walk[0]].firstOrNull { it.to == walk[1] }?.kind
+                return Planned(
+                    listOf(from, to), d,
+                    mapOf((kind?.let { group(it) } ?: "path") to d),
+                    0.0,
+                    if (kind != null) mapOf(kind to d) else emptyMap(),
+                )
+            }
+        }
+        val planned = measure(g, walk)
+        // The path starts and ends at graph nodes, and onWay picks the end
+        // of the tapped segment nearer the tap — so the leg can set off by
+        // walking to that end and straight back through the tap point.
+        // When the handle already lies on the leg's first or last segment,
+        // the outermost vertex is a detour, not a start: drop it.
+        val pts = planned.points
+        if (pts.size >= 3) {
+            val dropHead = distToSegment(from, pts[0], pts[1]) < ENDPOINT_TRIM_M
+            val dropTail = distToSegment(to, pts[pts.size - 1], pts[pts.size - 2]) < ENDPOINT_TRIM_M
+            if (dropHead || dropTail) {
+                val trimmed = pts.subList(
+                    if (dropHead) 1 else 0,
+                    if (dropTail) pts.size - 1 else pts.size,
+                ).toList()
+                if (trimmed.size >= 2) {
+                    // Geometry length, not edge sums — the trim has left the
+                    // node walk. The ground tallies scale down with it, or a
+                    // trimmed 400 m segment leaves byKind claiming more road
+                    // than the whole leg is long.
+                    val metres = Geom.length(trimmed).coerceAtLeast(1.0)
+                    val f = (metres / planned.metres).coerceIn(0.0, 1.0)
+                    return Planned(
+                        trimmed,
+                        metres,
+                        planned.byGroup.mapValues { it.value * f },
+                        planned.repeatFraction,
+                        planned.byKind.mapValues { it.value * f },
+                        planned.trailM * f,
+                    )
+                }
+            }
+        }
+        return planned
+    }
+
+    /** How close a handle must sit to a leg's outermost segment before the
+     *  vertex beyond it is a doubling-back rather than part of the walk. */
+    private const val ENDPOINT_TRIM_M = 2.0
+
+    private fun distToSegment(p: En, a: En, b: En): Double {
+        val q = Geom.nearestOnSegment(p, a, b)
+        return hypot(q.e - p.e, q.n - p.n)
     }
 
 }

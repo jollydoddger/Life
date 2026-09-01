@@ -188,4 +188,70 @@ class RouteEditTest {
         e.removeAt(4)
         assertTrue("one mend, not a whole re-route: $legCalls", legCalls <= 2)
     }
+
+    // --- healing: what arrives late must still snap; what was loaded must not ---
+
+    @Test
+    fun `points placed before the network arrives snap when it lands`() {
+        // The editor invites taps immediately; the path network takes
+        // seconds to fetch. The first points of every session used to stay
+        // wherever the thumb fell, forever.
+        var haveGraph = false
+        val e = RouteEdit { a, b, _ ->
+            if (haveGraph) listOf(a, En(a.e, b.n), b) else null
+        }
+        e.add(En(0.0, 3.0))
+        e.add(En(100.0, 3.0))
+        assertTrue("straight until the graph lands", e.hasUnsnapped())
+        haveGraph = true
+        assertTrue(e.heal { p -> En(p.e, 0.0) })
+        assertTrue("legs routed once healed", !e.hasUnsnapped())
+        assertEquals("anchor moved onto the way", 0.0, e.anchorPoints()[0].n, 1e-9)
+        assertEquals(0.0, e.anchorPoints()[1].n, 1e-9)
+    }
+
+    @Test
+    fun `a loaded walk is not re-invented when the network lands`() {
+        // load() promises the file's geometry verbatim; the blanket
+        // resnap that used to run when the graph arrived broke exactly
+        // that promise. heal() must leave every snapped leg alone.
+        val real = listOf(
+            En(0.0, 0.0), En(40.0, 70.0), En(110.0, 60.0),
+            En(180.0, 130.0), En(260.0, 90.0),
+        )
+        val e = RouteEdit { a, b, _ -> listOf(a, b) }
+        e.load(real)
+        val changed = e.heal { En(999.0, 999.0) }
+        assertTrue("nothing to heal on a loaded walk", !changed)
+        assertEquals(real, e.line())
+    }
+
+    @Test
+    fun `healing the drawn tail leaves the loaded body alone`() {
+        val real = listOf(
+            En(0.0, 0.0), En(40.0, 70.0), En(110.0, 60.0), En(180.0, 130.0),
+        )
+        var haveGraph = false
+        val e = RouteEdit { a, b, _ ->
+            if (haveGraph) listOf(a, b) else null
+        }
+        e.load(real)
+        e.add(En(250.0, 133.0))
+        haveGraph = true
+        assertTrue(e.heal { p -> En(p.e, 130.0) })
+        // The loaded points survive untouched; only the added tap moved.
+        assertEquals(real, e.line().subList(0, real.size))
+        assertEquals(130.0, e.anchorPoints().last().n, 1e-9)
+    }
+
+    @Test
+    fun `straight mode is never healed`() {
+        // There an unsnapped leg is the intended result, not a casualty.
+        val e = RouteEdit { a, b, _ -> listOf(a, En(a.e, b.n), b) }
+        e.snap = RouteEdit.Snap.STRAIGHT
+        e.add(En(0.0, 3.0))
+        e.add(En(100.0, 3.0))
+        assertTrue(!e.heal { En(0.0, 0.0) })
+        assertEquals(3.0, e.anchorPoints()[0].n, 1e-9)
+    }
 }
