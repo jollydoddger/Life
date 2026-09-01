@@ -79,6 +79,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -1937,9 +1938,29 @@ class MainActivity : Activity() {
             // different question — "somewhere in the county" — and put walks
             // on the picker he would have had to drive to.
             val searchM = slackM.coerceAtLeast(Router.START_SLACK_M)
-            val found = withContext(Dispatchers.IO) {
+            // The close search and the wide one, started together.
+            //
+            // These used to run one after another — the close one, then an
+            // 8 km one for stitching material, then a 12 km one if the
+            // close one came back empty. Three queries to the same servers
+            // asking the same question at three radii, each of which can
+            // legitimately take most of a minute, and the answer to the
+            // close one is a subset of the answer to the wide one anyway.
+            // Up to three minutes of a status line that never changed:
+            // that is what "it looks for ages and gets nothing" was.
+            val wideM = maxOf(searchM, widerSearchM)
+            val nearAsync = async(Dispatchers.IO) {
                 runCatching { RouteFinder.find(this@MainActivity, here, searchM) }.getOrNull()
             }
+            val wideAsync = if (wideM > searchM) {
+                async(Dispatchers.IO) {
+                    runCatching { RouteFinder.find(this@MainActivity, here, wideM) }.getOrNull()
+                }
+            } else {
+                null
+            }
+            val found = nearAsync.await()
+            val wide = wideAsync?.await() ?: found
             // OpenStreetMap *failing* and OpenStreetMap being *empty* are
             // different answers, and telling them apart is the whole
             // difference between "your signal is bad" and "Snowdonia has no
@@ -1964,11 +1985,8 @@ class MainActivity : Activity() {
             // for what to *offer* and wrong for what to *build from*: a
             // coast path a mile off is material for the loop even though it
             // does not start where he does.
-            val stitchable = if (!osmFailed && searchM < 8_000.0) {
-                withContext(Dispatchers.IO) {
-                    runCatching { RouteFinder.find(this@MainActivity, here, 8_000.0).walks }
-                        .getOrDefault(emptyList())
-                }
+            val stitchable = if (!osmFailed && wide != null && wide.note == null) {
+                wide.walks.filter { it.closestM <= 8_000.0 }
             } else {
                 emptyList()
             }
@@ -1979,15 +1997,14 @@ class MainActivity : Activity() {
             // widening is offered, never slipped in. Pointless when the
             // servers are down: the same servers answer the wider question.
             var widened = 0.0
-            if (real.isEmpty() && !osmFailed && bounds == null && searchM < widerSearchM) {
+            if (real.isEmpty() && !osmFailed && bounds == null && searchM < widerSearchM &&
+                wide != null && wide.note == null
+            ) {
+                // Already in hand — the wide search ran alongside the close
+                // one rather than after it failed.
                 widened = widerSearchM
-                val wider = withContext(Dispatchers.IO) {
-                    runCatching {
-                        RouteFinder.find(this@MainActivity, here, widerSearchM)
-                    }.getOrNull()
-                }
-                real = narrow(wider)
-                if (wider != null && wider.note == null) trails = wider.walks
+                real = narrow(wide)
+                trails = wide.walks
             }
 
             // Nothing was fetched, so nothing can be planned either — the
@@ -2073,6 +2090,10 @@ class MainActivity : Activity() {
                         "region you gave reaches further than that.",
                 )
             }
+            // A separate wait, and a long one on a path-dense area: the bar
+            // said "working one out" through both the fetch and the search,
+            // so a slow network looked like a slow planner.
+            sayBriefly("Reading the path network round here\u2026")
             val plannedAll: List<Router.Planned> = withContext(Dispatchers.IO) {
                 runCatching {
                     // The network has to cover the start region as well as
@@ -2277,9 +2298,22 @@ class MainActivity : Activity() {
         // handle rather than a mathematical point.
         val withinM = 22.0 * resources.displayMetrics.density * map.metresPerPixel()
         val hit = ed.anchorNear(en, withinM)
+        // Land the handle on the path he aimed at, not where his thumb
+        // actually came down. On OS Maps a point dropped near a footpath
+        // sits on it, and the difference is not cosmetic: a handle a few
+        // metres off the line leaves a stub of straight leg at both ends of
+        // every segment, which is most of what "it doesn't stick to
+        // footpaths" looked like. Never in Straight mode — there the whole
+        // point is that no path is being claimed.
+        val g = editGraph
+        val place = if (hit < 0 && g != null && ed.snap != RouteEdit.Snap.STRAIGHT) {
+            g.onWay(en, maxOf(Router.TAP_SNAP_M, withinM))?.at ?: en
+        } else {
+            en
+        }
         scope.launch {
             withContext(Dispatchers.IO) {
-                if (hit >= 0) ed.removeAt(hit) else ed.add(en)
+                if (hit >= 0) ed.removeAt(hit) else ed.add(place)
             }
             refreshEdit()
             // Drawn past the edge of what was fetched: widen and re-snap,

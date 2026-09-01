@@ -79,8 +79,14 @@ class RouteEdit(
             if (leg.isEmpty()) {
                 out.add(a.at)
             } else {
-                // The leg already starts at the previous anchor.
-                for (i in 1 until leg.size) out.add(leg[i])
+                // A routed leg runs between two *graph nodes*, and a handle
+                // now sits on the way rather than at a node — so the leg no
+                // longer begins where the last one ended. Dropping its first
+                // point (which is what this did, on the assumption that it
+                // always did) cut the corner between the handle and the path
+                // it sits on. Everything is kept, duplicates dropped.
+                for (p in leg) if (p != out.last()) out.add(p)
+                if (a.at != out.last()) out.add(a.at)
             }
         }
         return out

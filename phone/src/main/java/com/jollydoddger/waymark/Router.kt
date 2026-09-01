@@ -80,6 +80,21 @@ object Router {
      */
     const val TRAIL_BONUS = 0.7
 
+    /**
+     * How far out [Graph.nearestOnWay] gathers nodes before measuring to
+     * the ways they carry. Generous because a moorland footpath's two ends
+     * can be a long way from the middle of it, and the middle is where he
+     * taps.
+     */
+    const val SEGMENT_REACH_M = 500.0
+
+    /**
+     * How close a tap has to be to a way before it counts as being on it.
+     * Roughly a thumb's width of map at walking zoom; further out than this
+     * and he meant open ground, not that path.
+     */
+    const val TAP_SNAP_M = 60.0
+
     /** What a way counts as when the result is described back to him. */
     fun group(kind: String): String = when (kind) {
         "path", "footway", "bridleway", "track", "steps", "pedestrian" -> "path"
@@ -176,6 +191,65 @@ object Router {
             }
             return if (best >= 0) best else null
         }
+
+        /**
+         * The node to start or finish a leg at, for a point he tapped on
+         * the map.
+         *
+         * [nearest] answers with the nearest *node*, and that turns out to
+         * be the wrong question — it is why the editor "snaps to roads but
+         * not footpaths". OpenStreetMap gives a road a node at every
+         * junction, every bend and every crossing, and gives a field
+         * footpath two nodes a quarter of a mile apart. So a tap placed
+         * squarely on the footpath is ten metres from the *footpath* and
+         * twenty from the lane, but two hundred metres from the nearest
+         * footpath **node** and twenty from the lane's. Nearest-node picks
+         * the lane every time. Not a preference — arithmetic.
+         *
+         * So this measures to the way itself: the closest segment,
+         * perpendicular, and then the end of that segment nearer the tap.
+         * Nodes are gathered from well beyond [withinM] on purpose, because
+         * the segment wanted may have both its ends far outside the tap's
+         * own tolerance — that being the entire problem.
+         */
+        /** The way found under a tap: the end to route from, and the exact
+         *  point on it that was tapped. */
+        class OnWay(val node: Int, val at: En)
+
+        fun onWay(p: En, withinM: Double): OnWay? {
+            if (nodes.isEmpty()) return null
+            val reach = maxOf(withinM, SEGMENT_REACH_M)
+            val cx = Math.floor(p.e / cell).toLong()
+            val cy = Math.floor(p.n / cell).toLong()
+            val rings = (reach / cell).toInt() + 1
+            var best = -1
+            var bestAt: En? = null
+            var bestD = Double.MAX_VALUE
+            for (dx in -rings..rings) {
+                for (dy in -rings..rings) {
+                    val bucket = grid[cellKey(cx + dx, cy + dy)] ?: continue
+                    for (i in bucket) {
+                        for (e in edges[i]) {
+                            val on = Geom.nearestOnSegment(p, nodes[i], nodes[e.to])
+                            val d = hypot(on.e - p.e, on.n - p.n)
+                            if (d >= bestD) continue
+                            bestD = d
+                            bestAt = on
+                            // The end nearer the tap, so the stub between
+                            // the handle and the graph runs back along the
+                            // very segment it was measured to.
+                            val di = hypot(nodes[i].e - p.e, nodes[i].n - p.n)
+                            val dj = hypot(nodes[e.to].e - p.e, nodes[e.to].n - p.n)
+                            best = if (di <= dj) i else e.to
+                        }
+                    }
+                }
+            }
+            val at = bestAt
+            return if (best >= 0 && at != null && bestD <= withinM) OnWay(best, at) else null
+        }
+
+        fun nearestOnWay(p: En, withinM: Double): Int? = onWay(p, withinM)?.node
 
         /** Junctions within [withinM], nearest first — the places a loop can
          *  actually start or turn. */
@@ -421,11 +495,24 @@ object Router {
         val (south, west) = Bng.toWgs84(En(centre.e - r, centre.n - r))
         val (north, east) = Bng.toWgs84(En(centre.e + r, centre.n + r))
         val clip = "%.5f,%.5f,%.5f,%.5f".format(south, west, north, east)
+        // Two clauses, not one. The first is "walkable and not shut": the
+        // second exists because access=private with foot=yes is how a
+        // public footpath along somebody's drive is mapped, and there are a
+        // great many of those in England. Filtering on access alone threw
+        // every one of them out of the network — a right of way, dropped
+        // for being a right of way across private land, which is what most
+        // of them are.
+        val walkable = "way[\"highway\"~\"^($kinds)$end\"]"
         val query = "[out:json][timeout:60];" +
-            "way[\"highway\"~\"^($kinds)$end\"]" +
+            "(" +
+            walkable +
             "[\"foot\"!~\"^(no|private)$end\"]" +
             "[\"access\"!~\"^(no|private)$end\"]" +
             "(around:${r.toInt()},$at);" +
+            walkable +
+            "[\"foot\"~\"^(yes|designated|permissive)$end\"]" +
+            "(around:${r.toInt()},$at);" +
+            ");" +
             "out geom($clip);"
         val nodes = ArrayList<En>()
         val edges = ArrayList<ArrayList<Graph.Edge>>()
@@ -1034,8 +1121,10 @@ object Router {
 
     /** Point-to-point on the same graph, so the same rules apply. */
     fun between(g: Graph, from: En, to: En, avoidRoads: Boolean = true): Planned? {
-        val a = g.nearest(from) ?: return null
-        val b = g.nearest(to) ?: return null
+        // The way he tapped on first, and only then the nearest node
+        // anywhere. Nearest-node alone is what put every leg on the road.
+        val a = (g.nearestOnWay(from, TAP_SNAP_M) ?: g.nearest(from)) ?: return null
+        val b = (g.nearestOnWay(to, TAP_SNAP_M) ?: g.nearest(to)) ?: return null
         val walk = path(g, a, b, emptySet(), avoidRoads) ?: return null
         return measure(g, walk)
     }

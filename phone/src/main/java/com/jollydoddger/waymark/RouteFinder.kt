@@ -13,9 +13,16 @@ import com.jollydoddger.waymark.shared.En
  */
 object RouteFinder {
 
-    /** How far out the OSM geometry is clipped: a national trail is megabytes
-     *  unclipped, and the part 200 km away is not the part he can walk today. */
-    private const val CLIP_M = 20_000.0
+    /**
+     * The smallest the OSM geometry clip box is ever made. A national trail
+     * is megabytes unclipped and the part 200 km away is not the part he
+     * can walk today — but the floor used to be twenty kilometres whatever
+     * was asked, so a "walks starting within five hundred metres" question
+     * pulled a forty-kilometre square of the Pennine Way to answer it. The
+     * box has to cover the radius searched, with room for a trail to be
+     * routed along; it does not have to cover the next county.
+     */
+    private const val MIN_CLIP_M = 6_000.0
 
     private const val MAX_RESULTS = 25
 
@@ -80,7 +87,7 @@ object RouteFinder {
         // The clip box must grow with the search radius: a fixed ±20 km box
         // under a 25 km radius clips a 22-km-away walk to no geometry at
         // all, and the closest-distance guard below then drops it silently.
-        val clipM = maxOf(CLIP_M, radiusM + 5_000.0)
+        val clipM = maxOf(MIN_CLIP_M, radiusM + 5_000.0)
         val (south, west) = Bng.toWgs84(En(near.e - clipM, near.n - clipM))
         val (north, east) = Bng.toWgs84(En(near.e + clipM, near.n + clipM))
         // One literal with templates (a .format() over concatenated literals
