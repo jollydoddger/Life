@@ -153,6 +153,21 @@ class RouterTest {
     }
 
     @Test
+    fun `a wildly overlong loop is not offered as an answer`() {
+        // He asked for 5-15 km and got 50. Scoring alone let it through
+        // because nothing else had closed; length has to be a gate, not
+        // only a penalty.
+        val g = awkwardNetwork(3)
+        val target = 2_000.0
+        for (p in Router.loops(g, centre(), target, wanted = 3)) {
+            assertTrue(
+                "offered ${p.metres} m against a $target m ask",
+                p.metres <= target * 3,
+            )
+        }
+    }
+
+    @Test
     fun `a short loop is offered rather than thrown away`() {
         // A genuine circuit far under the asked distance used to be
         // discarded by a quarter-of-target floor, so a search holding a real

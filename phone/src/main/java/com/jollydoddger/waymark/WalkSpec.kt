@@ -72,6 +72,17 @@ data class WalkSpec(
      * give it a meaningless one.
      */
     val anyLength: Boolean = false,
+    /**
+     * Whether [from]/[to] are miles rather than kilometres, when they are a
+     * distance at all.
+     *
+     * He thinks in both and said so: "don't get miles and km mixed up,
+     * allow for both and always convert to km". So the unit is stored with
+     * the number instead of being assumed, and every distance leaving this
+     * class is metres — there is exactly one conversion, here, and nothing
+     * downstream ever sees a mile.
+     */
+    val miles: Boolean = false,
     /** 0 = today. Bounded by what a forecast can honestly cover. */
     val dayOffset: Int = 0,
     /** Where it may start. See [Origin]. */
@@ -92,7 +103,8 @@ data class WalkSpec(
         return if (byTime) {
             (lo * 60.0 / paceMinPerKm) * 1000 to (hi * 60.0 / paceMinPerKm) * 1000
         } else {
-            lo * 1000 to hi * 1000
+            val perUnit = if (miles) METRES_PER_MILE else 1000.0
+            lo * perUnit to hi * perUnit
         }
     }
 
@@ -103,7 +115,7 @@ data class WalkSpec(
         val size = when {
             anyLength -> "any length"
             byTime -> "${trim(lo)}–${trim(hi)} hours"
-            else -> "${trim(lo)}–${trim(hi)} km"
+            else -> "${trim(lo)}–${trim(hi)} ${if (miles) "miles" else "km"}"
         }
         val kind = when (shape) {
             Shape.CIRCULAR -> "circular"
@@ -125,6 +137,7 @@ data class WalkSpec(
         .put("to", to)
         .put("dayOffset", dayOffset)
         .put("anyLength", anyLength)
+        .put("miles", miles)
         .put("origin", origin.name)
         .toString()
 
@@ -132,6 +145,9 @@ data class WalkSpec(
         /** As far ahead as an hourly forecast is worth believing. Offering
          *  a fortnight would be offering a brief nobody should plan on. */
         const val MAX_DAY_OFFSET = 6
+
+        /** The statute mile, exactly. */
+        const val METRES_PER_MILE = 1609.344
 
         fun fromJson(s: String?): WalkSpec {
             if (s.isNullOrBlank()) return WalkSpec()
@@ -143,6 +159,7 @@ data class WalkSpec(
                     from = o.optDouble("from", 5.0),
                     to = o.optDouble("to", 10.0),
                     anyLength = o.optBoolean("anyLength"),
+                    miles = o.optBoolean("miles"),
                     dayOffset = o.optInt("dayOffset").coerceIn(0, MAX_DAY_OFFSET),
                     origin = runCatching { Origin.valueOf(o.optString("origin")) }
                         .getOrDefault(Origin.HERE),

@@ -151,4 +151,41 @@ class RouteEditTest {
         e.load(real)
         assertEquals(real, e.line())
     }
+
+    @Test
+    fun `a loaded route is editable, not two handles round a frozen line`() {
+        // The bug he reported as "only adding to a gpx and not editing it":
+        // load made a start and an end with the whole route as one leg, so
+        // every point was drawn and none of the shape could be touched.
+        val real = (0..200).map { En(it * 50.0, 0.0) }
+        val e = editor()
+        e.load(real, maxAnchors = 12)
+        assertTrue("needs handles along it, not just two", e.count() >= 8)
+        assertEquals("and it is still the same walk", real, e.line())
+    }
+
+    @Test
+    fun `handles are spread along the ground, not bunched where points crowd`() {
+        // A watch GPX has points packed where the walker dawdled. Splitting
+        // by index puts every handle in the lay-by where he had lunch.
+        val dawdle = (0..100).map { En(it * 0.5, 0.0) }          // 50 m, 101 points
+        val march = (1..40).map { En(50.0 + it * 100.0, 0.0) }   // 4 km, 40 points
+        val e = editor()
+        e.load(dawdle + march, maxAnchors = 9)
+        val xs = e.anchorPoints().map { it.e }
+        assertTrue("handles must reach the far end", xs.last() > 3_000)
+        val beyondDawdle = xs.count { it > 200 }
+        assertTrue("most handles belong on the long stretch, got $xs", beyondDawdle >= 5)
+    }
+
+    @Test
+    fun `editing a loaded route re-routes only the leg that changed`() {
+        val real = (0..100).map { En(it * 100.0, 0.0) }
+        var legCalls = 0
+        val e = RouteEdit { a, b, snap -> legCalls++; dogleg(a, b, snap) }
+        e.load(real, maxAnchors = 10)
+        legCalls = 0
+        e.removeAt(4)
+        assertTrue("one mend, not a whole re-route: $legCalls", legCalls <= 2)
+    }
 }

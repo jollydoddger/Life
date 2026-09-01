@@ -162,6 +162,9 @@ class MainActivity : Activity() {
     private lateinit var editSnapBtn: TextView
     private var editing: RouteEdit? = null
     private var editGraph: Router.Graph? = null
+    private var editGraphCentre: En? = null
+    private var editGraphRadius = 0.0
+    private var editPathsNote = ""
     private var editJob: kotlinx.coroutines.Job? = null
 
     /**
@@ -1712,10 +1715,18 @@ class MainActivity : Activity() {
             setSelection(spec.dayOffset.coerceIn(0, WalkSpec.MAX_DAY_OFFSET))
         }
 
+        var inMiles = spec.miles
         val units = TextView(this).apply {
-            textSize = 13f
-            setTextColor(Color.argb(200, 150, 160, 152))
-            setPadding(dp(8), 0, 0, 0)
+            textSize = 15f
+            setTextColor(Color.argb(255, 150, 210, 170))
+            setPadding(dp(10), dp(6), dp(10), dp(6))
+        }
+        fun showUnits(byTimeNow: Boolean) {
+            units.text = when {
+                byTimeNow -> "hours"
+                inMiles -> "miles ⇄"
+                else -> "km ⇄"
+            }
         }
         fun number(v: Double) = EditText(this).apply {
             setText(WalkSpec.trim(v))
@@ -1735,14 +1746,21 @@ class MainActivity : Activity() {
             addView(RadioButton(this@MainActivity).apply { id = 3; text = "Any length"; textSize = 14f })
             check(if (spec.anyLength) 3 else if (spec.byTime) 2 else 1)
             setOnCheckedChangeListener { _, id ->
-                units.text = if (id == 2) "hours" else "km"
+                showUnits(id == 2)
                 // "Any length" is the old Walks-near-me: show me what is
                 // here, never mind how long. The boxes have nothing to say.
                 fromBox.isEnabled = id != 3
                 toBox.isEnabled = id != 3
             }
         }
-        units.text = if (spec.byTime) "hours" else "km"
+        showUnits(spec.byTime)
+        // Tapping the unit swaps it. He thinks in both and asked for both;
+        // everything downstream is metres either way.
+        units.setOnClickListener {
+            if (byTime.checkedRadioButtonId == 2) return@setOnClickListener
+            inMiles = !inMiles
+            showUnits(false)
+        }
 
         val row = LinearLayout(this).apply {
             gravity = Gravity.CENTER_VERTICAL
@@ -1794,6 +1812,7 @@ class MainActivity : Activity() {
                     },
                     byTime = byTime.checkedRadioButtonId == 2,
                     anyLength = byTime.checkedRadioButtonId == 3,
+                    miles = inMiles,
                     from = fromBox.text.toString().toDoubleOrNull() ?: spec.from,
                     to = toBox.text.toString().toDoubleOrNull() ?: spec.to,
                     dayOffset = daySpinner.selectedItemPosition.coerceIn(0, WalkSpec.MAX_DAY_OFFSET),
@@ -2091,8 +2110,15 @@ class MainActivity : Activity() {
             // Offered if anywhere near the asked range; the best one is
             // kept whatever its length, because "6.1 km against 10 asked,
             // said plainly" beats an empty answer.
-            val offered = plannedAll.filterIndexed { i, p ->
-                i == 0 || p.metres in (minM * 0.7)..(maxM * 1.3)
+            // "i == 0 ||" used to let the best-scored loop through at any
+            // length at all, which is how a 5–15 km ask came back with 50 km.
+            // In range, or short of it and honest about that; never a walk
+            // several times what he asked for.
+            val inRange = plannedAll.filter { it.metres in (minM * 0.7)..(maxM * 1.3) }
+            val offered = if (inRange.isNotEmpty()) {
+                inRange
+            } else {
+                plannedAll.filter { it.metres < minM }.take(1)
             }
             if (offered.isEmpty()) {
                 if (real.isEmpty()) {
@@ -2142,6 +2168,12 @@ class MainActivity : Activity() {
             pickDayOffset = spec.dayOffset
             showSpecPicks()
             val best = offered.first()
+            val shortOf = if (best.metres < minM * 0.95) {
+                " \u2014 shorter than the ${Brief.fmtKm(minM)} you asked for, but it is a " +
+                    "real circuit and the paths round there would not make a longer one"
+            } else {
+                ""
+            }
             val roads = best.roadSummary()
             val trailNote = if (best.trailM >= 400) {
                 ", ${Brief.fmtKm(best.trailM)} of it on waymarked routes"
@@ -2154,7 +2186,7 @@ class MainActivity : Activity() {
                         "best is ${Brief.fmtKm(best.metres)}$trailNote"
                 } else {
                     "Planned a ${Brief.fmtKm(best.metres)} $shapeWord from here" + trailNote
-                }) +
+                }) + shortOf +
                     (roads?.let { ", including $it" } ?: ", off the roads") +
                     ". ${picks.size} to choose from \u2014 \u2039 \u203a to flick through, " +
                     "Brief for the day\u2019s plan.",
@@ -2187,26 +2219,53 @@ class MainActivity : Activity() {
             "Tap the map to lay the walk out. Each leg follows real paths between " +
                 "your taps; tap a point again to remove it.",
         )
-        val centre = from?.firstOrNull() ?: lastFix ?: map.viewportBounds().let {
-            En((it[0] + it[2]) / 2, (it[1] + it[3]) / 2)
-        }
+        // Centred on what he is looking at and sized to cover it, not on a
+        // fixed 6 km around his fix: he draws across the map in front of
+        // him, and a leg whose ends fall outside the graph has no path to
+        // find. That is why every leg came back straight.
+        val b = map.viewportBounds()
+        val centre = En((b[0] + b[2]) / 2, (b[1] + b[3]) / 2)
+        val reach = kotlin.math.hypot(b[2] - b[0], b[3] - b[1]) / 2 + 2_000.0
+        loadEditGraph(centre, reach)
+    }
+
+    /**
+     * Fetch the walking network for the area being drawn in, and re-snap
+     * what is already there. Failure is stated on the bar rather than in a
+     * line that scrolls away — with every leg drawn straight, the one thing
+     * he needs to know is whether that is the ground or the fetch.
+     */
+    private fun loadEditGraph(centre: En, radiusM: Double) {
         editJob?.cancel()
+        editStat.text = "Reading the paths round here…"
         editJob = scope.launch {
             val g = withContext(Dispatchers.IO) {
-                runCatching { Router.buildCached(centre, 6_000.0) }.getOrNull()
+                runCatching { Router.buildCached(centre, radiusM) }
             }
             if (editing == null) return@launch
-            editGraph = g
-            if (g == null || g.nodes.size < 20) {
-                say(
-                    "No path network here, so legs will be straight lines. " +
-                        "That is honest, not a failure — but they will not follow paths.",
-                )
-            } else {
-                editing?.resnapAll()
+            val graph = g.getOrNull()
+            if (graph == null || graph.nodes.size < 20) {
+                editGraph = null
+                editPathsNote = if (graph == null) {
+                    "no paths loaded (" + (g.exceptionOrNull()?.message?.take(60) ?: "failed") + ")"
+                } else {
+                    "no paths mapped here"
+                }
                 refreshEdit()
-                sayBriefly("Paths loaded — legs will snap to them now.")
+                say(
+                    "Couldn't read the path network, so legs are straight lines. " +
+                        (g.exceptionOrNull()?.let { Assistant.explain(it) } ?: "") +
+                        " Tap Paths to try again.",
+                )
+                return@launch
             }
+            editGraph = graph
+            editGraphCentre = centre
+            editGraphRadius = radiusM
+            editPathsNote = ""
+            withContext(Dispatchers.IO) { editing?.resnapAll() }
+            refreshEdit()
+            sayBriefly("${graph.nodes.size} path junctions loaded — legs snap to them now.")
         }
     }
 
@@ -2222,6 +2281,15 @@ class MainActivity : Activity() {
                 if (hit >= 0) ed.removeAt(hit) else ed.add(en)
             }
             refreshEdit()
+            // Drawn past the edge of what was fetched: widen and re-snap,
+            // rather than quietly drawing the rest of the walk straight.
+            val c = editGraphCentre
+            if (hit < 0 && c != null) {
+                val out = kotlin.math.hypot(en.e - c.e, en.n - c.n)
+                if (out > editGraphRadius - 500.0) {
+                    loadEditGraph(c, (out + 2_500.0).coerceAtMost(Router.MAX_GRAPH_RADIUS_M))
+                }
+            }
         }
     }
 
@@ -2229,7 +2297,11 @@ class MainActivity : Activity() {
         val ed = editing ?: return
         map.setPreview(if (ed.count() > 0) listOf(ed.line()) else emptyList())
         map.setEditHandles(ed.anchorPoints())
-        val warn = if (ed.hasUnsnapped()) " · some legs straight (no path found)" else ""
+        val warn = when {
+            editPathsNote.isNotBlank() -> " · $editPathsNote"
+            ed.hasUnsnapped() -> " · some legs straight (no path between those points)"
+            else -> ""
+        }
         editStat.text = when (ed.count()) {
             0 -> "Tap to place the first point"
             1 -> "1 point · tap the next"
@@ -2239,6 +2311,16 @@ class MainActivity : Activity() {
 
     private fun cycleSnap() {
         val ed = editing ?: return
+        if (editGraph == null && ed.snap != RouteEdit.Snap.STRAIGHT) {
+            // Nothing to snap to yet: the useful thing this button can do is
+            // fetch again, not cycle a preference that cannot be honoured.
+            val b = map.viewportBounds()
+            loadEditGraph(
+                En((b[0] + b[2]) / 2, (b[1] + b[3]) / 2),
+                kotlin.math.hypot(b[2] - b[0], b[3] - b[1]) / 2 + 2_000.0,
+            )
+            return
+        }
         ed.snap = when (ed.snap) {
             RouteEdit.Snap.PATHS -> RouteEdit.Snap.ANY
             RouteEdit.Snap.ANY -> RouteEdit.Snap.STRAIGHT
@@ -2307,6 +2389,9 @@ class MainActivity : Activity() {
         editJob?.cancel()
         editJob = null
         editing = null
+        editGraph = null
+        editGraphCentre = null
+        editPathsNote = ""
         editBar.visibility = View.GONE
         map.placeMode = false
         map.onPlacePicked = null

@@ -831,6 +831,16 @@ object Router {
                                 // reported finding nothing at all — a worse
                                 // answer than the loop it was holding.
                                 if (planned.metres < MIN_LOOP_M) continue
+                                // Absurdly long is not "the wrong length",
+                                // it is the wrong walk. A four-corner shape
+                                // on a wandering network can route to many
+                                // times the polygon it was aimed at, and
+                                // scoring alone let a 50 km answer through
+                                // to a 5-15 km ask because nothing else had
+                                // closed. Short is still kept — a real
+                                // circuit under the ask beats none at all —
+                                // so the guard is deliberately one-sided.
+                                if (planned.metres > targetM * MAX_OVERSHOOT) continue
                                 val keys = HashSet<Long>(circuit.size)
                                 for (i in 1 until circuit.size) {
                                     keys.add(edgeKey(circuit[i - 1], circuit[i]))
@@ -878,6 +888,10 @@ object Router {
 
     /** Loops shorter than this are noise, not walks. */
     private const val MIN_LOOP_M = 300.0
+
+    /** How many times the asked length a candidate may reach before it is a
+     *  different walk rather than an imprecise one. */
+    private const val MAX_OVERSHOOT = 2.2
 
     /** How far from him a walk may start — his own licence, and the default
      *  when he has not said otherwise. */

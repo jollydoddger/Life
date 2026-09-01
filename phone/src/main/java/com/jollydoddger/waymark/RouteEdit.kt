@@ -179,14 +179,51 @@ class RouteEdit(
         for (i in 1 until anchors.size) route(i)
     }
 
-    fun load(points: List<En>) {
+    /**
+     * Open an existing walk for editing.
+     *
+     * The first version made two anchors — start and end — with the whole
+     * route as one frozen leg between them. Every point of the line was
+     * still drawn, so it looked editable, and nothing about its shape could
+     * actually be changed: "only adding to a gpx and not editing it", in
+     * his words, and exactly right.
+     *
+     * So the line is broken into handles along its length, each leg keeping
+     * the file's own geometry verbatim. Nothing is re-routed on load — a
+     * real GPX describes ground somebody walked and our network would only
+     * approximate it — but every handle can now be moved or deleted, and
+     * only the one or two legs touching it are re-routed when it is.
+     */
+    fun load(points: List<En>, maxAnchors: Int = 20) {
         snapshot()
         anchors.clear()
         if (points.isEmpty()) return
-        // An imported line becomes one straight-through anchor chain: its
-        // shape is already real, so it is kept verbatim as a single leg
-        // rather than re-routed into something the file never said.
-        anchors.add(Anchor(points.first()))
-        anchors.add(Anchor(points.last(), points, snapped = true))
+        if (points.size < 3) {
+            anchors.add(Anchor(points.first()))
+            if (points.size == 2) anchors.add(Anchor(points[1], points, snapped = true))
+            return
+        }
+        val cum = Eta.cumulative(points)
+        val total = cum.last()
+        val want = maxAnchors.coerceIn(2, 60)
+        // Evenly along the ground rather than every Nth point: a GPX from a
+        // watch has points crowded where the walker dawdled, and splitting
+        // by index puts all the handles in the lay-by where he had lunch.
+        val step = if (total > 0) total / (want - 1) else 0.0
+        val cuts = ArrayList<Int>()
+        cuts.add(0)
+        var next = step
+        for (i in points.indices) {
+            if (step > 0 && cum[i] >= next && i != cuts.last()) {
+                cuts.add(i)
+                next = cum[i] + step
+            }
+        }
+        if (cuts.last() != points.size - 1) cuts.add(points.size - 1)
+        anchors.add(Anchor(points[cuts[0]]))
+        for (k in 1 until cuts.size) {
+            val leg = points.subList(cuts[k - 1], cuts[k] + 1).toList()
+            anchors.add(Anchor(points[cuts[k]], leg, snapped = true))
+        }
     }
 }

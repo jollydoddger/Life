@@ -77,6 +77,33 @@ class WalkSpecTest {
     }
 
     @Test
+    fun `miles are converted, and nothing downstream ever sees one`() {
+        // "Don't get miles and km mixed up, allow for both and always
+        // convert to km." One conversion, in one place.
+        val (lo, hi) = WalkSpec(from = 5.0, to = 15.0, miles = true).rangeMetres(12.0)
+        assertEquals(8_046.7, lo, 1.0)
+        assertEquals(24_140.2, hi, 1.0)
+        val (kmLo, kmHi) = WalkSpec(from = 5.0, to = 15.0, miles = false).rangeMetres(12.0)
+        assertEquals(5_000.0, kmLo, 0.1)
+        assertEquals(15_000.0, kmHi, 0.1)
+        assertTrue("a mile is longer than a kilometre", lo > kmLo && hi > kmHi)
+    }
+
+    @Test
+    fun `the unit is named in the label, so the form cannot lie about it`() {
+        assertTrue("miles" in WalkSpec(from = 5.0, to = 15.0, miles = true).label())
+        assertTrue("km" in WalkSpec(from = 5.0, to = 15.0, miles = false).label())
+    }
+
+    @Test
+    fun `an hours ask ignores the mile flag entirely`() {
+        val a = WalkSpec(byTime = true, from = 2.0, to = 3.0, miles = true).rangeMetres(12.0)
+        val b = WalkSpec(byTime = true, from = 2.0, to = 3.0, miles = false).rangeMetres(12.0)
+        assertEquals(a.first, b.first, 0.1)
+        assertEquals(a.second, b.second, 0.1)
+    }
+
+    @Test
     fun `kilometres are taken at face value and the ends may arrive swapped`() {
         val (min, max) = WalkSpec(from = 9.0, to = 4.0).rangeMetres(12.0)
         assertEquals(4_000.0, min, 0.1)
