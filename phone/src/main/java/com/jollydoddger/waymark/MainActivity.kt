@@ -119,6 +119,8 @@ class MainActivity : Activity() {
     // this is what replaced five separately-managed bars whose visibility
     // dance was a standing source of "why is the scrubber gone".
     private lateinit var sheet: SheetLayout
+    private lateinit var buttons: LinearLayout
+    private lateinit var topBar: LinearLayout
     private lateinit var askPeek: LinearLayout
     private lateinit var askContent: LinearLayout
     private lateinit var wxPeek: LinearLayout
@@ -295,7 +297,7 @@ class MainActivity : Activity() {
             startActivity(Intent(this, SettingsActivity::class.java))
         }
 
-        val buttons = LinearLayout(this).apply {
+        buttons = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             listOf(importBtn, reverseBtn, recentreBtn, recordBtn, downloadBtn, sunBtn, settingsBtn).forEach {
                 addView(it, LinearLayout.LayoutParams(dp(52), dp(52)).apply { topMargin = dp(9) })
@@ -776,7 +778,9 @@ class MainActivity : Activity() {
             background = Ui.ripple(Ui.pill(this@MainActivity, Palette.raised))
             setPadding(dp(12), dp(6), dp(12), dp(6))
             visibility = View.GONE
-            setOnClickListener { showPanel(Panel.WEATHER) }
+            // The scrubber is the panel; opening onto its title bar alone
+            // answers nothing.
+            setOnClickListener { showPanel(Panel.WEATHER, open = true) }
         }
         askPeek = LinearLayout(this).apply {
             gravity = Gravity.CENTER_VERTICAL
@@ -803,6 +807,15 @@ class MainActivity : Activity() {
         }
 
         sheet = SheetLayout(this)
+        // An open sheet sits over the lower half of the button rail and
+        // consumes its taps — record, download, sun and settings become
+        // unreachable without anything saying why. Buttons you cannot press
+        // are the same failure as options you cannot see, so the rail steps
+        // up out of the way and comes back when the sheet closes.
+        // Tracked off the sheet's own layout rather than its state, so the
+        // rail slides with the animation instead of jumping to where the
+        // sheet is going to be.
+        sheet.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> liftRail() }
         askBox.setOnFocusChangeListener { _, has ->
             if (has) sheet.setState(SheetLayout.State.OPEN)
         }
@@ -863,7 +876,7 @@ class MainActivity : Activity() {
             setPadding(dp(14), dp(4), dp(14), dp(4))
             visibility = View.GONE
         }
-        val topBar = LinearLayout(this).apply {
+        topBar = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             addView(statusRow, LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT,
@@ -1177,16 +1190,54 @@ class MainActivity : Activity() {
                 FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT,
             ),
         )
-        when {
-            open -> sheet.setState(SheetLayout.State.OPEN)
-            sheet.state == SheetLayout.State.OPEN -> sheet.remeasureOpen()
-            else -> sheet.setState(SheetLayout.State.PEEK, animate = false)
-        }
+        // A panel already open stays open; the body is WRAP_CONTENT, so it
+        // resizes to the new panel by itself. The version that had to be
+        // told to re-measure is what left one panel wearing another's
+        // height — and, once the re-measure quietly stopped working, left
+        // every panel with no height at all.
+        sheet.setState(
+            if (open || sheet.state == SheetLayout.State.OPEN) {
+                SheetLayout.State.OPEN
+            } else {
+                SheetLayout.State.PEEK
+            },
+            animate = open,
+        )
         updatePeek()
+    }
+
+    /**
+     * Keep the button rail clear of the sheet.
+     *
+     * Shifted rather than shrunk, and clamped so it never climbs into the
+     * chips at the top: on a short screen with a tall panel some of the
+     * rail still goes under, which is honest — better a couple of buttons
+     * covered than a rail that has silently walked off the top of the map.
+     */
+    private fun liftRail() {
+        if (!this::buttons.isInitialized || !this::topBar.isInitialized) return
+        val root = (buttons.parent as? View)?.height ?: return
+        val sheetTop = if (sheet.visibility == View.VISIBLE) sheet.top else root
+        // Measured against the rail's laid-out position, never its shifted
+        // one, so the shift cannot feed back into its own input.
+        val overlap = (buttons.bottom - sheetTop).coerceAtLeast(0)
+        val roomAbove = (buttons.top - topBar.bottom).coerceAtLeast(0)
+        buttons.translationY = -minOf(overlap, roomAbove).toFloat()
     }
 
     /** One tap from map to typing: sheet open, box focused, keyboard up. */
     private fun openAsk() {
+        if (!assistantEnabled) {
+            // The app ships with the assistant off, and with it off this
+            // panel has nothing in it. Opening the sheet onto an empty body
+            // looked like a dead tap — and, in the version this replaces,
+            // was worse: the zero-height "open" wedged the sheet, and no
+            // panel drew anything again for the rest of the session.
+            sayAction("The assistant is switched off.", "Settings") {
+                startActivity(Intent(this, SettingsActivity::class.java))
+            }
+            return
+        }
         showPanel(Panel.ASK, open = true)
         askBox.requestFocus()
         (getSystemService(INPUT_METHOD_SERVICE) as android.view.inputmethod.InputMethodManager)
@@ -1196,11 +1247,16 @@ class MainActivity : Activity() {
     /** The ask peek's one line: what is loaded, and that this is where to ask. */
     private fun updatePeek() {
         val r = RouteStore.load(this)
-        peekSummary.text = if (r != null && r.points.size >= 2) {
-            val name = r.name.ifBlank { "Route" }
-            "$name · ${fmtDist(Geom.length(r.points))}   —   Ask\u2026"
+        val loaded = if (r != null && r.points.size >= 2) {
+            "${r.name.ifBlank { "Route" }} · ${fmtDist(Geom.length(r.points))}"
         } else {
-            "Ask\u2026 (find walks? toilets on the route?)"
+            null
+        }
+        // Never invite a question the app cannot take.
+        peekSummary.text = when {
+            !assistantEnabled -> loaded ?: "No route loaded"
+            loaded != null -> "$loaded   —   Ask\u2026"
+            else -> "Ask\u2026 (find walks? toilets on the route?)"
         }
         peekMic.visibility = if (assistantEnabled) View.VISIBLE else View.GONE
     }
@@ -2609,7 +2665,8 @@ class MainActivity : Activity() {
         }
         from?.takeIf { it.size >= 2 }?.let { ed.load(it) }
         editing = ed
-        showPanel(Panel.EDIT)
+        // Save and Discard are not optional extras to go looking for.
+        showPanel(Panel.EDIT, open = true)
         map.placeMode = true
         map.onPlacePicked = { en -> editTapped(en) }
         // Editing an existing walk starts in Adjust — the walk is already
@@ -3337,7 +3394,11 @@ class MainActivity : Activity() {
         picks = pending
         pickIndex = 0
         pickerShowing = true
-        showPanel(Panel.PICKER)
+        // Open, not peeking. Start walk / Use / Brief / Parking are the
+        // reason the picker exists, and they lived in a body at height
+        // zero behind a swipe nothing on screen suggested — so the pill
+        // named buttons he could not see.
+        showPanel(Panel.PICKER, open = true)
         showPick(0)
     }
 
@@ -3348,7 +3409,11 @@ class MainActivity : Activity() {
         picks = pending
         pickIndex = 0
         pickerShowing = true
-        showPanel(Panel.PICKER)
+        // Open, not peeking. Start walk / Use / Brief / Parking are the
+        // reason the picker exists, and they lived in a body at height
+        // zero behind a swipe nothing on screen suggested — so the pill
+        // named buttons he could not see.
+        showPanel(Panel.PICKER, open = true)
         showPick(0)
     }
 
@@ -3696,7 +3761,6 @@ class MainActivity : Activity() {
         replyPanel.visibility = View.VISIBLE
         if (panel != Panel.ASK) showPanel(Panel.ASK)
         sheet.setState(SheetLayout.State.OPEN)
-        sheet.remeasureOpen()
         replyText.removeCallbacks(askTick)
         askTick.run()
 
@@ -3724,7 +3788,6 @@ class MainActivity : Activity() {
                 replyPanel.visibility = View.VISIBLE
                 if (panel != Panel.ASK) showPanel(Panel.ASK)
                 sheet.setState(SheetLayout.State.OPEN)
-                sheet.remeasureOpen()
 
                 // Show what the tools did: markers, and possibly a new route.
                 map.setPois(PoiStore.load(this@MainActivity))
