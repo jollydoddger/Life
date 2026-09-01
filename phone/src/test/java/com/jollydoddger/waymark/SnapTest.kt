@@ -146,4 +146,47 @@ class SnapTest {
         assertTrue("no vertex behind the first tap: $ns", ns.min() >= 120.0 - 0.001)
         assertTrue("no vertex past the second tap: $ns", ns.max() <= 330.0 + 0.001)
     }
+
+    // --- what may honestly be called a snapped leg -------------------------
+
+    @Test fun `two taps either side of one junction are not a path`() {
+        // The regression this replaces: both taps resolve to the same node
+        // — which two taps on open ground either side of a junction do just
+        // as well as two taps on one footpath — and the leg came back as a
+        // straight line across the field, marked snapped. An honest "this
+        // leg is straight" had become a claim to have found a path, which
+        // is the worst thing this app can do.
+        val g = graph()
+        // Well off both ways, either side of the lane's node at n=200.
+        val leg = Router.between(g, En(700.0, 190.0), En(700.0, 210.0))
+        assertNull("no way under them, so no leg", leg)
+    }
+
+    @Test fun `a leg starts at one tap and ends at the other`() {
+        // The contract that makes legs joinable: the assistant stitches
+        // consecutive legs with drop(1), which is only right if each starts
+        // exactly where the last ended. Bare graph nodes left a gap at
+        // every joint and then deleted a vertex trying to close it.
+        val g = graph()
+        // On the lane, where a snapped handle actually sits.
+        val from = En(1000.0, 120.0)
+        val to = En(1000.0, 330.0)
+        val leg = Router.between(g, from, to)
+        assertNotNull(leg)
+        assertEquals(from, leg!!.points.first())
+        assertEquals(to, leg.points.last())
+    }
+
+    @Test fun `a leg over one intermediate junction keeps it`() {
+        // The three-point case: both handles sit on the leg's own outer
+        // segments, so both outer vertices are trimmed — which used to
+        // leave one vertex, be rejected, and return the walk untrimmed.
+        // The junction between them is real and must survive.
+        val g = graph()
+        val leg = Router.between(g, En(1000.0, 160.0), En(1000.0, 240.0))!!
+        assertEquals(En(1000.0, 160.0), leg.points.first())
+        assertEquals(En(1000.0, 240.0), leg.points.last())
+        assertTrue("the junction between them is kept", leg.points.size >= 3)
+        assertTrue("and it is a real one", leg.points.any { kotlin.math.abs(it.n - 200.0) < 0.001 })
+    }
 }

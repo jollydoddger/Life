@@ -343,31 +343,48 @@ class GeoTools(
             progress("Reading the paths and lanes round here…")
             val graph = Router.buildCached(here, span + 2_000)
             if (graph.nodes.size < Router.MIN_USABLE_NODES) return noNetwork(avoidRoads)
-            val points = ArrayList<En>()
-            var metres = 0.0
+                val points = ArrayList<En>()
             val byGroup = HashMap<String, Double>()
+            val byKind = HashMap<String, Double>()
             var cursor = here
             for ((i, t) in targets.withIndex()) {
                 progress("Leg ${i + 1} of ${targets.size}…")
                 val leg = Router.between(graph, cursor, t, avoidRoads)
                     ?: return "No walkable way to \"${placeNames[i]}\" that keeps to the rules — " +
                         "try again with avoid_roads false, or a nearer place."
+                // drop(1) is right again: Router.between now returns a leg
+                // that starts exactly at `cursor` and ends exactly at `t`,
+                // so consecutive legs meet at a shared point. While it
+                // returned bare graph nodes this left a gap at every joint
+                // and then deleted a vertex trying to close it.
                 if (points.isEmpty()) points.addAll(leg.points) else points.addAll(leg.points.drop(1))
-                metres += leg.metres
                 leg.byGroup.forEach { (k, v) -> byGroup[k] = (byGroup[k] ?: 0.0) + v }
+                leg.byKind.forEach { (k, v) -> byKind[k] = (byKind[k] ?: 0.0) + v }
                 cursor = t
             }
             if (circularKm > 0) {
                 Router.between(graph, cursor, here, avoidRoads)?.let { back ->
                     points.addAll(back.points.drop(1))
-                    metres += back.metres
                     back.byGroup.forEach { (k, v) -> byGroup[k] = (byGroup[k] ?: 0.0) + v }
+                    back.byKind.forEach { (k, v) -> byKind[k] = (byKind[k] ?: 0.0) + v }
                 }
             }
-            // repeatFraction was left at its default here, so a
-            // via-places route always claimed a clean circuit however much
-            // of itself it retraced. Measured now, like the loops.
-            val planned = Router.Planned(points, metres, byGroup, Router.repeatFraction(points))
+            // Measured off the finished line rather than summed from the
+            // legs: the sum was of leg lengths before they were joined, and
+            // under-reported by whatever each joint absorbed.
+            //
+            // repeatFraction was left at its default here, so a via-places
+            // route always claimed a clean circuit however much of itself
+            // it retraced. byKind was left empty, so roadSummary() returned
+            // null and describe() called every such route "off the roads"
+            // whatever it had actually walked along. Both measured now.
+            val planned = Router.Planned(
+                points,
+                Geom.length(points),
+                byGroup,
+                Router.repeatFraction(points),
+                byKind,
+            )
             return adopt(planned.points to planned.metres, "Planned walk", describe(planned, null, avoidRoads))
         }
 

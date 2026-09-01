@@ -1179,20 +1179,17 @@ object Router {
             // nodes a quarter mile apart resolves both to the same end. The
             // straight run between the taps *is* the path here, and it used
             // to come back as "no path between those points": a leg that
-            // was on the way, flagged as a failure to find one. Described
-            // as whatever the way under it actually is, read off the edge
-            // at the shared node nearest the tap.
-            val d = hypot(to.e - from.e, to.n - from.n)
-            if (d <= 0) return null
-            val kind = g.edges[a].minByOrNull {
-                distToSegment(from, g.nodes[a], g.nodes[it.to])
-            }?.kind
-            return Planned(
-                listOf(from, to), d,
-                mapOf((kind?.let { group(it) } ?: "path") to d),
-                0.0,
-                if (kind != null) mapOf(kind to d) else emptyMap(),
-            )
+            // was on the way, flagged as a failure to find one.
+            //
+            // But `a == b` alone does not mean that. It means only that the
+            // two taps resolved to the same *node*, which two taps on open
+            // moor either side of one junction do just as well — and the
+            // version that assumed otherwise returned a straight line
+            // across a field and marked it snapped. That is worse than the
+            // bug it replaced: an honest "this leg is straight" became a
+            // claim to have found a path. So the shared edge has to be
+            // found, not presumed.
+            return alongSharedEdge(g, a, from, to)
         }
         val walk = path(g, a, b, emptySet(), avoidRoads) ?: return null
         // Both taps on the one edge the path reduced to — the same long
@@ -1204,59 +1201,95 @@ object Router {
         if (walk.size == 2) {
             val pA = g.nodes[walk[0]]
             val pB = g.nodes[walk[1]]
-            if (distToSegment(from, pA, pB) < ENDPOINT_TRIM_M &&
-                distToSegment(to, pA, pB) < ENDPOINT_TRIM_M
-            ) {
-                val d = hypot(to.e - from.e, to.n - from.n)
-                if (d <= 0) return null
+            if (onSegment(from, pA, pB) && onSegment(to, pA, pB)) {
                 val kind = g.edges[walk[0]].firstOrNull { it.to == walk[1] }?.kind
-                return Planned(
-                    listOf(from, to), d,
-                    mapOf((kind?.let { group(it) } ?: "path") to d),
-                    0.0,
-                    if (kind != null) mapOf(kind to d) else emptyMap(),
-                )
+                return straightAlong(from, to, kind)
             }
         }
         val planned = measure(g, walk)
-        // The path starts and ends at graph nodes, and onWay picks the end
-        // of the tapped segment nearer the tap — so the leg can set off by
-        // walking to that end and straight back through the tap point.
-        // When the handle already lies on the leg's first or last segment,
-        // the outermost vertex is a detour, not a start: drop it.
         val pts = planned.points
-        if (pts.size >= 3) {
-            val dropHead = distToSegment(from, pts[0], pts[1]) < ENDPOINT_TRIM_M
-            val dropTail = distToSegment(to, pts[pts.size - 1], pts[pts.size - 2]) < ENDPOINT_TRIM_M
-            if (dropHead || dropTail) {
-                val trimmed = pts.subList(
-                    if (dropHead) 1 else 0,
-                    if (dropTail) pts.size - 1 else pts.size,
-                ).toList()
-                if (trimmed.size >= 2) {
-                    // Geometry length, not edge sums — the trim has left the
-                    // node walk. The ground tallies scale down with it, or a
-                    // trimmed 400 m segment leaves byKind claiming more road
-                    // than the whole leg is long.
-                    val metres = Geom.length(trimmed).coerceAtLeast(1.0)
-                    val f = (metres / planned.metres).coerceIn(0.0, 1.0)
-                    return Planned(
-                        trimmed,
-                        metres,
-                        planned.byGroup.mapValues { it.value * f },
-                        planned.repeatFraction,
-                        planned.byKind.mapValues { it.value * f },
-                        planned.trailM * f,
-                    )
-                }
-            }
+        // The path runs node to node, and onWay picks the end of the tapped
+        // segment nearer the tap — so the leg can set off by walking out to
+        // that end and straight back through the tap. When a handle already
+        // lies on the leg's outermost segment, that vertex is a detour, not
+        // a start: drop it. Dropping both on a three-point path leaves a
+        // single vertex, which the previous version rejected — returning
+        // the walk *untrimmed*, so the line shooting off in both directions
+        // survived for exactly the case the trim was written for.
+        val head = if (pts.size >= 2 && onSegment(from, pts[0], pts[1])) 1 else 0
+        val tail = if (pts.size >= 2 && onSegment(to, pts[pts.size - 1], pts[pts.size - 2])) 1 else 0
+        val body = if (head + tail > 0 && pts.size - head - tail >= 1) {
+            pts.subList(head, pts.size - tail)
+        } else {
+            pts
         }
-        return planned
+        // The leg begins at the tap and ends at the tap, always. That is
+        // what a caller means by "between these two points", and it is what
+        // makes legs joinable: the assistant stitches consecutive legs with
+        // drop(1), which is only correct if each one starts exactly where
+        // the last ended. Returning bare graph nodes left a gap at every
+        // joint and deleted a vertex trying to close it.
+        val line = ArrayList<En>(body.size + 2)
+        line.add(from)
+        for (p in body) if (p != line.last()) line.add(p)
+        if (to != line.last()) line.add(to)
+        if (line.size < 2) return null
+        val metres = Geom.length(line).coerceAtLeast(1.0)
+        // Ground tallies scale with the change, or a trimmed 400 m segment
+        // leaves byKind claiming more road than the whole leg is long.
+        val f = if (planned.metres > 0) (metres / planned.metres).coerceIn(0.0, 2.0) else 1.0
+        return Planned(
+            line,
+            metres,
+            planned.byGroup.mapValues { it.value * f },
+            planned.repeatFraction,
+            planned.byKind.mapValues { it.value * f },
+            planned.trailM * f,
+        )
     }
 
     /** How close a handle must sit to a leg's outermost segment before the
      *  vertex beyond it is a doubling-back rather than part of the walk. */
     private const val ENDPOINT_TRIM_M = 2.0
+
+    /** Whether [p] sits on the segment a–b, within the trim tolerance. */
+    private fun onSegment(p: En, a: En, b: En): Boolean =
+        distToSegment(p, a, b) < ENDPOINT_TRIM_M
+
+    /**
+     * The stretch of one way between two taps that both sit on it.
+     *
+     * Only called once a shared edge is established: this is a real leg
+     * along a real way, and may honestly be reported as snapped.
+     */
+    private fun straightAlong(from: En, to: En, kind: String?): Planned? {
+        val d = hypot(to.e - from.e, to.n - from.n)
+        if (d <= 0) return null
+        return Planned(
+            listOf(from, to), d,
+            mapOf((kind?.let { group(it) } ?: "path") to d),
+            0.0,
+            if (kind != null) mapOf(kind to d) else emptyMap(),
+        )
+    }
+
+    /**
+     * Both taps on one edge leaving [node], or null if they are not.
+     *
+     * Null is the important half. A leg with no path under it must come
+     * back as nothing, so the editor draws it straight and *says* it is
+     * straight — the warning is the feature.
+     */
+    private fun alongSharedEdge(g: Graph, node: Int, from: En, to: En): Planned? {
+        val here = g.nodes[node]
+        for (e in g.edges[node]) {
+            val far = g.nodes[e.to]
+            if (onSegment(from, here, far) && onSegment(to, here, far)) {
+                return straightAlong(from, to, e.kind)
+            }
+        }
+        return null
+    }
 
     private fun distToSegment(p: En, a: En, b: En): Double {
         val q = Geom.nearestOnSegment(p, a, b)
