@@ -379,6 +379,14 @@ object Router {
          *  off the edges actually walked, never estimated, so "3.1 km of it
          *  is on the Slate Trail" is a checkable claim and not a flourish. */
         val trailM: Double = 0.0,
+        /**
+         * How many times the walk meets itself away from a stem at the
+         * start: the number of junctions it passes through twice. Zero is
+         * a plain loop, one a figure of eight, more is a walk tangled to
+         * make up distance — see [Router.shape]. Kept on the result so the
+         * picker can say so when only a tangled one could be found.
+         */
+        val revisits: Int = 0,
     ) {
 
         /** "180 m on a B road, 40 m on an A road", or null if it kept off
@@ -618,6 +626,10 @@ object Router {
         to: Int,
         penalise: Set<Long> = emptySet(),
         avoidRoads: Boolean = false,
+        /** Nodes already on the walk. Passing through one again is a
+         *  crossing, priced like a re-walked edge; the destination is
+         *  exempt, since coming home is the point. */
+        visited: Set<Int> = emptySet(),
     ): List<Int>? {
         val n = g.nodes.size
         if (from >= n || to >= n) return null
@@ -641,6 +653,7 @@ object Router {
                 var step = if (avoidRoads) e.avoidCost else e.cost
                 if (e.onTrail) step *= TRAIL_BONUS
                 if (key in penalise) step *= REUSE_PENALTY
+                if (e.to != to && e.to in visited) step *= REUSE_PENALTY
                 val alt = best[u] + step
                 if (alt < best[e.to]) {
                     best[e.to] = alt
@@ -742,6 +755,51 @@ object Router {
         return if (total > 0) repeated / total else 0.0
     }
 
+    /**
+     * The shape of a closed node walk, judged against what he will accept.
+     *
+     * His words, after a plan that wandered over itself: "routes need to
+     * not overlap and cross their own lines except for a return leg of the
+     * journey to the start. I don't mind figure of 8 either but not this
+     * just to make up distance." So three shapes are walks and everything
+     * else is a tangle: a plain loop; a lollipop, which is a loop on the end
+     * of a stem walked out and back; and a figure of eight, a loop that
+     * meets itself once. The edge-reuse penalty in [path] never said any of
+     * this — it priced retracing a path, and a leg that crossed the walk at
+     * a junction, or made a small loop on a parallel track, paid nothing.
+     *
+     * [stemEdges] is the length in edges of the out-and-back stem at the
+     * start; [revisits] the count of junctions the rest of the walk passes
+     * through twice; [reusedInCore] whether any edge beyond the stem is
+     * walked twice, which is doubling back that is not the stem.
+     */
+    class Shape(val stemEdges: Int, val revisits: Int, val reusedInCore: Boolean) {
+        /** A loop, a lollipop, or a figure of eight — nothing else. */
+        val clean: Boolean get() = !reusedInCore && revisits <= 1
+    }
+
+    fun shape(walk: List<Int>): Shape {
+        if (walk.size < 3) return Shape(0, 0, false)
+        // The stem: the walk's first steps mirrored by its last, so the
+        // return leg comes home down the outward path.
+        var stem = 0
+        val n = walk.size
+        while (stem + 1 < n - 1 - stem && walk[stem + 1] == walk[n - 2 - stem]) stem++
+        val core = walk.subList(stem, n - stem)
+        // A closed core: first == last, counted once.
+        val seenNode = HashSet<Int>()
+        var revisits = 0
+        for (i in 0 until core.size - 1) {
+            if (!seenNode.add(core[i])) revisits++
+        }
+        val seenEdge = HashSet<Long>()
+        var reused = false
+        for (i in 1 until core.size) {
+            if (!seenEdge.add(edgeKey(core[i - 1], core[i]))) { reused = true; break }
+        }
+        return Shape(stem, revisits, reused)
+    }
+
     /** Turn a node walk into points, per-kind distances and repeated ground. */
     private fun measure(g: Graph, walk: List<Int>): Planned {
         val pts = walk.map { g.nodes[it] }
@@ -760,8 +818,12 @@ object Router {
             val key = edgeKey(walk[i - 1], walk[i])
             if (seen.put(key, e.metres) != null) repeated += e.metres
         }
+        val sh = shape(walk)
         return Planned(
             pts, total, byGroup, if (total > 0) repeated / total else 0.0, byKind, trail,
+            // An edge walked twice beyond the stem is doubling back, and
+            // never reads as a figure of eight: it lands at two or more.
+            revisits = if (sh.reusedInCore) maxOf(sh.revisits, 1) + 1 else sh.revisits,
         )
     }
 
@@ -829,7 +891,9 @@ object Router {
      *  branch of the search, kept once at its better score. */
     private const val SAME_OVERLAP = 0.9
 
-    private class Candidate(val planned: Planned, val edges: HashSet<Long>, val score: Double)
+    private class Candidate(val planned: Planned, val edges: HashSet<Long>, val score: Double) {
+        val clean: Boolean get() = planned.revisits <= 1
+    }
 
     /**
      * Up to [wanted] genuinely different circular walks of about [targetM],
@@ -889,15 +953,19 @@ object Router {
 
         fun isGood(c: Candidate): Boolean {
             val err = abs(c.planned.metres - targetM) / targetM
-            return err < GOOD_ERROR && c.planned.repeatFraction < GOOD_REPEAT
+            return c.clean && err < GOOD_ERROR && c.planned.repeatFraction < GOOD_REPEAT
         }
 
         /** Best-first greedy pick of circuits that share under half their
-         *  ground — the list that is actually returned. */
+         *  ground — the list that is actually returned. Clean shapes only,
+         *  while there are any: a loop, a lollipop or a figure of eight.
+         *  A tangle is offered only when nothing else closed at all, and
+         *  the picker names it as one. */
         fun distinct(): List<Candidate> {
             val ranked = kept.sortedBy { it.score }
+            val pool = if (ranked.any { it.clean }) ranked.filter { it.clean } else ranked
             val out = ArrayList<Candidate>()
-            for (c in ranked) {
+            for (c in pool) {
                 if (out.size >= wanted) break
                 if (out.none { overlap(it.edges, c.edges) > DISTINCT_OVERLAP }) out.add(c)
             }
@@ -910,8 +978,12 @@ object Router {
             // candidate, a waymarked trail counts for it. The weights are
             // stated here because they are a judgement — a loop would give
             // up ~8% of length accuracy to lose 10% of itself from roads.
+            // Every junction met twice costs as much as being 25% off on
+            // length: a figure of eight is allowed but a plain loop of the
+            // same length is the better walk.
             val score = err +
                 planned.repeatFraction * 1.5 +
+                planned.revisits * 0.25 +
                 (planned.roadMetres() / planned.metres) * 0.8 -
                 (planned.trailM / planned.metres) * 0.3
             val c = Candidate(planned, edges, score)
@@ -955,20 +1027,29 @@ object Router {
                                 val bearing0 = spin + seed * (Math.PI / corners)
                                 val walk = ArrayList<Int>()
                                 val used = HashSet<Long>()
+                                // Junctions already on the walk: a leg that
+                                // passes through one again crosses the
+                                // route, and pays for it in path().
+                                val visited = HashSet<Int>()
                                 var cursor = startNode
                                 for (k in 0 until corners) {
                                     val b = bearing0 + direction * k * 2 * Math.PI / corners
                                     val ideal = En(from.e + radius * sin(b), from.n + radius * cos(b))
                                     val wp = g.nearestJunction(ideal, radius * 0.6) ?: continue
                                     if (wp == cursor) continue
-                                    val leg = path(g, cursor, wp, used, avoidRoads) ?: continue
+                                    val leg = path(g, cursor, wp, used, avoidRoads, visited) ?: continue
                                     for (i in 1 until leg.size) used.add(edgeKey(leg[i - 1], leg[i]))
                                     if (walk.isEmpty()) walk.add(leg.first())
                                     walk.addAll(leg.drop(1))
+                                    // The start stays off the list: home is
+                                    // the one junction the walk must reach
+                                    // twice.
+                                    for (i in 1 until leg.size) visited.add(leg[i])
                                     cursor = wp
                                 }
                                 if (walk.isEmpty()) continue
-                                val home = path(g, cursor, startNode, used, avoidRoads) ?: continue
+                                visited.remove(startNode)
+                                val home = path(g, cursor, startNode, used, avoidRoads, visited) ?: continue
                                 walk.addAll(home.drop(1))
                                 val circuit = prune(walk)
                                 if (circuit.size < 4) continue
@@ -1021,9 +1102,15 @@ object Router {
             val err = abs(r.metres - targetM) / targetM
             onProgress(
                 "Round ${attempt + 1}: ${"%.1f".format(r.metres / 1000)} km" +
-                    (if (r.repeatFraction > 0.12) ", still doubling back…" else "…"),
+                    when {
+                        r.repeatFraction > 0.12 -> ", still doubling back…"
+                        r.revisits > 1 -> ", still crossing itself…"
+                        else -> "…"
+                    },
             )
-            if (err < GOOD_ERROR && r.repeatFraction < GOOD_REPEAT && kept.size >= wanted) break
+            if (err < GOOD_ERROR && r.repeatFraction < GOOD_REPEAT && r.revisits <= 1 &&
+                kept.count { it.clean } >= wanted
+            ) break
             base *= (targetM / r.metres).coerceIn(0.55, 1.8)
         }
         if (kept.isEmpty() && tried > 0) {

@@ -421,6 +421,14 @@ none at all at zero — each labelled for what it is, and real ones marked
 circular or linear, since a coastal-path fragment can match on distance and
 still be a line.
 
+A circuit has to be one of three shapes — a loop, a lollipop (a loop on the
+end of a path walked out and back), or a figure of eight — and a route that
+crosses or overlaps itself anywhere else is a tangle, not a walk, and is only
+offered when nothing cleaner closed, named as such on the picker. A leg is
+priced for passing through a junction the walk has already used, the same
+way it is priced for re-walking a path, so the search steers clear of itself
+rather than only being told off afterwards.
+
 The planner searches for at most **90 seconds** and then hands back the best
 circuit it found, stating its true length and how much of itself it retraces.
 It used to search a fixed 72 candidates with no clock and report finding

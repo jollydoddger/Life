@@ -490,6 +490,8 @@ class GeoTools(
             lines.append("\n- Planned ${km(p.metres)} circular (asked ${km(target)})")
             // Say how much of it is somebody's real walk rather than ours.
             if (p.trailM >= 400) lines.append(", ${km(p.trailM)} of it along known walks")
+            if (p.revisits == 1) lines.append(", a figure of eight")
+            if (p.revisits > 1) lines.append(", crosses itself ${p.revisits} times")
             if (p.repeatFraction > 0.05) {
                 lines.append(", retraces ${(p.repeatFraction * 100).roundToInt()}%")
             }

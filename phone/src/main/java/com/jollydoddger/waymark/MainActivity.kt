@@ -2841,10 +2841,19 @@ class MainActivity : Activity() {
                 } else {
                     ""
                 }
+                // The shape, when it is not a plain loop: a figure of eight
+                // he is happy with, a tangle he is not — and the latter is
+                // only ever offered when nothing cleaner closed, so it must
+                // say so on the picker rather than look like a loop.
+                val shapeNote = when {
+                    planned.revisits > 1 -> " (crosses itself)"
+                    planned.revisits == 1 -> " figure of 8"
+                    else -> ""
+                }
                 WalkPicks.append(
                     this@MainActivity,
                     RouteFinder.FoundWalk(
-                        name = "Planned ${Brief.fmtKm(planned.metres)} $shapeWord$onTrail",
+                        name = "Planned ${Brief.fmtKm(planned.metres)} $shapeWord$shapeNote$onTrail",
                         source = "Planned",
                         lines = listOf(planned.points),
                         closestM = 0.0,
@@ -2870,6 +2879,12 @@ class MainActivity : Activity() {
                         "real circuit and the paths round there would not close a shorter one"
                 else -> ""
             }
+            val tangled = if (best.revisits > 1) {
+                " \u2014 the only circuits that closed cross themselves; a wider start " +
+                    "or a different length usually finds a clean one"
+            } else {
+                ""
+            }
             val roads = best.roadSummary()
             val trailNote = if (best.trailM >= 400) {
                 ", ${Brief.fmtKm(best.trailM)} of it on waymarked routes"
@@ -2882,7 +2897,7 @@ class MainActivity : Activity() {
                         "best is ${Brief.fmtKm(best.metres)}$trailNote"
                 } else {
                     "Planned a ${Brief.fmtKm(best.metres)} $shapeWord from here" + trailNote
-                }) + shortOf +
+                }) + shortOf + tangled +
                     (roads?.let { ", including $it" } ?: ", off the roads") +
                     ". ${picks.size} to choose from \u2014 \u2039 \u203a to flick through, " +
                     "Brief for the day\u2019s plan.",
