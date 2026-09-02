@@ -729,8 +729,10 @@ class Assistant(private val ctx: Context, private val tools: GeoTools) {
             ),
             tool(
                 "weather",
-                "Hourly forecast for the next 8 hours where he is: temperature, rain chance and " +
-                    "amount, wind (Open-Meteo).",
+                "Whether it is going to rain where he is, when it clears, when the sun comes — " +
+                    "as a sentence the app computes itself — then the next 12 hours hour by " +
+                    "hour: temperature, rain chance and amount, wind and gusts (Open-Meteo, " +
+                    "Met Office model over the UK). Use this for any 'will it rain' question.",
                 schema(emptyMap(), emptyList()),
             ),
             tool(

@@ -35,6 +35,7 @@ import com.jollydoddger.waymark.shared.Prefs.radarScheme
 import com.jollydoddger.waymark.shared.Prefs.routeColour
 import com.jollydoddger.waymark.shared.Prefs.screenTimeoutSec
 import com.jollydoddger.waymark.shared.Prefs.tempEnabled
+import com.jollydoddger.waymark.shared.Prefs.weatherAlerts
 import com.jollydoddger.waymark.shared.Prefs.tracesEnabled
 import com.jollydoddger.waymark.shared.Prefs.tracesShown
 import com.jollydoddger.waymark.shared.Prefs.weatherShown
@@ -336,6 +337,21 @@ class SettingsActivity : Activity() {
             }
         }
 
+        val alertsSwitch = Switch(this).apply {
+            text = "  Rain alerts while recording"
+            textSize = 16f
+            isChecked = weatherAlerts
+            setOnCheckedChangeListener { _, on ->
+                weatherAlerts = on
+                result.text = if (on) {
+                    "While a walk is recorded the forecast for where you are is re-read every " +
+                        "twenty minutes, and rain coming, rain clearing or sun coming is said " +
+                        "once each — on the phone and on the watch."
+                } else {
+                    "No rain alerts. The timeline and the assistant still answer when asked."
+                }
+            }
+        }
         val cloudSwitch = Switch(this).apply {
             text = "  Cloud, sunshine and fog"
             textSize = 16f
@@ -546,6 +562,9 @@ class SettingsActivity : Activity() {
                 LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT,
             ).apply { topMargin = dp(6) })
             addView(washNote)
+            addView(alertsSwitch, LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT,
+            ).apply { topMargin = dp(12) })
 
             addView(heading("Route line"))
             addView(swatches({ routeColour }) { routeColour = it })

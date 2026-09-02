@@ -5,6 +5,7 @@ import com.google.android.gms.wearable.DataEventBuffer
 import com.google.android.gms.wearable.DataMapItem
 import com.google.android.gms.wearable.WearableListenerService
 import com.jollydoddger.waymark.shared.Sync
+import com.jollydoddger.waymark.shared.WeatherNote
 import kotlinx.coroutines.runBlocking
 
 /**
@@ -32,6 +33,12 @@ class WaymarkListenerService : WearableListenerService() {
                 Sync.PATH_STYLE -> Sync.applyStyle(this, data)
                 Sync.PATH_RECORD -> Sync.applyRecordWish(this, data)
                 Sync.PATH_POIS -> Sync.applyPois(this, data)
+                // The phone's own notification is local-only, so this is
+                // the buzz the wrist gets — and only for a headline, never
+                // for a routine re-read that found the same sky.
+                Sync.PATH_WEATHER -> Sync.applyWeather(this, data)?.let { (title, text) ->
+                    WeatherNote.show(this, title, text, localOnly = false)
+                }
             }
         }
     }

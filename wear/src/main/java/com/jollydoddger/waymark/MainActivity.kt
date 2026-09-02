@@ -39,10 +39,13 @@ import com.jollydoddger.waymark.shared.Prefs.routeReversed
 import com.jollydoddger.waymark.shared.Prefs.screenTimeoutSec
 import com.jollydoddger.waymark.shared.Prefs.trailColour
 import com.jollydoddger.waymark.shared.Prefs.wantRecording
+import com.jollydoddger.waymark.shared.Prefs.weatherLine
+import com.jollydoddger.waymark.shared.Prefs.weatherLineAt
 import com.jollydoddger.waymark.shared.RouteStore
 import com.jollydoddger.waymark.shared.Sync
 import com.jollydoddger.waymark.shared.TrackingService
 import com.jollydoddger.waymark.shared.TrailStore
+import com.jollydoddger.waymark.shared.WeatherNote
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -67,6 +70,7 @@ class MainActivity : Activity(), DataClient.OnDataChangedListener {
 
     private lateinit var map: BngMapView
     private lateinit var hint: TextView
+    private lateinit var weather: TextView
     private var locator: Locator? = null
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
 
@@ -108,6 +112,21 @@ class MainActivity : Activity(), DataClient.OnDataChangedListener {
             visibility = View.GONE
         }
 
+        // The hours ahead, in the phone's words, along the bottom of the
+        // dial: "Dry until 14:00, then rain for about 2 h". Read by the
+        // phone every twenty minutes while a walk is recorded and sent
+        // here; stale after three hours, because a forecast that old is
+        // a guess wearing a clock.
+        weather = TextView(this).apply {
+            setTextColor(Color.WHITE)
+            setBackgroundColor(Color.argb(190, 0, 0, 0))
+            textSize = 11f
+            gravity = Gravity.CENTER
+            maxLines = 2
+            setPadding(dp(12), dp(4), dp(12), dp(4))
+            visibility = View.GONE
+        }
+
         val root = FrameLayout(this).apply {
             addView(map, FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT)
             addView(recentreBtn, FrameLayout.LayoutParams(dp(48), dp(48), Gravity.START or Gravity.CENTER_VERTICAL).apply {
@@ -117,6 +136,10 @@ class MainActivity : Activity(), DataClient.OnDataChangedListener {
                 FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT,
                 Gravity.TOP or Gravity.CENTER_HORIZONTAL,
             ).apply { topMargin = dp(26) })
+            addView(weather, FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT,
+                Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL,
+            ).apply { bottomMargin = dp(22); leftMargin = dp(30); rightMargin = dp(30) })
         }
         setContentView(root)
 
@@ -174,6 +197,7 @@ class MainActivity : Activity(), DataClient.OnDataChangedListener {
         map.setPois(PoiStore.load(this))
         applySettings()
         showHint()
+        showWeather()
 
         // Ask the Data Layer what the settings actually are, rather than only
         // waiting to be told. A change sent while this app was closed or the
@@ -185,6 +209,7 @@ class MainActivity : Activity(), DataClient.OnDataChangedListener {
                     applySettings()
                     map.setPois(PoiStore.load(this@MainActivity))
                     showHint()
+                    showWeather()
                     startRecordingIfWanted()
                 }
             } catch (e: Exception) {
@@ -255,6 +280,13 @@ class MainActivity : Activity(), DataClient.OnDataChangedListener {
         TrackingService.warm(this)
     }
 
+    private fun showWeather() {
+        val line = weatherLine
+        val fresh = System.currentTimeMillis() - weatherLineAt < 3 * 3_600_000L
+        weather.text = line
+        weather.visibility = if (line.isNotBlank() && fresh) View.VISIBLE else View.GONE
+    }
+
     private fun showHint() {
         hint.visibility = when {
             osApiKey.isEmpty() -> { hint.text = "Open Waymark on the phone\nto set the OS map key"; View.VISIBLE }
@@ -309,6 +341,15 @@ class MainActivity : Activity(), DataClient.OnDataChangedListener {
                 Sync.PATH_POIS -> {
                     Sync.applyPois(this, data)
                     map.setPois(PoiStore.load(this))
+                }
+                Sync.PATH_WEATHER -> {
+                    // Whichever of this and the listener service sees the
+                    // stamp first raises the buzz; the other finds it seen
+                    // and only refreshes the words.
+                    Sync.applyWeather(this, data)?.let { (title, text) ->
+                        WeatherNote.show(this, title, text, localOnly = false)
+                    }
+                    showWeather()
                 }
             }
         }

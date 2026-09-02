@@ -26,9 +26,31 @@ import java.util.concurrent.Executors
  */
 object Weather {
 
-    /** Points per side. Twenty-five readings is a smooth field and a
-     *  comfortable arrow density, and keeps one request small. */
-    const val GRID = 5
+    /** Points per side. Forty-nine readings: a field that follows a valley
+     *  rather than averaging it away, in one request still small enough to
+     *  ask for on every settle. Twenty-five was the first answer and read
+     *  as a blur past the radar's reach. */
+    const val GRID = 7
+
+    /**
+     * The model asked for first. Open-Meteo serves the Met Office's UK
+     * model — two kilometres over the British Isles, and it hands over to
+     * its global run beyond them — which is the most detailed honest
+     * answer for where he walks. If the server refuses the name (a model
+     * renamed, or offline), the request is made again with no model named
+     * and Open-Meteo's own choice is taken; a forecast from the wrong model
+     * beats a blank map, and the fallback is silent because the label
+     * already says "forecast" and there is no second thing to say.
+     */
+    const val MODEL = "ukmo_seamless"
+
+    /** [url] with the model named, and then without, if it is refused. */
+    internal fun getWithModel(url: String, timeoutMs: Int): String =
+        try {
+            Net.get("$url&models=$MODEL", timeoutMs)
+        } catch (e: Exception) {
+            Net.get(url, timeoutMs)
+        }
 
     /** A fetched grid is good for this long before it is asked for again. */
     private const val TTL_MS = 12 * 60_000L
@@ -173,7 +195,7 @@ object Weather {
             "cloud_cover_high,visibility,wind_speed_10m,wind_direction_10m" +
             "&past_days=1&forecast_days=2&wind_speed_unit=mph" +
             "&timeformat=unixtime&timezone=UTC"
-        return parseField(Net.get(url, timeoutMs = 30_000), lat, lon, box)
+        return parseField(getWithModel(url, timeoutMs = 30_000), lat, lon, box)
     }
 
     /**
@@ -240,6 +262,65 @@ object Weather {
             timesMs, lat, lon, temp, rain, cloud, low, mid, high, vis,
             wind, dir, south, west, north, east,
         )
+    }
+
+    // --- one place, for the words --------------------------------------------
+
+    /**
+     * The hours ahead at one point, for [WeatherAhead]: what the job reads
+     * for where he is standing every twenty minutes, and what the
+     * assistant's weather tool reads. Carries the two figures the grid
+     * cannot — the chance of rain and the gusts — which is why it is its
+     * own request rather than a column of the field.
+     */
+    fun point(lat: Double, lon: Double, aheadHours: Int = Timeline.AHEAD_HOURS + 2): List<WeatherAhead.Hour> {
+        val url = "https://api.open-meteo.com/v1/forecast?latitude=%.4f&longitude=%.4f"
+            .format(java.util.Locale.UK, lat, lon) +
+            "&hourly=temperature_2m,precipitation,precipitation_probability,cloud_cover," +
+            "wind_speed_10m,wind_gusts_10m" +
+            "&past_hours=1&forecast_hours=$aheadHours&wind_speed_unit=mph" +
+            "&timeformat=unixtime&timezone=UTC"
+        return parsePoint(getWithModel(url, timeoutMs = 20_000))
+    }
+
+    internal fun parsePoint(body: String): List<WeatherAhead.Hour> {
+        val h = JSONObject(body).getJSONObject("hourly")
+        val times = h.getJSONArray("time")
+        fun arr(name: String): JSONArray? = h.optJSONArray(name)
+        val temp = arr("temperature_2m"); val rain = arr("precipitation")
+        val prob = arr("precipitation_probability"); val cloud = arr("cloud_cover")
+        val wind = arr("wind_speed_10m"); val gust = arr("wind_gusts_10m")
+        val out = ArrayList<WeatherAhead.Hour>()
+        for (i in 0 until times.length()) {
+            val mm = rain?.optDouble(i, Double.NaN) ?: Double.NaN
+            if (mm.isNaN()) continue
+            out.add(
+                WeatherAhead.Hour(
+                    times.getLong(i) * 1000L, mm,
+                    rainProb = prob?.let { if (it.isNull(i)) -1 else it.optInt(i, -1) } ?: -1,
+                    cloudPct = cloud?.optDouble(i, Double.NaN) ?: Double.NaN,
+                    tempC = temp?.optDouble(i, Double.NaN) ?: Double.NaN,
+                    windMph = wind?.optDouble(i, Double.NaN) ?: Double.NaN,
+                    gustMph = gust?.optDouble(i, Double.NaN) ?: Double.NaN,
+                ),
+            )
+        }
+        return out
+    }
+
+    /** The field's own hours at one of its points, as [WeatherAhead] hours —
+     *  the timeline's words come from the same grid the timeline paints. */
+    fun hoursAt(field: Field, index: Int): List<WeatherAhead.Hour> {
+        if (index < 0 || index >= field.lat.size) return emptyList()
+        return field.timesMs.indices.map { t ->
+            WeatherAhead.Hour(
+                field.timesMs[t],
+                field.rain[t][index],
+                cloudPct = field.cloud[t][index],
+                tempC = field.temp[t][index],
+                windMph = field.windSpeed[t][index],
+            )
+        }
     }
 
     // --- rendering -----------------------------------------------------------

@@ -15,6 +15,8 @@ import com.jollydoddger.waymark.shared.Prefs.routeReversed
 import com.jollydoddger.waymark.shared.Prefs.screenTimeoutSec
 import com.jollydoddger.waymark.shared.Prefs.trailColour
 import com.jollydoddger.waymark.shared.Prefs.wantRecording
+import com.jollydoddger.waymark.shared.Prefs.weatherLine
+import com.jollydoddger.waymark.shared.Prefs.weatherLineAt
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
@@ -41,6 +43,7 @@ object Sync {
     const val PATH_STYLE = "/waymark/style"
     const val PATH_RECORD = "/waymark/record"
     const val PATH_POIS = "/waymark/pois"
+    const val PATH_WEATHER = "/waymark/weather"
 
     private val TILE_ENTRY = Regex("""\d{1,2}/\d{1,7}/\d{1,7}\.png""")
 
@@ -166,6 +169,37 @@ object Sync {
     }
 
     /**
+     * The hours ahead, in words, for the wrist. [title] is set only when
+     * something changed that is worth a buzz — "Rain from 14:00" — and the
+     * watch raises its own notification for it; a re-read that found the
+     * same forecast travels with no title and only refreshes the line on
+     * the watch's map. The phone's own notification is local-only, so
+     * this is the one the wrist gets.
+     */
+    suspend fun sendWeather(ctx: Context, line: String, title: String?, text: String?) {
+        val req = PutDataMapRequest.create(PATH_WEATHER).apply {
+            dataMap.putString("line", line)
+            dataMap.putString("title", title ?: "")
+            dataMap.putString("text", text ?: "")
+            dataMap.putLong("stamp", System.currentTimeMillis())
+        }.asPutDataRequest().setUrgent()
+        Wearable.getDataClient(ctx).putDataItem(req).await()
+    }
+
+    /** Stores the line; returns the headline to raise, or null. A stamp
+     *  already seen raises nothing — the pull on open re-delivers items
+     *  the listener already handled. */
+    fun applyWeather(ctx: Context, data: DataMap): Pair<String, String>? {
+        val stamp = data.getLong("stamp", 0L)
+        val seen = ctx.weatherLineAt
+        ctx.weatherLine = data.getString("line") ?: ""
+        ctx.weatherLineAt = stamp
+        val title = data.getString("title") ?: ""
+        if (title.isBlank() || stamp == seen) return null
+        return title to (data.getString("text") ?: "")
+    }
+
+    /**
      * Ask the Data Layer what the current settings are, rather than waiting to
      * be told.
      *
@@ -187,6 +221,7 @@ object Sync {
                     PATH_STYLE -> { applyStyle(ctx, data); applied = true }
                     PATH_RECORD -> { applyRecordWish(ctx, data); applied = true }
                     PATH_POIS -> { applyPois(ctx, data); applied = true }
+                    PATH_WEATHER -> { applyWeather(ctx, data); applied = true }
                 }
             }
             applied

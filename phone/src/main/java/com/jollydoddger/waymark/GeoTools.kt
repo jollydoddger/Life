@@ -1071,23 +1071,28 @@ class GeoTools(
         val at = fix() ?: route()?.let { it.points[it.points.size / 2] }
             ?: return "No GPS fix and no route — nowhere to forecast for."
         val (lat, lon) = Bng.toWgs84(at)
-        val json = Net.get(
-            "https://api.open-meteo.com/v1/forecast?latitude=%.4f&longitude=%.4f".format(lat, lon) +
-                "&hourly=temperature_2m,precipitation_probability,precipitation,wind_speed_10m" +
-                "&forecast_hours=8&wind_speed_unit=mph&timezone=auto",
-        )
-        val hourly = JSONObject(json).getJSONObject("hourly")
-        val times = hourly.getJSONArray("time")
-        val temp = hourly.getJSONArray("temperature_2m")
-        val prob = hourly.getJSONArray("precipitation_probability")
-        val rain = hourly.getJSONArray("precipitation")
-        val wind = hourly.getJSONArray("wind_speed_10m")
-        val sb = StringBuilder("Next hours here (Open-Meteo):\n")
-        for (i in 0 until minOf(8, times.length())) {
+        val hours = Weather.point(lat, lon)
+        val now = System.currentTimeMillis()
+        // The same sentence the wrist gets, from the same code, then the
+        // hours it was made from — so a question to the assistant can never
+        // get a different answer from the buzz.
+        val sb = StringBuilder(WeatherAhead.describe(hours, now, horizonH = 12))
+        sb.append("\n\nHour by hour here (Open-Meteo, ${Weather.MODEL} where it covers):\n")
+        val clock = java.text.SimpleDateFormat("HH:mm", java.util.Locale.UK)
+        for (h in WeatherAhead.ahead(hours, now, 12)) {
             sb.append(
-                "- %s: %.0f°C, rain %d%% (%.1f mm), wind %.0f mph\n".format(
-                    times.getString(i).substringAfter('T'),
-                    temp.getDouble(i), prob.optInt(i), rain.getDouble(i), wind.getDouble(i),
+                "- %s: %.0f°C, rain %s (%.1f mm), wind %.0f mph%s\n".format(
+                    java.util.Locale.UK,
+                    clock.format(java.util.Date(h.timeMs)),
+                    h.tempC,
+                    if (h.rainProb >= 0) "${h.rainProb}%" else "?",
+                    h.rainMm,
+                    h.windMph,
+                    if (!h.gustMph.isNaN() && h.gustMph >= WeatherAhead.GUSTY_MPH) {
+                        " gusting %.0f".format(java.util.Locale.UK, h.gustMph)
+                    } else {
+                        ""
+                    },
                 ),
             )
         }

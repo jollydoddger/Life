@@ -61,6 +61,9 @@ import com.jollydoddger.waymark.shared.Prefs.tempEnabled
 import com.jollydoddger.waymark.shared.Prefs.tracesEnabled
 import com.jollydoddger.waymark.shared.Prefs.tracesShown
 import com.jollydoddger.waymark.shared.Prefs.weatherShown
+import com.jollydoddger.waymark.shared.Prefs.weatherAlerts
+import com.jollydoddger.waymark.shared.Prefs.weatherLine
+import com.jollydoddger.waymark.shared.Prefs.weatherLineAt
 import com.jollydoddger.waymark.shared.Prefs.trailColour
 import com.jollydoddger.waymark.shared.Prefs.walkSpec
 import com.jollydoddger.waymark.shared.Prefs.wantRecording
@@ -148,6 +151,7 @@ class MainActivity : Activity() {
     private lateinit var wxFade: SeekBar
     private lateinit var wxLegend: LinearLayout
     private lateinit var wxPlay: TextView
+    private lateinit var wxAhead: TextView
     private var wxPlaying = false
     private var legendKey = ""
 
@@ -524,9 +528,20 @@ class MainActivity : Activity() {
                     .apply { leftMargin = dp(8) },
             )
         }
+        // The hours ahead in words, for the middle of the map — the same
+        // sentence the wrist gets, from the same grid the scrubber paints.
+        wxAhead = TextView(this).apply {
+            textSize = Ui.CAP
+            setTextColor(Palette.inkMut)
+            setPadding(dp(14), dp(2), dp(14), dp(6))
+            visibility = View.GONE
+        }
         wxContent = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             addView(wxSeek, LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT,
+            ))
+            addView(wxAhead, LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT,
             ))
             addView(wxFadeRow, LinearLayout.LayoutParams(
@@ -740,10 +755,11 @@ class MainActivity : Activity() {
             addView(Ui.heading(this@MainActivity, "More"))
             grid(
                 listOf(
-                    menuAction("Download this area") { downloadArea() },
+                    menuAction("Timeline \u25b6") { openTimeline() },
                     menuAction("Forecast") { openWeather() },
                 ),
                 listOf(
+                    menuAction("Download this area") { downloadArea() },
                     menuAction("Sun") { openSun() },
                     menuAction("Settings") { openSettings() },
                 ),
@@ -796,7 +812,7 @@ class MainActivity : Activity() {
             setOnClickListener { openAsk() }
         }
         wxChip = TextView(this).apply {
-            text = "Radar ›"
+            text = "Timeline \u203a"
             textSize = Ui.CAP
             setTextColor(Palette.ink)
             background = Ui.ripple(Ui.pill(this@MainActivity, Palette.raised))
@@ -867,6 +883,9 @@ class MainActivity : Activity() {
             addView(wxIcon, LinearLayout.LayoutParams(dp(34), dp(34)).apply { rightMargin = dp(6) })
             addView(wxTemp)
             setOnClickListener { openWeather() }
+            // Held: the timeline, so the scrubber is reachable from the one
+            // weather thing always on screen, not only from the peek chip.
+            setOnLongClickListener { openTimeline(); true }
         }
         wxToggle = TextView(this).apply {
             textSize = Ui.CAP
@@ -1052,6 +1071,7 @@ class MainActivity : Activity() {
         if (wantRecording && !recording) {
             recordingStartedAt = System.currentTimeMillis()
             TrackingService.start(this)
+            WeatherWatch.start(this)
         }
         paintRecordButton()
         val filter = IntentFilter(TrackingService.BROADCAST_TRAIL)
@@ -1165,6 +1185,9 @@ class MainActivity : Activity() {
         }
         recording = turningOn
         wantRecording = turningOn
+        // The forecast for where he is, re-read through the walk and said
+        // when it changes — on the phone and the wrist.
+        if (turningOn) WeatherWatch.start(this) else WeatherWatch.stop(this)
         paintRecordButton()
         scope.launch {
             try {
@@ -1461,6 +1484,22 @@ class MainActivity : Activity() {
      * His words were "wherever my map is", and that is the useful reading:
      * the walk he is weighing up is often an hour's drive away.
      */
+    /** The scrubber, open. Says why when there is nothing to scrub. */
+    private fun openTimeline() {
+        if (wxFrames.isEmpty()) {
+            sayAction(
+                if (radarEnabled || windEnabled || tempEnabled || cloudEnabled) {
+                    "No weather frames yet \u2014 give the forecast a moment."
+                } else {
+                    "Nothing on the timeline: no weather layer is on."
+                },
+                "Settings",
+            ) { openSettings() }
+            return
+        }
+        showPanel(Panel.WEATHER, open = true)
+    }
+
     private fun openWeather() {
         val b = map.viewportBounds()
         startActivity(
@@ -1676,6 +1715,7 @@ class MainActivity : Activity() {
         drawWeatherField(field, hour, frame)
         drawWind(field, hour)
         showTemperature(field, hour)
+        showAhead(field)
         wxLabel.text = frameLabel(frame) + rainWords(field, hour, frame) + readings(field, hour)
         showLegend(frame, field != null && hour >= 0)
     }
@@ -1696,17 +1736,22 @@ class MainActivity : Activity() {
         // server refused his choice, the tiles are the fallback's colours,
         // and a key naming his preference would describe nothing on screen.
         val radar = if (wantRadar && frame.radarPath != null) Radar.schemeNow() else 0
+        val modelRain = wantRadar && frame.radarPath == null && haveField
         val sky = wantCloud && haveField
-        val key = "$radar/$sky"
+        val key = "$radar/$modelRain/$sky"
         if (key == legendKey) return
         legendKey = key
         wxLegend.removeAllViews()
-        wxLegend.visibility = if (radar == 0 && !sky) View.GONE else View.VISIBLE
-        // The forecast-rain swatches went with the forecast-rain layer. They
-        // were honest while that layer existed and would describe nothing
-        // now — a key for a picture that is no longer painted is exactly the
-        // sort of thing that made this overlay hard to read.
+        wxLegend.visibility = if (radar == 0 && !modelRain && !sky) View.GONE else View.VISIBLE
         if (radar != 0) wxLegend.addView(legendNote(RADAR_SCALES[radar] ?: "RainViewer"))
+        if (modelRain) {
+            // Named as what it is. The swatches are the ramp actually
+            // painted, so the key describes the picture and nothing else.
+            wxLegend.addView(legendNote("Forecast rain (model, not radar)"))
+            wxLegend.addView(legendChip("drizzle", Ramp.rain(0.3)))
+            wxLegend.addView(legendChip("1 mm/h", Ramp.rain(1.0)))
+            wxLegend.addView(legendChip("4 mm/h", Ramp.rain(4.0)))
+        }
         if (sky) {
             // No swatch for clear sky, because clear sky has no swatch: the
             // map is simply left alone, and saying so in words is the honest
@@ -1766,19 +1811,29 @@ class MainActivity : Activity() {
             Weather.renderSky(field, hour),
             field.south, field.west, field.north, field.east,
         ) else null)
-        // Rain is drawn one way only: the radar. It used to fill the gap
-        // beyond the radar's reach with the forecast grid, and that is what
-        // he meant by "it flicks between different types of rain overlay" —
-        // scrubbing past the nowcast swapped a sharp measured sweep in
-        // RainViewer's palette for a blurry 5x5 model grid in ours, with no
-        // warning and no way to read the two against each other.
-        //
-        // Two pictures of one quantity is worse than one picture and a
-        // sentence. Beyond the radar the rain is said in words on the label
-        // instead, so nothing is lost and nothing is disguised — and what
-        // is left on the map is a single ten-minute radar animation, which
-        // is the only genuinely sub-hourly rain there is.
-        map.setField(null, 255)
+        // Rain past the radar's reach is painted from the forecast grid,
+        // and only there. The first version filled that gap the same way
+        // and he said "it flicks between different types of rain overlay"
+        // — a sharp measured sweep in RainViewer's palette giving way to a
+        // blurry 5×5 model wash in ours with nothing saying so. The answer
+        // for a while was words only beyond the radar; his verdict on that
+        // was a timeline that went blank past half an hour on, "needs as
+        // detailed future as possible". So the forecast is painted again,
+        // on a finer grid, with the key naming it as forecast and the
+        // frame label already calling the moment a forecast. The seam is
+        // real — a model is not a radar — and is now labelled rather than
+        // hidden or left empty.
+        if (wantRadar && frame.radarPath == null) {
+            map.setField(
+                BngMapView.MeshTile(
+                    Weather.render(field.rain[hour]) { Ramp.rain(it) },
+                    field.south, field.west, field.north, field.east,
+                ),
+                255,
+            )
+        } else {
+            map.setField(null, 255)
+        }
     }
 
     /**
@@ -1851,6 +1906,28 @@ class MainActivity : Activity() {
         }
         if (east <= west || north <= south) return null
         return BngMapView.WindGrid(west, south, east, north, n, u, v)
+    }
+
+    /**
+     * "Is it going to rain, and when will it clear?" for the middle of the
+     * map, under the scrubber. While a walk is being recorded the job's own
+     * reading for where he actually is takes precedence, because that one
+     * carries the chance of rain and the gusts the grid does not.
+     */
+    private fun showAhead(field: Weather.Field?) {
+        val now = System.currentTimeMillis()
+        val walked = weatherLine
+        val text = if (recording && walked.isNotBlank() && now - weatherLineAt < 3 * 3_600_000L) {
+            "Where you are: $walked"
+        } else if (field != null) {
+            val centre = (Weather.GRID / 2) * Weather.GRID + Weather.GRID / 2
+            val line = WeatherAhead.describe(Weather.hoursAt(field, centre), now)
+            "Middle of the map: $line"
+        } else {
+            ""
+        }
+        wxAhead.text = text
+        wxAhead.visibility = if (text.isBlank()) View.GONE else View.VISIBLE
     }
 
     /** Temperature as a figure. A wash of colour across the whole map said
@@ -1948,7 +2025,7 @@ class MainActivity : Activity() {
             mm > 0.02 -> "spitting"
             else -> "dry"
         }
-        return " · no radar, forecast says $what"
+        return " \u00b7 forecast: $what"
     }
 
     // --- offline area download -----------------------------------------------

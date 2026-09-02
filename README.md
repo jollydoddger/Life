@@ -358,8 +358,9 @@ every part currently painted. They share a single **Weather** toggle — the
 Overlay switch at the top, or the chip on the menu's Map page, the same
 switch twice; the path overlays keep a chip each on that page.
 
-**The timeline.** A scrubber along the bottom, five hours back and five
-forward, with a ▶ that runs the whole span as a loop — a frame and a half a
+**The timeline.** A scrubber along the bottom — reach it from the
+*Timeline ›* chip on the ask bar, by holding the weather readout at the top,
+or from the menu's Map page — three hours back and twelve forward, with a ▶ that runs the whole span as a loop — a frame and a half a
 second — until a finger on the bar or the ⏸ takes over. The past and the
 future genuinely look different, on purpose: behind you is *measured radar*
 (sharp cells, RainViewer's palette); past the ~30-minute nowcast no radar
@@ -374,10 +375,24 @@ you chose.
 
 The two halves are not made of the same stuff, and the label under the
 scrubber says which you are looking at. RainViewer publishes about two hours
-back and half an hour on; that is measured radar. The rest of the ten hours
-is the hourly forecast on a grid a few kilometres across — a model's opinion
-about the sky, not an observation. Wind, temperature and cloud are always the
-model.
+back and half an hour on; that is measured radar. Beyond it, out to twelve
+hours, rain is painted from the hourly forecast — the Met Office's 2 km UK
+model through Open-Meteo, on a 7×7 grid over the map — and the key names it
+*forecast rain (model, not radar)* so the seam is labelled rather than hidden.
+Wind, temperature and cloud are always the model. Under the scrubber, a line
+says in words what the hours ahead hold for the middle of the map: "Dry
+until 14:00, then rain for about 2 h, clearing by 16:00. Sun from 16:00."
+
+**Weather ahead, on the walk.** While a walk is being recorded the phone
+re-reads the forecast for where you actually are every twenty minutes and
+says — once each — when rain is coming, when it will clear, when the sun is
+due or going: a notification on the phone and the same words, with their own
+buzz, on the watch, whose map carries the line along its bottom edge. The
+sentence is computed by the app from the hourly figures, not written by a
+model, and the assistant's `weather` tool returns the identical sentence
+before its hour-by-hour table, so asking "is it going to rain" and being
+told unasked can never disagree. *Rain alerts while recording* in ⚙ switches
+the nudges off; the timeline and the assistant still answer when asked.
 
 **Switching them on and off.** Settings decides which overlays exist; each
 one allowed there gets a chip on the menu's Map page, and that chip is what

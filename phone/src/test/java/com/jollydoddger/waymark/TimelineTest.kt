@@ -8,8 +8,8 @@ import org.junit.Test
 /**
  * The timeline mixes a measurement with a model, so the rules about which
  * wins where are worth holding to a test: radar is never covered over by a
- * forecast hour, nothing outside the ten-hour span gets in, and the scrubber
- * opens on now.
+ * forecast hour, nothing outside the span gets in, and the scrubber opens
+ * on now.
  */
 class TimelineTest {
 
@@ -46,23 +46,24 @@ class TimelineTest {
     }
 
     @Test
-    fun theSpanIsFiveHoursEitherSideAndSorted() {
-        val merged = Timeline.merge(radarFrames(), hours(-9, 9), now)
+    fun theSpanIsThreeHoursBackTwelveOnAndSorted() {
+        val merged = Timeline.merge(radarFrames(), hours(-9, 20), now)
         assertTrue(merged.isNotEmpty())
-        assertTrue("too early a frame", merged.first().timeMs >= now - 5 * hour)
-        assertTrue("too late a frame", merged.last().timeMs <= now + 5 * hour)
+        assertTrue("too early a frame", merged.first().timeMs >= now - 3 * hour)
+        assertTrue("too late a frame", merged.last().timeMs <= now + 12 * hour)
         for (i in 1 until merged.size) {
             assertTrue("frames out of order", merged[i].timeMs >= merged[i - 1].timeMs)
         }
-        // Both halves are actually reachable: five hours back and five on.
-        assertTrue("nothing more than 3 h back", merged.any { it.timeMs <= now - 3 * hour })
-        assertTrue("nothing more than 3 h ahead", merged.any { it.timeMs >= now + 3 * hour })
+        // Both halves are actually reachable: the radar's two hours back
+        // with an hour of run-up, and a day's walk ahead.
+        assertTrue("nothing 3 h back", merged.any { it.timeMs <= now - 3 * hour })
+        assertTrue("nothing 12 h ahead", merged.any { it.timeMs >= now + 11 * hour })
     }
 
     @Test
     fun withNoRadarAtAllTheForecastStillFillsTheTimeline() {
-        val merged = Timeline.merge(emptyList(), hours(-5, 5), now)
-        assertEquals(11L, merged.size.toLong())
+        val merged = Timeline.merge(emptyList(), hours(-3, 12), now)
+        assertEquals(16L, merged.size.toLong())
         merged.forEach { assertNull(it.radarPath) }
         assertEquals("forecast", merged.first().kind)
     }

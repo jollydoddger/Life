@@ -297,4 +297,30 @@ object Prefs {
     var Context.walkSpec: String
         get() = p(this).getString("walkSpec", "") ?: ""
         set(v) = p(this).edit().putString("walkSpec", v).apply()
+
+    // --- weather ahead ---------------------------------------------------
+    //
+    // The phone reads the forecast every twenty minutes while a walk is
+    // being recorded and says what is coming; the watch shows the same
+    // words. These are the handover between the job, the two screens and
+    // the notification, on both devices.
+
+    /** Whether the recording walk gets rain-ahead notifications at all. */
+    var Context.weatherAlerts: Boolean
+        get() = p(this).getBoolean("weatherAlerts", true)
+        set(v) = p(this).edit().putBoolean("weatherAlerts", v).apply()
+
+    /** Headline keys already said this walk, `|`-joined; reset on ●. */
+    var Context.weatherSaid: String
+        get() = p(this).getString("weatherSaid", "") ?: ""
+        set(v) = p(this).edit().putString("weatherSaid", v).apply()
+
+    /** The latest sentence about the hours ahead, and when it was read. */
+    var Context.weatherLine: String
+        get() = p(this).getString("weatherLine", "") ?: ""
+        set(v) = p(this).edit().putString("weatherLine", v).apply()
+
+    var Context.weatherLineAt: Long
+        get() = p(this).getLong("weatherLineAt", 0L)
+        set(v) = p(this).edit().putLong("weatherLineAt", v).apply()
 }

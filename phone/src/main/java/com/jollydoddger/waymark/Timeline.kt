@@ -22,20 +22,28 @@ data class WxFrame(
 }
 
 /**
- * The scrub timeline: five hours back, five hours forward.
+ * The scrub timeline: three hours back, twelve hours forward.
  *
  * He asked for both halves, and the honest answer is that they are not made
  * of the same stuff. Real radar reaches about two hours back and half an hour
  * on — that is the whole of what RainViewer's free service publishes, and no
  * amount of wanting extends it. The rest of the span is filled from the
- * hourly forecast grid, at the model's own coarser resolution. So the
- * timeline covers the ten hours asked for, and every frame says out loud
- * which of the two it is.
+ * hourly forecast grid, at the model's own coarser resolution, and every
+ * frame says out loud which of the two it is.
+ *
+ * The halves are unequal on purpose. Back covers the radar and an hour of
+ * context — rain that has gone is the least useful hour on the bar.
+ * Forward is the length of a day out: "as detailed future as possible" is
+ * the ask, and a five-hour horizon was answering "what at four" with a
+ * shrug by lunchtime.
  */
 object Timeline {
 
-    /** Hours either side of now. */
-    const val SPAN_HOURS = 5
+    /** Hours back from now. Radar reaches two; one more for the run-up. */
+    const val BACK_HOURS = 3
+
+    /** Hours forward. A day's walk, and the point forecast's own reach. */
+    const val AHEAD_HOURS = 12
 
     /**
      * Radar frames where radar exists, forecast hours either side of it.
@@ -45,8 +53,8 @@ object Timeline {
      * of a better one.
      */
     fun merge(radar: List<WxFrame>, hourlyMs: List<Long>, nowMs: Long): List<WxFrame> {
-        val from = nowMs - SPAN_HOURS * 3_600_000L
-        val to = nowMs + SPAN_HOURS * 3_600_000L
+        val from = nowMs - BACK_HOURS * 3_600_000L
+        val to = nowMs + AHEAD_HOURS * 3_600_000L
         val out = ArrayList<WxFrame>()
         for (f in radar) if (f.timeMs in from..to) out.add(f)
         val radarFrom = out.minOfOrNull { it.timeMs } ?: Long.MAX_VALUE
