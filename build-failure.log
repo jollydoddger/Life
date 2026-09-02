@@ -1,0 +1,158 @@
+Starting a Gradle Daemon (subsequent builds will be faster)
+> Task :phone:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :shared:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :wear:preBuild UP-TO-DATE
+> Task :wear:preDebugBuild UP-TO-DATE
+> Task :shared:preBuild UP-TO-DATE
+> Task :shared:preDebugBuild UP-TO-DATE
+> Task :wear:mergeDebugNativeDebugMetadata NO-SOURCE
+> Task :wear:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :wear:generateDebugResValues FROM-CACHE
+> Task :shared:generateDebugResValues FROM-CACHE
+> Task :shared:generateDebugResources FROM-CACHE
+> Task :wear:generateDebugResources FROM-CACHE
+> Task :shared:packageDebugResources FROM-CACHE
+> Task :wear:packageDebugResources FROM-CACHE
+> Task :wear:parseDebugLocalResources FROM-CACHE
+> Task :shared:parseDebugLocalResources FROM-CACHE
+> Task :shared:generateDebugRFile FROM-CACHE
+> Task :wear:mapDebugSourceSetPaths
+> Task :wear:mergeDebugResources FROM-CACHE
+> Task :wear:createDebugCompatibleScreenManifests
+> Task :wear:extractDeepLinksDebug FROM-CACHE
+> Task :wear:javaPreCompileDebug FROM-CACHE
+> Task :phone:preBuild UP-TO-DATE
+> Task :phone:preDebugBuild UP-TO-DATE
+> Task :phone:generateDebugResValues FROM-CACHE
+> Task :wear:mergeDebugShaders
+> Task :wear:compileDebugShaders NO-SOURCE
+> Task :wear:generateDebugAssets UP-TO-DATE
+> Task :phone:mapDebugSourceSetPaths
+> Task :phone:generateDebugResources FROM-CACHE
+> Task :wear:desugarDebugFileDependencies FROM-CACHE
+> Task :wear:mergeDebugJniLibFolders
+> Task :wear:validateSigningDebug
+> Task :wear:writeDebugAppMetadata
+> Task :wear:checkDebugDuplicateClasses
+> Task :phone:mergeDebugResources FROM-CACHE
+> Task :phone:packageDebugResources FROM-CACHE
+> Task :phone:parseDebugLocalResources FROM-CACHE
+> Task :wear:writeDebugSigningConfigVersions
+> Task :phone:createDebugCompatibleScreenManifests
+> Task :phone:extractDeepLinksDebug FROM-CACHE
+> Task :phone:javaPreCompileDebug FROM-CACHE
+> Task :phone:preDebugUnitTestBuild UP-TO-DATE
+> Task :phone:javaPreCompileDebugUnitTest FROM-CACHE
+> Task :phone:mergeDebugNativeDebugMetadata NO-SOURCE
+> Task :phone:mergeDebugShaders
+> Task :phone:compileDebugShaders NO-SOURCE
+> Task :phone:generateDebugAssets UP-TO-DATE
+> Task :wear:mergeExtDexDebug FROM-CACHE
+> Task :shared:javaPreCompileDebug FROM-CACHE
+> Task :shared:preDebugUnitTestBuild UP-TO-DATE
+> Task :shared:generateDebugUnitTestStubRFile FROM-CACHE
+> Task :shared:javaPreCompileDebugUnitTest FROM-CACHE
+> Task :phone:l8DexDesugarLibDebug FROM-CACHE
+> Task :shared:extractDeepLinksDebug FROM-CACHE
+> Task :shared:processDebugManifest FROM-CACHE
+> Task :shared:compileDebugLibraryResources FROM-CACHE
+> Task :shared:writeDebugAarMetadata
+> Task :shared:mergeDebugShaders
+> Task :shared:compileDebugShaders NO-SOURCE
+> Task :shared:generateDebugAssets UP-TO-DATE
+> Task :shared:packageDebugAssets
+> Task :shared:mergeDebugJniLibFolders
+> Task :wear:checkDebugAarMetadata
+> Task :shared:mergeDebugNativeLibs NO-SOURCE
+> Task :shared:copyDebugJniLibsProjectOnly
+> Task :wear:processDebugMainManifest
+> Task :wear:processDebugManifest
+> Task :wear:mergeDebugAssets
+> Task :wear:compressDebugAssets FROM-CACHE
+> Task :wear:processDebugManifestForPackage
+> Task :wear:mergeDebugNativeLibs NO-SOURCE
+> Task :wear:stripDebugDebugSymbols NO-SOURCE
+> Task :phone:desugarDebugFileDependencies FROM-CACHE
+> Task :phone:checkDebugAarMetadata
+> Task :phone:processDebugMainManifest
+> Task :phone:processDebugManifest
+> Task :phone:mergeDebugAssets
+> Task :phone:processDebugManifestForPackage
+> Task :wear:processDebugResources
+> Task :phone:compressDebugAssets FROM-CACHE
+> Task :phone:mergeDebugJniLibFolders
+> Task :phone:checkDebugDuplicateClasses
+> Task :phone:mergeDebugNativeLibs NO-SOURCE
+> Task :phone:mergeExtDexDebug FROM-CACHE
+> Task :phone:processDebugResources
+> Task :phone:stripDebugDebugSymbols NO-SOURCE
+> Task :phone:validateSigningDebug
+> Task :phone:writeDebugAppMetadata
+> Task :phone:writeDebugSigningConfigVersions
+> Task :shared:compileDebugKotlin
+> Task :shared:compileDebugJavaWithJavac NO-SOURCE
+> Task :shared:bundleLibRuntimeToJarDebug
+> Task :shared:bundleLibCompileToJarDebug
+> Task :shared:processDebugJavaRes
+> Task :shared:compileDebugUnitTestKotlin
+> Task :shared:compileDebugUnitTestJavaWithJavac NO-SOURCE
+> Task :shared:processDebugUnitTestJavaRes
+> Task :wear:compileDebugKotlin
+> Task :wear:compileDebugJavaWithJavac NO-SOURCE
+> Task :shared:testDebugUnitTest
+> Task :shared:bundleLibRuntimeToDirDebug
+> Task :wear:dexBuilderDebug
+> Task :wear:mergeDebugGlobalSynthetics FROM-CACHE
+> Task :wear:processDebugJavaRes
+> Task :phone:mergeLibDexDebug
+> Task :wear:mergeProjectDexDebug
+> Task :wear:mergeDebugJavaResource
+> Task :wear:mergeLibDexDebug
+> Task :wear:packageDebug
+> Task :wear:createDebugApkListingFileRedirect
+> Task :wear:assembleDebug
+
+> Task :phone:compileDebugKotlin
+w: file:///home/runner/work/Life/Life/phone/src/main/java/com/jollydoddger/waymark/MainActivity.kt:1159:58 'static field TRIM_MEMORY_RUNNING_LOW: Int' is deprecated. Deprecated in Java.
+w: file:///home/runner/work/Life/Life/phone/src/main/java/com/jollydoddger/waymark/WalksActivity.kt:50:44 'val systemWindowInsetTop: Int' is deprecated. Deprecated in Java.
+w: file:///home/runner/work/Life/Life/phone/src/main/java/com/jollydoddger/waymark/WalksActivity.kt:50:76 'val systemWindowInsetBottom: Int' is deprecated. Deprecated in Java.
+w: file:///home/runner/work/Life/Life/phone/src/main/java/com/jollydoddger/waymark/WeatherActivity.kt:112:44 'val systemWindowInsetTop: Int' is deprecated. Deprecated in Java.
+w: file:///home/runner/work/Life/Life/phone/src/main/java/com/jollydoddger/waymark/WeatherActivity.kt:112:76 'val systemWindowInsetBottom: Int' is deprecated. Deprecated in Java.
+
+> Task :phone:compileDebugJavaWithJavac NO-SOURCE
+> Task :phone:processDebugJavaRes
+> Task :phone:bundleDebugClassesToRuntimeJar
+> Task :phone:bundleDebugClassesToCompileJar
+> Task :phone:dexBuilderDebug
+> Task :phone:mergeDebugGlobalSynthetics FROM-CACHE
+> Task :phone:mergeDebugJavaResource
+> Task :phone:mergeProjectDexDebug
+> Task :phone:packageDebug
+> Task :phone:createDebugApkListingFileRedirect
+> Task :phone:assembleDebug
+
+> Task :phone:compileDebugUnitTestKotlin
+w: file:///home/runner/work/Life/Life/phone/src/test/java/com/jollydoddger/waymark/OverpassRefusalTest.kt:59:20 Check for instance is always 'true'.
+
+> Task :phone:compileDebugUnitTestJavaWithJavac NO-SOURCE
+> Task :phone:processDebugUnitTestJavaRes
+
+> Task :phone:testDebugUnitTest FAILED
+
+WeatherPointTest > the words come straight off the parse FAILED
+    java.lang.AssertionError at WeatherPointTest.kt:44
+
+210 tests completed, 1 failed
+gradle/actions: Writing build results to /home/runner/work/_temp/.gradle-actions/build-results/__run-1788332959118.json
+
+FAILURE: Build failed with an exception.
+
+* What went wrong:
+Execution failed for task ':phone:testDebugUnitTest'.
+> There were failing tests. See the report at: file:///home/runner/work/Life/Life/phone/build/reports/tests/testDebugUnitTest/index.html
+
+* Try:
+> Run with --scan to get full insights.
+
+BUILD FAILED in 1m 2s
+97 actionable tasks: 62 executed, 35 from cache
