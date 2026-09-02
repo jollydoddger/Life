@@ -21,7 +21,7 @@ import android.view.WindowInsets
 import android.view.inputmethod.EditorInfo
 import android.widget.ArrayAdapter
 import android.widget.EditText
-import android.widget.HorizontalScrollView
+import android.widget.ImageView
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.ScrollView
@@ -129,13 +129,17 @@ class MainActivity : Activity() {
     private lateinit var pickerContent: LinearLayout
     private lateinit var editPeek: LinearLayout
     private lateinit var editContent: LinearLayout
-    private lateinit var walksPeek: LinearLayout
-    private lateinit var walksContent: LinearLayout
+    private lateinit var menuPeek: LinearLayout
+    private lateinit var menuContent: Pager
+    private lateinit var menuTabs: List<TextView>
+    private lateinit var layerGrid: LinearLayout
+    private lateinit var hideBtn: TextView
+    private lateinit var weightBtn: TextView
     private lateinit var peekSummary: TextView
     private lateinit var peekMic: View
     private lateinit var wxChip: TextView
 
-    private enum class Panel { ASK, WEATHER, PICKER, EDIT, WALKS }
+    private enum class Panel { ASK, WEATHER, PICKER, EDIT, MENU }
     private var panel = Panel.ASK
 
     // The weather scrubber: five hours back, five forward, one moment shown.
@@ -147,12 +151,12 @@ class MainActivity : Activity() {
     private var wxPlaying = false
     private var legendKey = ""
 
-    /** The row of layer toggles across the top of the map, and the reading
-     *  chips that sit beside them. */
-    private lateinit var chipRow: LinearLayout
-    private lateinit var chipScroll: HorizontalScrollView
-    private lateinit var mapChip: TextView
-    private lateinit var tempChip: TextView
+    /** The weather readout at the top of the map — a symbol and a figure —
+     *  the overlay switch beside it, and the walk clock. */
+    private lateinit var wxPill: LinearLayout
+    private lateinit var wxIcon: ImageView
+    private lateinit var wxTemp: TextView
+    private lateinit var wxToggle: TextView
     private lateinit var timerChip: TextView
     private lateinit var markChip: TextView
 
@@ -262,45 +266,21 @@ class MainActivity : Activity() {
         fun iconButton(glyph: Glyph, onClick: () -> Unit): View =
             Ui.iconButton(this, glyph, onTap = onClick)
 
-        val importBtn = iconButton(Glyph.ROUTE) { showPanel(Panel.WALKS, open = true) }
-        val reverseBtn = iconButton(Glyph.REVERSE) {
-            routeReversed = !routeReversed
-            map.routeReversed = routeReversed
-            say(
-                if (routeReversed) "Arrows now point back the way — sending to the watch"
-                else "Arrows point the route's own way — sending to the watch",
-            )
-            // The watch has no ⇄ of its own any more, so this has to travel.
-            scope.launch {
-                try {
-                    Sync.sendStyle(this@MainActivity)
-                } catch (e: Exception) {
-                    say("Flipped here. The watch will follow when you next open it.")
-                }
-            }
-        }
+        // The rail: what a thumb wants on a hill, and nothing else. His
+        // call — "most important things on that side are record, GPS lock
+        // and the menu button; everything else can be in the menu" — and
+        // the line weight, which he asked for by name because seeing what
+        // is under the route is a mid-walk want, not a settings one.
+        // Reverse, download, sun and settings live on the menu's Map page.
+        val menuBtn = iconButton(Glyph.ROUTE) { toggleMenu() }
         val recentreBtn = iconButton(Glyph.LOCATE) { map.recentre() }
         recordIcon = IconDrawable(Glyph.RECORD, d)
         val recordBtn = Ui.iconButton(this, recordIcon) { toggleRecording() }
-        val downloadBtn = iconButton(Glyph.DOWNLOAD) { downloadArea() }
-        val sunBtn = iconButton(Glyph.SUN) {
-            val here = lastFix
-            if (here == null) {
-                say("No GPS fix yet — the sun's track needs to know where you are.")
-            } else {
-                startActivity(
-                    Intent(this, SunActivity::class.java)
-                        .putExtra("e", here.e).putExtra("n", here.n),
-                )
-            }
-        }
-        val settingsBtn = iconButton(Glyph.SETTINGS) {
-            startActivity(Intent(this, SettingsActivity::class.java))
-        }
+        val opacityBtn = iconButton(Glyph.OPACITY) { cycleRouteWeight() }
 
         buttons = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            listOf(importBtn, reverseBtn, recentreBtn, recordBtn, downloadBtn, sunBtn, settingsBtn).forEach {
+            listOf(menuBtn, recentreBtn, recordBtn, opacityBtn).forEach {
                 addView(it, LinearLayout.LayoutParams(dp(52), dp(52)).apply { topMargin = dp(9) })
             }
         }
@@ -683,54 +663,42 @@ class MainActivity : Activity() {
             ),
         )
 
-        // --- the walks panel: everything that finds or makes a route ---
-        // It replaces an eleven-item dialog list. Each action first hands
-        // the sheet back to the ask panel, because every one of them leads
-        // somewhere else — a dialog, the editor, the picker.
-        fun walksAction(label: String, filled: Boolean = false, run: () -> Unit) =
+        // --- the menu: two pages under one handle ---
+        // Walks finds or makes a route; Map is what the map shows, plus the
+        // rarer controls that used to crowd the rail. The tabs on the peek
+        // and a swipe across the body do the same thing. Each action that
+        // leads somewhere else — a dialog, the editor, the picker — first
+        // hands the sheet back to the ask panel; the toggles stay put.
+        fun menuAction(label: String, filled: Boolean = false, run: () -> Unit) =
             Ui.button(this, label, filled) {
                 showPanel(Panel.ASK)
                 run()
             }
-        walksPeek = LinearLayout(this).apply {
-            gravity = Gravity.CENTER_VERTICAL
-            addView(
-                Ui.label(this@MainActivity, "Walks", Ui.TITLE).apply {
-                    setPadding(dp(16), dp(2), 0, dp(8))
-                },
-                LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f),
-            )
-            addView(TextView(this@MainActivity).apply {
-                text = "✕"
-                textSize = 17f
-                setTextColor(Palette.inkMut)
-                setPadding(dp(10), dp(6), dp(14), dp(10))
-                background = Ui.ripple(null)
-                setOnClickListener { showPanel(Panel.ASK) }
-            })
-        }
-        walksContent = LinearLayout(this).apply {
+        fun page(build: LinearLayout.() -> Unit) = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(12), 0, dp(12), dp(10))
-            fun grid(vararg rows: List<View>) = addView(
-                actionGrid(*rows).apply { setPadding(0, 0, 0, 0) },
-                LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT,
-                ),
-            )
+            build()
+        }
+        fun LinearLayout.grid(vararg rows: List<View>) = addView(
+            actionGrid(*rows).apply { setPadding(0, 0, 0, 0) },
+            LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT,
+            ),
+        )
+        val walksPage = page {
             addView(Ui.heading(this@MainActivity, "Find"))
             grid(
                 listOf(
-                    walksAction("Plan a walk\u2026", filled = true) { walkSpecifier() },
-                    walksAction("All walks") { openWalks() },
-                    walksAction("Picker \u2039 \u203a") { reopenPicker() },
+                    menuAction("Plan a walk\u2026", filled = true) { walkSpecifier() },
+                    menuAction("All walks") { openWalks() },
+                    menuAction("Picker \u2039 \u203a") { reopenPicker() },
                 ),
             )
             addView(Ui.heading(this@MainActivity, "Make"))
             grid(
                 listOf(
-                    walksAction("Draw a walk") { startEditing() },
-                    walksAction("Edit loaded route") {
+                    menuAction("Draw a walk") { startEditing() },
+                    menuAction("Edit loaded route") {
                         val loaded = RouteStore.load(this@MainActivity)?.points
                         if (loaded == null || loaded.size < 2) {
                             say("No route loaded to edit \u2014 draw one, or import one first.")
@@ -743,21 +711,76 @@ class MainActivity : Activity() {
             addView(Ui.heading(this@MainActivity, "Files"))
             grid(
                 listOf(
-                    walksAction("Import GPX") { pickGpx() },
-                    walksAction("Saved walks") { savedWalksDialog() },
-                    walksAction("Library\u2026") { libraryDialog() },
+                    menuAction("Import GPX") { pickGpx() },
+                    menuAction("Saved walks") { savedWalksDialog() },
+                    menuAction("Library\u2026") { libraryDialog() },
                 ),
             )
-            addView(Ui.heading(this@MainActivity, "Go"))
+        }
+        layerGrid = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        hideBtn = Ui.button(this, "Hide route") { toggleRouteHidden() }
+        weightBtn = Ui.button(this, "Line") { cycleRouteWeight() }
+        val mapPage = page {
+            addView(Ui.heading(this@MainActivity, "Layers"))
+            addView(layerGrid, LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT,
+            ))
+            addView(Ui.heading(this@MainActivity, "Route"))
             grid(
+                listOf(hideBtn, weightBtn),
                 listOf(
-                    walksAction("Drive to the start") {
+                    Ui.button(this@MainActivity, "Reverse") { reverseRoute() },
+                    menuAction("Drive to the start") {
                         val start = RouteStore.load(this@MainActivity)?.points?.firstOrNull()
                         if (start == null) say("No route loaded \u2014 import or find one first.")
                         else openParking(start)
                     },
                 ),
             )
+            addView(Ui.heading(this@MainActivity, "More"))
+            grid(
+                listOf(
+                    menuAction("Download this area") { downloadArea() },
+                    menuAction("Forecast") { openWeather() },
+                ),
+                listOf(
+                    menuAction("Sun") { openSun() },
+                    menuAction("Settings") { openSettings() },
+                ),
+            )
+        }
+        menuContent = Pager(this).apply {
+            add(walksPage)
+            add(mapPage)
+        }
+        fun tab(label: String, i: Int) = TextView(this).apply {
+            text = label
+            textSize = Ui.TITLE
+            setTypeface(typeface, android.graphics.Typeface.BOLD)
+            setPadding(dp(14), dp(4), dp(14), dp(10))
+            background = Ui.ripple(null)
+            setOnClickListener { menuContent.show(i) }
+        }
+        menuTabs = listOf(tab("Walks", 0), tab("Map", 1))
+        menuContent.onPage = { i ->
+            menuTabs.forEachIndexed { k, t ->
+                t.setTextColor(if (k == i) Palette.ink else Palette.inkFaint)
+            }
+        }
+        menuContent.onPage?.invoke(0)
+        menuPeek = LinearLayout(this).apply {
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(4), 0, 0, 0)
+            menuTabs.forEach { addView(it) }
+            addView(View(this@MainActivity), LinearLayout.LayoutParams(0, 1, 1f))
+            addView(TextView(this@MainActivity).apply {
+                text = "\u2715"
+                textSize = 17f
+                setTextColor(Palette.inkMut)
+                setPadding(dp(10), dp(6), dp(14), dp(10))
+                background = Ui.ripple(null)
+                setOnClickListener { showPanel(Panel.ASK) }
+            })
         }
 
         // --- the sheet's ask panel: summary + mic peeking, talk on open ---
@@ -821,25 +844,44 @@ class MainActivity : Activity() {
             if (has) sheet.setState(SheetLayout.State.OPEN)
         }
 
-        // --- the layer toggles, on the map where they get used ---
-        //
-        // Settings decides which of these exist; this row decides which are
-        // on. A switch buried two screens away is not something anyone
-        // operates halfway up a hill, and the full list is long enough that
-        // putting all of it here would be its own clutter.
-        // One big number: he asked for "a nice big number somewhere" over
-        // the wash of colour it used to be — two characters say more than a
-        // film over the whole map did, and bury nothing saying it.
-        tempChip = TextView(this).apply {
+        // --- the weather readout: a symbol and a figure, top left ---
+        // "Up top I'd like just weather, just a temp and a symbol." The pill
+        // is the forecast page's own icon and the temperature at the middle
+        // of the map, for the moment on the scrubber; tapping it opens the
+        // full page. The switch beside it is the overlay — radar, wind and
+        // cloud painted onto the map — which is a different thing from
+        // knowing what the sky is doing, and now reads as one. The layer
+        // chips that used to run across here live on the menu's Map page.
+        wxIcon = ImageView(this).apply { scaleType = ImageView.ScaleType.FIT_CENTER }
+        wxTemp = TextView(this).apply {
             textSize = Ui.BIG
             setTypeface(typeface, android.graphics.Typeface.BOLD)
             setTextColor(Palette.ink)
+            includeFontPadding = false
+        }
+        wxPill = LinearLayout(this).apply {
+            gravity = Gravity.CENTER_VERTICAL
             background = Ui.ripple(Ui.pill(this@MainActivity, Palette.scrim))
-            setPadding(dp(14), dp(4), dp(14), dp(4))
+            setPadding(dp(10), dp(4), dp(14), dp(4))
             visibility = View.GONE
-            // The number on the map is the obvious thing to press when you
-            // want more than a number.
+            addView(wxIcon, LinearLayout.LayoutParams(dp(34), dp(34)).apply { rightMargin = dp(6) })
+            addView(wxTemp)
             setOnClickListener { openWeather() }
+        }
+        wxToggle = TextView(this).apply {
+            textSize = Ui.CAP
+            gravity = Gravity.CENTER
+            setPadding(dp(12), dp(8), dp(12), dp(8))
+            visibility = View.GONE
+            setOnClickListener {
+                weatherShown = !weatherShown
+                refreshControls()
+                bindOverlays()
+                sayBriefly(
+                    if (weatherShown) "Weather painted onto the map."
+                    else "Weather off the map \u2014 the readout stays.",
+                )
+            }
         }
         timerChip = TextView(this).apply {
             textSize = Ui.BIG
@@ -849,52 +891,14 @@ class MainActivity : Activity() {
             setPadding(dp(14), dp(4), dp(14), dp(4))
             visibility = View.GONE
         }
-        chipRow = LinearLayout(this).apply {
-            gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(2), 0, dp(2), 0)
-        }
-        chipScroll = HorizontalScrollView(this).apply {
-            isHorizontalScrollBarEnabled = false
-            // A row that overflows must look like one. Without this it was
-            // indistinguishable from a full row, which is half the reason
-            // nobody found what had scrolled off the end of it.
-            isHorizontalFadingEdgeEnabled = true
-            setFadingEdgeLength(dp(20))
-            visibility = View.GONE
-            addView(chipRow)
-        }
-        // Outside the scroll, and last in a weighted row, so it holds the
-        // right-hand end whatever the layer chips do. It used to be the
-        // final child *inside* the scroll — which on his phone, with the
-        // weather and paths layers on, put it about 150dp past the edge of
-        // the screen, in a row with no scrollbar and no fading edge to
-        // suggest there was anything out there. "No hide route button": it
-        // existed, and could not be reached.
-        mapChip = TextView(this).apply {
-            text = "Map ⋯"
-            textSize = Ui.CAP
-            setTextColor(Palette.ink)
-            // Deliberately not Ui.chip's off-state: in a row whose whole
-            // grammar is green-on / grey-off, a permanently grey chip reads
-            // as a switched-off layer rather than a way in to a menu.
-            background = Ui.ripple(Ui.pill(this@MainActivity, Palette.raised))
-            setPadding(dp(14), dp(8), dp(14), dp(8))
-            setOnClickListener { mapOptions(this) }
-        }
-        val chipLine = LinearLayout(this).apply {
-            gravity = Gravity.CENTER_VERTICAL
-            addView(chipScroll, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
-            addView(
-                mapChip,
-                LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT,
-                ).apply { leftMargin = dp(6) },
-            )
-        }
         val readouts = LinearLayout(this).apply {
-            addView(tempChip, LinearLayout.LayoutParams(
+            gravity = Gravity.CENTER_VERTICAL
+            addView(wxPill, LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT,
             ))
+            addView(wxToggle, LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT,
+            ).apply { leftMargin = dp(8) })
             addView(timerChip, LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT,
             ).apply { leftMargin = dp(8) })
@@ -921,9 +925,6 @@ class MainActivity : Activity() {
             addView(markChip, LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT,
             ).apply { bottomMargin = dp(6) })
-            addView(chipLine, LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT,
-            ))
         }
 
         val root = FrameLayout(this).apply {
@@ -933,11 +934,11 @@ class MainActivity : Activity() {
                 Gravity.END or Gravity.CENTER_VERTICAL,
             ).apply { rightMargin = dp(10) })
             // One column: the status line, then the readouts, then the
-            // chips. They used to be two separately-positioned children with
-            // a guessed margin between them, and a note like "Mark 3 set"
-            // rendered squarely behind the chip row. Stacked, nothing can
-            // cover anything, and the chips just shift down while a note is
-            // showing.
+            // mark. They used to be separately-positioned children with a
+            // guessed margin between them, and a note like "Mark 3 set"
+            // rendered squarely behind the row below. Stacked, nothing can
+            // cover anything, and the readouts just shift down while a
+            // note is showing.
             addView(topBar, FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT,
                 Gravity.TOP,
@@ -1070,15 +1071,11 @@ class MainActivity : Activity() {
             // screen the only way back was adopting a different route
             // altogether. Now the state offers its own undo, wherever the
             // button that set it happens to be.
-            sayAction("Route hidden.", "Show") {
-                routeHidden = false
-                map.setRoute(RouteStore.load(this))
-                sayBriefly("Route back on the map.")
-            }
+            sayAction("Route hidden.", "Show") { toggleRouteHidden() }
         }
         // A run that outlived a trip to another screen gets its clock back.
         if (askBusy) { replyText.removeCallbacks(askTick); askTick.run() }
-        buildChips()
+        refreshControls()
         bindOverlays()
         map.onRoutePointPicked = { en, alongM -> pointPicked(en, alongM) }
         refreshMarks()
@@ -1221,7 +1218,7 @@ class MainActivity : Activity() {
             Panel.WEATHER -> wxPeek to wxContent
             Panel.PICKER -> pickerPeek to pickerContent
             Panel.EDIT -> editPeek to editContent
-            Panel.WALKS -> walksPeek to walksContent
+            Panel.MENU -> menuPeek to menuContent
         }
         sheet.peekRow.addView(
             peek,
@@ -1375,9 +1372,11 @@ class MainActivity : Activity() {
         // temperature figure come on and off together, his call: "it's all
         // kinda relevant isn't it". Settings still decides which parts the
         // chip includes.
+        // The readout at the top is not part of this: it stays whatever
+        // the switch says, so the chip only exists when something paints.
         Layer(
             "Weather",
-            radarEnabled || windEnabled || tempEnabled || cloudEnabled,
+            radarEnabled || windEnabled || cloudEnabled,
             weatherShown,
         ) { weatherShown = it },
         // A mode, not an overlay, but the chip row is exactly the right
@@ -1395,30 +1394,62 @@ class MainActivity : Activity() {
     )
 
     /**
-     * The toggle row. Only layers allowed in Settings appear, so the row is
-     * as short as he has chosen to make it — and an empty row takes no space
-     * at all rather than sitting there as an empty grey strip.
+     * Everything whose look states a preference, redrawn from the
+     * preferences: the layer chips on the Map page, the overlay switch at
+     * the top, and the route buttons whose label names the state they are
+     * in. One place, so nothing can show one thing while the map does
+     * another. Only layers allowed in Settings appear, so the grid is as
+     * short as he has chosen to make it.
      */
-    private fun buildChips() {
-        chipRow.removeAllViews()
+    private fun refreshControls() {
+        layerGrid.removeAllViews()
         val shown = layers().filter { it.allowed }
-        // The scroll can be empty — the Map button lives beside it now, not
-        // in it, so the display toggles are reachable with no layers on.
-        chipScroll.visibility = if (shown.isEmpty()) View.GONE else View.VISIBLE
-        for (layer in shown) {
-            // On and off have to be tellable apart at a glance in daylight,
-            // which Ui.chip's green-on / scrim-off already is.
-            chipRow.addView(
-                Ui.chip(this, layer.label, layer.on) {
-                    layer.set(!layer.on)
-                    buildChips()
-                    bindOverlays()
+        for (row in shown.chunked(3)) {
+            layerGrid.addView(
+                LinearLayout(this).apply {
+                    for ((i, layer) in row.withIndex()) {
+                        // On and off have to be tellable apart at a glance
+                        // in daylight, which Ui.chip's green / scrim is.
+                        addView(
+                            Ui.chip(this@MainActivity, layer.label, layer.on) {
+                                layer.set(!layer.on)
+                                refreshControls()
+                                bindOverlays()
+                            }.apply { gravity = Gravity.CENTER },
+                            LinearLayout.LayoutParams(
+                                0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f,
+                            ).apply { if (i > 0) leftMargin = dp(8) },
+                        )
+                    }
                 },
                 LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.WRAP_CONTENT,
-                    LinearLayout.LayoutParams.WRAP_CONTENT,
-                ).apply { rightMargin = dp(6) },
+                    LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT,
+                ).apply { topMargin = dp(8) },
             )
+        }
+        if (shown.isEmpty()) {
+            layerGrid.addView(
+                Ui.label(this, "Nothing switched on in Settings.", Ui.CAP, Palette.inkFaint)
+                    .apply { setPadding(dp(4), dp(4), dp(4), dp(4)) },
+            )
+        }
+        // The overlay switch only exists when something would be painted.
+        val paints = radarEnabled || windEnabled || cloudEnabled
+        wxToggle.visibility = if (paints) View.VISIBLE else View.GONE
+        wxToggle.text = if (weatherShown) "Overlay on" else "Overlay"
+        wxToggle.setTextColor(if (weatherShown) Palette.ink else Palette.inkMut)
+        wxToggle.background = Ui.ripple(
+            Ui.pill(
+                this,
+                if (weatherShown) Palette.green else Palette.scrim,
+                if (weatherShown) Color.TRANSPARENT else Palette.stroke,
+            ),
+        )
+        hideBtn.text = if (routeHidden) "Show route" else "Hide route"
+        weightBtn.text = "Line: " + when (BngMapView.RouteWeight.of(routeWeight)) {
+            BngMapView.RouteWeight.SOLID -> "solid"
+            BngMapView.RouteWeight.SEE_THROUGH -> "see-through"
+            BngMapView.RouteWeight.FAINT -> "faint"
         }
     }
 
@@ -1442,7 +1473,10 @@ class MainActivity : Activity() {
     private val wantRadar: Boolean get() = radarEnabled && weatherShown
     private val wantWind: Boolean get() = windEnabled && weatherShown
     private val wantCloud: Boolean get() = cloudEnabled && weatherShown
-    private val wantTemp: Boolean get() = tempEnabled && weatherShown
+    // The readout at the top is not an overlay: it is on whenever Settings
+    // allows it, whatever the switch beside it says. Knowing the sky and
+    // painting it onto the map are two different wants.
+    private val wantTemp: Boolean get() = tempEnabled
 
     /**
      * Wire whichever overlays are switched on to the map settling. Switched
@@ -1464,7 +1498,7 @@ class MainActivity : Activity() {
         if (!wantWind) { map.setWind(emptyList()); map.setWind(null, windStyle == 1) }
         if (!wantGrid && !wantRadar) map.setField(null, 255)
         if (!wantCloud) map.setSky(null)
-        if (!wantTemp) tempChip.visibility = View.GONE
+        if (!wantTemp) wxPill.visibility = View.GONE
         if (!wantWeather) {
             stopWxPlay()
             wxFrames = emptyList()
@@ -1822,12 +1856,25 @@ class MainActivity : Activity() {
     /** Temperature as a figure. A wash of colour across the whole map said
      *  less than two characters do, and buried the contours saying it. */
     private fun showTemperature(field: Weather.Field?, hour: Int) {
-        if (!wantTemp || field == null || hour < 0) { tempChip.visibility = View.GONE; return }
+        if (!wantTemp || field == null || hour < 0) { wxPill.visibility = View.GONE; return }
         val centre = (Weather.GRID / 2) * Weather.GRID + Weather.GRID / 2
-        val t = if (centre < field.lat.size) field.temp[hour][centre] else Double.NaN
-        if (t.isNaN()) { tempChip.visibility = View.GONE; return }
-        tempChip.text = "${t.roundToInt()}°C"
-        tempChip.visibility = View.VISIBLE
+        fun at(grid: Array<DoubleArray>) = grid.getOrNull(hour)?.getOrNull(centre) ?: Double.NaN
+        val t = at(field.temp)
+        if (t.isNaN()) { wxPill.visibility = View.GONE; return }
+        wxTemp.text = "${t.roundToInt()}\u00b0"
+        // The symbol is the forecast page's own, derived from the same grid
+        // — rain, cloud, fog — so the pill and the page one tap away agree.
+        val rain = at(field.rain)
+        val code = Weather.symbolCode(t, rain, at(field.cloud), at(field.visibility))
+        if (code >= 0) {
+            wxIcon.setImageDrawable(
+                WeatherIcon(code, resources.displayMetrics.density, if (rain.isNaN()) 0.0 else rain),
+            )
+            wxIcon.visibility = View.VISIBLE
+        } else {
+            wxIcon.visibility = View.GONE
+        }
+        wxPill.visibility = View.VISIBLE
     }
 
     /**
@@ -1963,73 +2010,75 @@ class MainActivity : Activity() {
 
     // --- routes in: import, walks near me, the library -----------------------
 
-    /**
-     * Show/hide and route-line weight, off the walks panel and into a small
-     * popover on the chip row — they are display toggles, not walk actions,
-     * and an eleven-item dialog was where both went to be lost.
-     */
-    private fun mapOptions(anchor: View) {
-        val ctx = this
-        lateinit var pop: android.widget.PopupWindow
-        fun row(label: String, onTap: () -> Unit) = TextView(ctx).apply {
-            text = label
-            textSize = Ui.BODY
-            setTextColor(Palette.ink)
-            background = Ui.ripple(null)
-            setPadding(dp(18), dp(12), dp(18), dp(12))
-            setOnClickListener {
-                pop.dismiss()
-                onTap()
+    /** The menu button opens the menu, and closes it: "tapping the GPX
+     *  button raises it which I like but it should also dismiss it". */
+    private fun toggleMenu() {
+        if (panel == Panel.MENU && sheet.state == SheetLayout.State.OPEN) {
+            showPanel(Panel.ASK)
+        } else {
+            showPanel(Panel.MENU, open = true)
+        }
+    }
+
+    private fun toggleRouteHidden() {
+        routeHidden = !routeHidden
+        map.setRoute(if (routeHidden) null else RouteStore.load(this))
+        refreshControls()
+        sayBriefly(
+            if (routeHidden) "Route hidden \u2014 still stored, still on the watch."
+            else "Route back on the map.",
+        )
+    }
+
+    /** Solid → see-through → faint → solid. On the rail and on the Map
+     *  page, and both say what they did, so the button needs no state. */
+    private fun cycleRouteWeight() {
+        val next = BngMapView.RouteWeight.of(routeWeight + 1)
+        routeWeight = next.ordinal
+        map.setRouteWeight(next)
+        refreshControls()
+        sayBriefly(
+            when (next) {
+                BngMapView.RouteWeight.SOLID -> "Route line solid."
+                BngMapView.RouteWeight.SEE_THROUGH ->
+                    "Route line see-through \u2014 the map reads through it."
+                BngMapView.RouteWeight.FAINT ->
+                    "Route line faint \u2014 rights of way underneath should read now."
+            },
+        )
+    }
+
+    private fun reverseRoute() {
+        routeReversed = !routeReversed
+        map.routeReversed = routeReversed
+        say(
+            if (routeReversed) "Arrows now point back the way \u2014 sending to the watch"
+            else "Arrows point the route\u2019s own way \u2014 sending to the watch",
+        )
+        // The watch has no ⇄ of its own any more, so this has to travel.
+        scope.launch {
+            try {
+                Sync.sendStyle(this@MainActivity)
+            } catch (e: Exception) {
+                say("Flipped here. The watch will follow when you next open it.")
             }
         }
-        val column = LinearLayout(ctx).apply {
-            orientation = LinearLayout.VERTICAL
-            background = Ui.card(ctx, Palette.raised)
-            addView(row(if (routeHidden) "Show the route" else "Hide the route") {
-                routeHidden = !routeHidden
-                map.setRoute(if (routeHidden) null else RouteStore.load(ctx))
-                sayBriefly(
-                    if (routeHidden) "Route hidden \u2014 still stored, still on the watch."
-                    else "Route back on the map.",
-                )
-            })
-            // Named for what tapping it gives you, not the state it is in.
-            val weightLabel = "Route line: " + when (BngMapView.RouteWeight.of(routeWeight)) {
-                BngMapView.RouteWeight.SOLID -> "solid \u2192 see-through"
-                BngMapView.RouteWeight.SEE_THROUGH -> "see-through \u2192 faint"
-                BngMapView.RouteWeight.FAINT -> "faint \u2192 solid"
-            }
-            addView(row(weightLabel) {
-                val next = BngMapView.RouteWeight.of(routeWeight + 1)
-                routeWeight = next.ordinal
-                map.setRouteWeight(next)
-                sayBriefly(
-                    when (next) {
-                        BngMapView.RouteWeight.SOLID -> "Route line solid again."
-                        BngMapView.RouteWeight.SEE_THROUGH ->
-                            "Route line see-through \u2014 the map reads through it."
-                        BngMapView.RouteWeight.FAINT ->
-                            "Route line faint \u2014 rights of way underneath should read now."
-                    },
-                )
-            })
-            addView(row("Forecast \u203a") { openWeather() })
+    }
+
+    private fun openSun() {
+        val here = lastFix
+        if (here == null) {
+            say("No GPS fix yet \u2014 the sun\u2019s track needs to know where you are.")
+        } else {
+            startActivity(
+                Intent(this, SunActivity::class.java)
+                    .putExtra("e", here.e).putExtra("n", here.n),
+            )
         }
-        pop = android.widget.PopupWindow(
-            column,
-            LinearLayout.LayoutParams.WRAP_CONTENT,
-            LinearLayout.LayoutParams.WRAP_CONTENT,
-            true,
-        ).apply {
-            elevation = dp(8).toFloat()
-            // Both of these, or the popup is touch-modal: focusable with no
-            // background drawable swallows every tap outside itself and
-            // refuses to close, leaving Back as the only way out of a menu
-            // three lines long.
-            setBackgroundDrawable(android.graphics.drawable.ColorDrawable(Color.TRANSPARENT))
-            isOutsideTouchable = true
-        }
-        pop.showAsDropDown(anchor, 0, dp(4))
+    }
+
+    private fun openSettings() {
+        startActivity(Intent(this, SettingsActivity::class.java))
     }
 
     // --- saved walks ----------------------------------------------------------
@@ -2168,6 +2217,58 @@ class MainActivity : Activity() {
             addView(units)
         }
 
+        // How many circuits to work out from the path network, beside the
+        // published walks. A stepper, not a box: the answer is a small
+        // whole number and the phone is in the wind.
+        var plannedCount = spec.planned
+        val plannedFigure = TextView(this).apply {
+            textSize = 18f
+            gravity = Gravity.CENTER
+            setTextColor(Color.argb(255, 150, 210, 170))
+            minWidth = dp(44)
+        }
+        val plannedNote = TextView(this).apply {
+            textSize = 12f
+            setTextColor(Color.argb(170, 150, 160, 152))
+            setPadding(0, dp(6), 0, 0)
+        }
+        fun showPlanned() {
+            plannedFigure.text = plannedCount.toString()
+            plannedNote.text = when (plannedCount) {
+                0 -> "Only walks somebody has published. Nothing worked out from the paths."
+                1 -> "One circuit worked out from the path network, alongside what is published."
+                else -> "$plannedCount different circuits worked out from the path network, " +
+                    "alongside what is published. More takes longer."
+            }
+        }
+        fun stepButton(label: String, delta: Int) = TextView(this).apply {
+            text = label
+            textSize = 20f
+            gravity = Gravity.CENTER
+            setTextColor(Color.WHITE)
+            background = Ui.ripple(Ui.pill(this@MainActivity, Palette.raised))
+            setPadding(dp(18), dp(4), dp(18), dp(6))
+            setOnClickListener {
+                plannedCount = (plannedCount + delta).coerceIn(0, WalkSpec.MAX_PLANNED)
+                showPlanned()
+            }
+        }
+        showPlanned()
+        val plannedRow = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            addView(
+                LinearLayout(this@MainActivity).apply {
+                    gravity = Gravity.CENTER_VERTICAL
+                    addView(stepButton("\u2212", -1))
+                    addView(plannedFigure, LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT,
+                    ).apply { leftMargin = dp(10); rightMargin = dp(10) })
+                    addView(stepButton("+", 1))
+                },
+            )
+            addView(plannedNote)
+        }
+
         val form = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(22), dp(4), dp(22), dp(4))
@@ -2178,6 +2279,8 @@ class MainActivity : Activity() {
             addView(heading("HOW LONG"))
             addView(byTime)
             addView(row)
+            addView(heading("ROUTES OF OUR OWN"))
+            addView(plannedRow)
             addView(heading("WHICH DAY"))
             addView(daySpinner)
             addView(
@@ -2213,6 +2316,7 @@ class MainActivity : Activity() {
                         1 -> Origin.TAP
                         else -> Origin.SCREEN
                     },
+                    planned = plannedCount,
                 )
                 // Saved before the search, not after: the point of the form is
                 // that tomorrow it opens on today's answers, and a search he
@@ -2495,6 +2599,22 @@ class MainActivity : Activity() {
                 return@launch
             }
 
+            // None of our own asked for: the published walks are the answer.
+            if (spec.planned == 0) {
+                if (real.isEmpty()) {
+                    say(
+                        "No established walk of that kind round there. The form asked for " +
+                            "none of our own \u2014 set a number of routes to work some out.",
+                    )
+                } else {
+                    say(
+                        "${real.size} published walk${if (real.size == 1) "" else "s"} round there " +
+                            "\u2014 \u2039 \u203a to flick through. None of our own, as asked.",
+                    )
+                }
+                return@launch
+            }
+
             // The invented one. Its shape follows the ask: nobody wants a
             // circuit when they asked to go out to something and come back.
             val target = (minM + maxM) / 2
@@ -2567,7 +2687,7 @@ class MainActivity : Activity() {
                         // it closes instead of discarding all but the best.
                         Router.loops(
                             graph, here, target, deadline, startSlackM = slackM,
-                            wanted = 3,
+                            wanted = spec.planned,
                         ) { note -> searchNote = note }
                     }
                 }

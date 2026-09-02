@@ -255,6 +255,48 @@ object Weather {
      * being drawn is a model, so a soft wash is a more honest picture than
      * crisp cells that would imply a precision nobody has.
      */
+    /**
+     * A WMO-style weather code for one hour of the grid, so the readout on
+     * the map can wear the same symbol the forecast page does.
+     *
+     * Derived, and honestly so: the grid carries rain, cloud, visibility
+     * and temperature, not Open-Meteo's own `weather_code`, and asking for
+     * that too would be a second array for every point of a 5×5 grid to
+     * save a `when`. The bands are the ones the forecast page already
+     * names — under a kilometre is fog, a few tenths of a millimetre is
+     * drizzle, four is heavy rain — and snow is rain at or below freezing.
+     * The number is a picture; the numbers under it are on the page.
+     * Returns -1 for an hour with nothing in it.
+     */
+    fun symbolCode(tempC: Double, rainMm: Double, cloudPct: Double, visibilityM: Double): Int {
+        if (tempC.isNaN() && rainMm.isNaN() && cloudPct.isNaN()) return -1
+        val rain = if (rainMm.isNaN()) 0.0 else rainMm
+        val cloud = if (cloudPct.isNaN()) 50.0 else cloudPct
+        val freezing = !tempC.isNaN() && tempC <= 0.5
+        if (rain >= 0.1) {
+            if (freezing) return when {
+                rain >= 2.5 -> 75
+                rain >= 1.0 -> 73
+                else -> 71
+            }
+            // Showers under a mostly open sky get the sun-and-cloud form.
+            val sunny = cloud < 60.0
+            return when {
+                rain >= 4.0 -> if (sunny) 82 else 65
+                rain >= 1.0 -> if (sunny) 81 else 63
+                rain >= 0.4 -> if (sunny) 80 else 61
+                else -> 51
+            }
+        }
+        if (!visibilityM.isNaN() && visibilityM < 1_000.0) return 45
+        return when {
+            cloud < 15.0 -> 0
+            cloud < 45.0 -> 1
+            cloud < 80.0 -> 2
+            else -> 3
+        }
+    }
+
     fun render(values: DoubleArray, ramp: (Double) -> Int): Bitmap {
         val pixels = IntArray(RENDER * RENDER)
         for (py in 0 until RENDER) {

@@ -10,7 +10,7 @@ import android.graphics.RectF
 import android.graphics.drawable.Drawable
 
 /** The buttons this app has. */
-enum class Glyph { LOCATE, RECORD, REVERSE, ROUTE, DOWNLOAD, SUN, SETTINGS, MIC, SEND }
+enum class Glyph { LOCATE, RECORD, REVERSE, ROUTE, DOWNLOAD, SUN, SETTINGS, MIC, SEND, OPACITY }
 
 /**
  * The map controls, drawn rather than typed.
@@ -177,6 +177,16 @@ class IconDrawable(
                 box.set(cx - g * 0.68f, cy - g * 0.5f, cx + g * 0.68f, cy + g * 0.62f)
                 canvas.drawArc(box, 10f, 160f, false, line)
                 canvas.drawLine(cx, cy + g * 0.62f, cx, cy + g * 1.05f, line)
+            }
+
+            Glyph.OPACITY -> {
+                // A disc half solid, half outline: how strongly the route is
+                // drawn over the map. On the rail because seeing what is
+                // under the line is something he wants mid-walk, not from a
+                // menu.
+                canvas.drawCircle(cx, cy, g * 0.92f, line)
+                box.set(cx - g * 0.92f, cy - g * 0.92f, cx + g * 0.92f, cy + g * 0.92f)
+                canvas.drawArc(box, 90f, 180f, true, fill)
             }
 
             Glyph.SEND -> {

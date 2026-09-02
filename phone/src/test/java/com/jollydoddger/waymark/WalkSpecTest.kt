@@ -197,6 +197,19 @@ class WalkSpecTest {
     }
 
     @Test
+    fun `how many to plan is remembered, bounded, and defaults for old forms`() {
+        val spec = WalkSpec(planned = 5)
+        assertEquals(5, WalkSpec.fromJson(spec.toJson()).planned)
+        // Zero is a real answer — the planner off — and must survive.
+        assertEquals(0, WalkSpec.fromJson(WalkSpec(planned = 0).toJson()).planned)
+        // A form saved before the count existed asked for the default.
+        assertEquals(WalkSpec.DEFAULT_PLANNED, WalkSpec.fromJson("""{"shape":"ANY"}""").planned)
+        // And a hand-edited file cannot ask for fifty.
+        assertEquals(WalkSpec.MAX_PLANNED, WalkSpec.fromJson("""{"planned":50}""").planned)
+        assertEquals(0, WalkSpec.fromJson("""{"planned":-3}""").planned)
+    }
+
+    @Test
     fun `where it starts from is remembered too`() {
         // The field the first version of the form forgot. A spec written
         // before it existed must still load, as "where I am".

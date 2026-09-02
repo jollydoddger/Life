@@ -2,8 +2,8 @@
 
 One job: open it and you are a little arrow on a proper Ordnance Survey map —
 the Explorer 1:25k / Landranger 1:50k Leisure styles, the paper ones. Import a
-GPX and there's a line to follow, with arrows along it (a ⇄ button flips them
-to walk the route the other way). The same app runs on the phone and on the
+GPX and there's a line to follow, with arrows along it (Reverse, on the menu's
+Map page, flips them to walk the route the other way). The same app runs on the phone and on the
 Galaxy Watch 5 Pro, and a GPX imported on the phone is simply there when the
 watch opens — along with the map tiles for the route, fetched ahead so a dead
 zone on a hillside doesn't matter.
@@ -67,16 +67,21 @@ Pinch works on the phone too. The watch's physical bottom button is left alone
 on purpose — on Wear OS it is the same navigation path as swipe-to-dismiss, so
 an app that steals it for zoom is an app you cannot reliably get out of.
 
-**Phone** — the buttons down the right-hand side:
+**Phone** — four buttons down the right-hand side, and a menu behind the
+first of them:
 
 | | |
 |---|---|
-| GPX | plan a walk, import a route file, find walks near you, or set up your GPX library |
-| ⇄ | flip the direction of the arrows along the route |
+| GPX | the menu — tap again to put it away. **Walks**: plan a walk, import a route file, find walks near you, your library. **Map**: the layer toggles, hide/show and reverse the route, download this area, the sun, the forecast, settings. Swipe between the two pages or tap their names |
 | ◉ | centre on you, and zoom right in |
 | ● | start recording a trail (■ stops it) |
-| ☀ | where the sun is, and where it sets, over the camera |
-| ⚙ | API key, colours, and the watch's screen timeout |
+| ◐ | how strongly the route is drawn — solid, see-through, faint — so what is under the line can be read |
+
+At the top left, a weather readout: the forecast page's own symbol and the
+temperature at the middle of the map, for the moment on the scrubber. Tap it
+for the full forecast. The **Overlay** switch beside it is the sky painted onto
+the map — radar, wind, cloud — which is a separate thing from knowing what the
+sky is doing, and the readout stays whichever way the switch is set.
 
 **Watch** — one button. **◉ at the middle of the left edge** centres on you and
 zooms in. There is room on a 45mm circle for a map and almost nothing else, so
@@ -349,8 +354,9 @@ the condition that turns walking by sight into a compass leg.
 
 **One picture.** The layers draw together — cloud under rain, wind lines over
 both, the temperature as a figure — and the key under the timeline names
-every part currently painted. On the map they share a single **Weather**
-chip; the path overlays keep a chip each.
+every part currently painted. They share a single **Weather** toggle — the
+Overlay switch at the top, or the chip on the menu's Map page, the same
+switch twice; the path overlays keep a chip each on that page.
 
 **The timeline.** A scrubber along the bottom, five hours back and five
 forward, with a ▶ that runs the whole span as a loop — a frame and a half a
@@ -374,12 +380,11 @@ about the sky, not an observation. Wind, temperature and cloud are always the
 model.
 
 **Switching them on and off.** Settings decides which overlays exist; each
-one allowed there gets a toggle across the top of the map, and that toggle is
-what turns the layer on and off while you are out. A switch two screens away
-is not something anyone operates halfway up a hill. The weather layers share
-one Weather chip — it is all one sky — and turning any part on in Settings
-lights the chip too, so it appears immediately rather than needing a second
-switch you did not know about.
+one allowed there gets a chip on the menu's Map page, and that chip is what
+turns the layer on and off while you are out. A switch two screens away is
+not something anyone operates halfway up a hill. The weather layers share
+one Weather chip — it is all one sky — and it is the same switch as the
+Overlay button beside the readout at the top of the map.
 
 Weather data by [RainViewer](https://rainviewer.com); forecast by
 [Open-Meteo](https://open-meteo.com).
@@ -395,9 +400,11 @@ way, paths — then the trail you have actually walked on top of everything.
 Ask for a circular walk and the app answers with **candidates on the
 picker**, not a fait accompli: established walks near you (OpenStreetMap
 routes, your library, your downloads) filtered to roughly the distance you
-asked for, **alongside** a loop worked out on the path network — each
-labelled for what it is, and real ones marked circular or linear, since a
-coastal-path fragment can match on distance and still be a line.
+asked for, **alongside** circuits worked out on the path network — as many
+as the form's *routes of our own* count asks for, three unless you say, and
+none at all at zero — each labelled for what it is, and real ones marked
+circular or linear, since a coastal-path fragment can match on distance and
+still be a line.
 
 The planner searches for at most **90 seconds** and then hands back the best
 circuit it found, stating its true length and how much of itself it retraces.
@@ -420,7 +427,7 @@ certainly get crossings. Every plan names the road metres it used ("including
 
 ## Tap a point, get a buzz there
 
-Turn on the **Mark points** chip at the top of the map, then tap any point on
+Turn on the **Mark points** chip on the menu's Map page, then tap any point on
 the route line — the tricky turn, the summit, the lunch spot. A card answers
 with the distance ahead along the route, the climb between here and there
 (up and down separately, from the cached elevation profile), and how long it

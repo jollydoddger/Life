@@ -87,6 +87,17 @@ data class WalkSpec(
     val dayOffset: Int = 0,
     /** Where it may start. See [Origin]. */
     val origin: Origin = Origin.HERE,
+    /**
+     * How many circuits of our own to work out from the path network,
+     * alongside the published walks the search finds. His ask, once the
+     * planner was worth having: "an option for auto planned routes, with
+     * a number of how many I want planned". Zero switches the planner off
+     * for the search, which is also what "any length" does — an invented
+     * loop needs a length to aim at. Capped at [MAX_PLANNED]: each one is
+     * another pass over the same graph inside the same time budget, and
+     * past a handful they stop being different walks.
+     */
+    val planned: Int = DEFAULT_PLANNED,
 ) {
 
     /**
@@ -139,6 +150,7 @@ data class WalkSpec(
         .put("anyLength", anyLength)
         .put("miles", miles)
         .put("origin", origin.name)
+        .put("planned", planned)
         .toString()
 
     companion object {
@@ -148,6 +160,12 @@ data class WalkSpec(
 
         /** The statute mile, exactly. */
         const val METRES_PER_MILE = 1609.344
+
+        /** How many of our own circuits a search works out unless told. */
+        const val DEFAULT_PLANNED = 3
+
+        /** The most it will be asked for. See [WalkSpec.planned]. */
+        const val MAX_PLANNED = 6
 
         fun fromJson(s: String?): WalkSpec {
             if (s.isNullOrBlank()) return WalkSpec()
@@ -163,6 +181,9 @@ data class WalkSpec(
                     dayOffset = o.optInt("dayOffset").coerceIn(0, MAX_DAY_OFFSET),
                     origin = runCatching { Origin.valueOf(o.optString("origin")) }
                         .getOrDefault(Origin.HERE),
+                    // A form saved before the count existed asked for the
+                    // default, not for none.
+                    planned = o.optInt("planned", DEFAULT_PLANNED).coerceIn(0, MAX_PLANNED),
                 )
             } catch (e: Exception) {
                 WalkSpec()

@@ -322,14 +322,17 @@ class SettingsActivity : Activity() {
         }
 
         val tempSwitch = Switch(this).apply {
-            text = "  Temperature"
+            text = "  Weather readout"
             textSize = 16f
             isChecked = tempEnabled
             setOnCheckedChangeListener { _, on ->
                 tempEnabled = on
-                if (on) weatherShown = true
-                result.text = if (on) "Temperature on — a figure at the top of the map, with the Weather chip."
-                else "Temperature off."
+                result.text = if (on) {
+                    "Readout on — a symbol and the temperature at the top of the map, " +
+                        "whatever the overlay switch says. Tap it for the full forecast."
+                } else {
+                    "Readout off."
+                }
             }
         }
 
