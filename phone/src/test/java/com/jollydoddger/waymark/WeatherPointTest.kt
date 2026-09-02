@@ -13,7 +13,7 @@ class WeatherPointTest {
 
     private val body = """
         {"hourly":{
-          "time":[1700000000,1700003600,1700007200],
+          "time":[1699999200,1700002800,1700006400],
           "temperature_2m":[9.1,8.4,null],
           "precipitation":[0.0,0.6,null],
           "precipitation_probability":[10,null,80],
@@ -26,7 +26,7 @@ class WeatherPointTest {
     @Test fun `hours arrive in order with the figures they carry`() {
         val hs = Weather.parsePoint(body)
         assertEquals(2, hs.size) // the hour with no rain figure is dropped
-        assertEquals(1_700_000_000_000L, hs[0].timeMs)
+        assertEquals(1_699_999_200_000L, hs[0].timeMs)
         assertEquals(10, hs[0].rainProb)
         assertEquals(0.6, hs[1].rainMm, 1e-9)
         assertEquals(-1, hs[1].rainProb)
