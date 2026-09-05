@@ -46,6 +46,7 @@ import com.jollydoddger.waymark.shared.Prefs.arrowColour
 import com.jollydoddger.waymark.shared.Prefs.assistantEnabled
 import com.jollydoddger.waymark.shared.Prefs.cloudEnabled
 import com.jollydoddger.waymark.shared.Prefs.libraryFolder
+import com.jollydoddger.waymark.shared.Prefs.backupFolder
 import com.jollydoddger.waymark.shared.Prefs.osApiKey
 import com.jollydoddger.waymark.shared.Prefs.prowEnabled
 import com.jollydoddger.waymark.shared.Prefs.prowShown
@@ -727,7 +728,11 @@ class MainActivity : Activity() {
             grid(
                 listOf(
                     menuAction("Import GPX") { pickGpx() },
+                    menuAction("Export GPX") { exportRoute() },
                     menuAction("Saved walks") { savedWalksDialog() },
+                ),
+                listOf(
+                    menuAction("Back up\u2026") { backupDialog() },
                     menuAction("Library\u2026") { libraryDialog() },
                 ),
             )
@@ -3317,8 +3322,10 @@ class MainActivity : Activity() {
                 Walks.save(this@MainActivity, walk)
                 walk
             }
+            val backed = withContext(Dispatchers.IO) { Backup.walk(this@MainActivity, walk) }
             say("Saved “${walk.name}” — ${fmtDist(walk.distanceM)} in ${Walks.duration(walk)}. " +
-                "It lives under GPX → Saved walks.")
+                "It lives under GPX → Saved walks." +
+                if (backed) " Backed up." else if (backupFolder.isNotEmpty()) " (Backup folder couldn’t be written.)" else "")
         }
     }
 
@@ -3916,6 +3923,96 @@ class MainActivity : Activity() {
             libraryFolder = tree.toString()
             rescanLibrary()
         }
+        if (requestCode == REQ_BACKUP_FOLDER && resultCode == RESULT_OK) data?.data?.let { tree ->
+            contentResolver.takePersistableUriPermission(
+                tree,
+                Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION,
+            )
+            backupFolder = tree.toString()
+            say("Backing up every walk and the loaded route\u2026")
+            scope.launch {
+                val words = withContext(Dispatchers.IO) { Backup.all(this@MainActivity) }
+                say("$words From now on each walk you save and each route you set goes there too.")
+            }
+        }
+        if (requestCode == REQ_BACKUP_ZIP && resultCode == RESULT_OK) data?.data?.let { uri ->
+            scope.launch {
+                val outcome = withContext(Dispatchers.IO) {
+                    runCatching {
+                        contentResolver.openOutputStream(uri, "wt")!!.use { Backup.zip(this@MainActivity, it) }
+                    }
+                }
+                outcome.onSuccess { n -> say("Saved a zip of $n GPX files.") }
+                outcome.onFailure { e -> say("Couldn\u2019t write the zip: ${e.message ?: e.javaClass.simpleName}") }
+            }
+        }
+    }
+
+    private val REQ_BACKUP_FOLDER = 6
+    private val REQ_BACKUP_ZIP = 7
+
+    /** The loaded route, out through the share sheet as GPX. */
+    private fun exportRoute() {
+        val route = RouteStore.load(this)
+        if (route == null || route.points.size < 2) {
+            say("No route loaded to export \u2014 set one first.")
+            return
+        }
+        scope.launch {
+            val uri = withContext(Dispatchers.IO) {
+                Walks.asGpxUri(this@MainActivity, route.name.ifBlank { "Route" }, route.points)
+            }
+            val send = Intent(Intent.ACTION_SEND).apply {
+                type = "application/gpx+xml"
+                putExtra(Intent.EXTRA_STREAM, uri)
+                putExtra(Intent.EXTRA_SUBJECT, route.name)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+            startActivity(Intent.createChooser(send, "Export \u201c${route.name}\u201d"))
+        }
+    }
+
+    /**
+     * Where his walks go besides this phone. A folder he picks once, kept
+     * in step as walks are saved and routes set; or a zip of the lot.
+     */
+    private fun backupDialog() {
+        val walks = Walks.list(this).size
+        val folderSet = backupFolder.isNotEmpty()
+        val b = AlertDialog.Builder(this)
+            .setTitle("Back up")
+            .setMessage(
+                (if (folderSet) {
+                    "A backup folder is set: every walk you save and every route you set is " +
+                        "written there as GPX the moment it exists. ${Backup.lastLine(this)}"
+                } else {
+                    "Choose a folder \u2014 Google Drive, a card, anywhere the phone syncs \u2014 " +
+                        "and every walk you save and every route you set is written there as GPX " +
+                        "the moment it exists, with nothing to remember."
+                }) + "\n\n$walks saved walk${if (walks == 1) "" else "s"} on this phone" +
+                    (if (RouteStore.load(this) != null) ", plus the loaded route." else "."),
+            )
+            .setPositiveButton(if (folderSet) "Change folder" else "Choose folder") { _, _ ->
+                @Suppress("DEPRECATION")
+                startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT_TREE), REQ_BACKUP_FOLDER)
+            }
+            .setNeutralButton("Save a zip") { _, _ ->
+                val create = Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
+                    addCategory(Intent.CATEGORY_OPENABLE)
+                    type = "application/zip"
+                    putExtra(Intent.EXTRA_TITLE, Backup.zipName())
+                }
+                @Suppress("DEPRECATION")
+                startActivityForResult(create, REQ_BACKUP_ZIP)
+            }
+        if (folderSet) {
+            b.setNegativeButton("Back up now") { _, _ ->
+                scope.launch { say(withContext(Dispatchers.IO) { Backup.all(this@MainActivity) }) }
+            }
+        } else {
+            b.setNegativeButton("Cancel", null)
+        }
+        b.show()
     }
 
     private fun importGpx(uri: Uri) {
@@ -3941,6 +4038,9 @@ class MainActivity : Activity() {
     private suspend fun publishRoute(route: Route) {
         routeHidden = false // a route you just chose is a route you can see
         map.setRoute(route)
+        // Every route he sets — imported, planned, drawn, chosen — goes to
+        // the backup folder as GPX, before anything that can take a while.
+        withContext(Dispatchers.IO) { runCatching { Backup.route(this@MainActivity, route) } }
         var lastShown = 0
         val failed = Corridor.prefetch(map.tiles, route) { done, total ->
             if (done - lastShown >= 25 || done == total) {
