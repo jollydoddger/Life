@@ -106,30 +106,21 @@ object Walks {
         val shareDir = File(ctx.filesDir, "share").apply { mkdirs() }
         // One shared file at a time; the previous export is stale by definition.
         shareDir.listFiles()?.forEach { it.delete() }
-        val safeName = walk.name.replace(Regex("[^A-Za-z0-9 _-]"), "").trim()
-            .ifEmpty { "walk" }.replace(' ', '_')
-        val f = File(shareDir, "$safeName.gpx")
-        val sb = StringBuilder()
-        sb.append("""<?xml version="1.0" encoding="UTF-8"?>""").append('\n')
-        sb.append("""<gpx version="1.1" creator="Waymark" xmlns="http://www.topografix.com/GPX/1/1">""").append('\n')
-        sb.append("<metadata><name>").append(xml(walk.name)).append("</name>")
-        if (walk.notes.isNotBlank() || walk.place.isNotBlank()) {
-            sb.append("<desc>").append(xml(listOf(walk.place, walk.notes).filter { it.isNotBlank() }.joinToString(" — ")))
-                .append("</desc>")
-        }
-        sb.append("</metadata>\n<trk><name>").append(xml(walk.name)).append("</name><trkseg>\n")
-        for (p in walk.points) {
-            val (lat, lon) = Bng.toWgs84(p)
-            sb.append("""<trkpt lat="%.6f" lon="%.6f"/>""".format(lat, lon)).append('\n')
-        }
-        sb.append("</trkseg></trk>\n</gpx>\n")
-        f.writeText(sb.toString())
+        val f = File(shareDir, Backup.fileName(walk.name, "walk"))
+        f.writeText(Backup.gpx(walk))
         return Uri.parse("content://${ShareProvider.AUTHORITY}/${f.name}")
     }
 
-    private fun xml(s: String): String = s
-        .replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-        .replace("\"", "&quot;")
+    /** Any named line as a GPX file for the share sheet — the loaded route,
+     *  a planned walk, whatever is on the map. */
+    fun asGpxUri(ctx: Context, name: String, points: List<En>): Uri {
+        val shareDir = File(ctx.filesDir, "share").apply { mkdirs() }
+        shareDir.listFiles()?.forEach { it.delete() }
+        val f = File(shareDir, Backup.fileName(name, "route"))
+        f.writeText(Backup.gpx(name, "", points))
+        return Uri.parse("content://${ShareProvider.AUTHORITY}/${f.name}")
+    }
+
 }
 
 /**

@@ -63,6 +63,16 @@ object Prefs {
         get() = p(this).getString("libraryFolder", "") ?: ""
         set(v) = p(this).edit().putString("libraryFolder", v).apply()
 
+    /** The tree URI of the folder every walk and route is copied into as
+     *  GPX the moment it exists — Drive, a card, wherever he chose. */
+    var Context.backupFolder: String
+        get() = p(this).getString("backupFolder", "") ?: ""
+        set(v) = p(this).edit().putString("backupFolder", v).apply()
+
+    var Context.lastBackupAt: Long
+        get() = p(this).getLong("lastBackupAt", 0L)
+        set(v) = p(this).edit().putLong("lastBackupAt", v).apply()
+
     /**
      * The public-GPS-traces overlay (phone only). Off by default: it is an
      * answer to "does this path exist on the ground", not decoration.

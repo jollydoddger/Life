@@ -231,6 +231,15 @@ GPX downloaded in your browser and opened or shared with Waymark imports
 straight onto the map, so a failed fetch is one tap, not a dead end.
 AllTrails, komoot and OS Maps stay refused — their terms.
 
+**Getting them out again.** *Export GPX* on the Walks page shares the loaded
+route as a GPX file; a saved walk shares as GPX from its own card. *Back up…*
+does the keeping: pick a folder once — Google Drive, a card, anywhere the
+phone syncs — and every walk you save and every route you set is written
+there as GPX the moment it exists, rewritten under the same name when it
+changes, with nothing to remember. Or save a zip of the lot (walks as GPX
+tracks, the loaded route as a GPX route, and the walks' own JSON so notes and
+times survive a round trip exactly) wherever the picker points.
+
 Community route apps show a pin where a walk *starts*; a walk that passes 400 m
 from your door can start two villages away. The GPX button's **Walks near me**
 answers the better question: which walks' *lines* come within 500 m / 1 km /

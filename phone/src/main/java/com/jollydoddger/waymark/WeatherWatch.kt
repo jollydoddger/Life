@@ -58,20 +58,26 @@ object WeatherWatch {
     /** Called on ●: forget what the last walk was told, read now, and keep reading. */
     fun start(ctx: Context) {
         ctx.weatherSaid = ""
-        val js = ctx.getSystemService(JobScheduler::class.java)
-        js.schedule(
-            JobInfo.Builder(JOB_ID, ComponentName(ctx, WeatherWatchJob::class.java))
-                .setPeriodic(PERIOD_MS)
-                .setRequiredNetworkType(JobInfo.NETWORK_TYPE_ANY)
-                .build(),
-        )
+        // Never let the forecast take the recording down with it: the
+        // scheduler refused this once (a missing permission) and the crash
+        // landed on ●, the one button that must always work. A refusal now
+        // costs the alerts, not the walk.
+        runCatching {
+            val js = ctx.getSystemService(JobScheduler::class.java)
+            js.schedule(
+                JobInfo.Builder(JOB_ID, ComponentName(ctx, WeatherWatchJob::class.java))
+                    .setPeriodic(PERIOD_MS)
+                    .setRequiredNetworkType(JobInfo.NETWORK_TYPE_ANY)
+                    .build(),
+            )
+        }
         // The first read happens now, not in twenty minutes: the walk is
         // starting, and "rain from two" is most useful at the car.
         Thread { runCatching { check(ctx) } }.start()
     }
 
     fun stop(ctx: Context) {
-        ctx.getSystemService(JobScheduler::class.java).cancel(JOB_ID)
+        runCatching { ctx.getSystemService(JobScheduler::class.java).cancel(JOB_ID) }
     }
 
     /** Where he is: the trail's last point, or the phone's last fix. */
