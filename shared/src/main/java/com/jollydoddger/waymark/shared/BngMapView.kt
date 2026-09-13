@@ -697,6 +697,14 @@ class BngMapView @JvmOverloads constructor(
     private val satellitePaint = Paint(Paint.FILTER_BITMAP_FLAG).apply { alpha = 0 }
     private val satMesh = FloatArray((radarMeshN + 1) * (radarMeshN + 1) * 2)
 
+    // What is on screen, worked out when the view moves rather than on
+    // every frame, and held so the cache cannot evict a tile that is
+    // currently being drawn. Asking per frame meant a screenful competing
+    // with itself for cache space sixty times a second, which is what
+    // "flickering like mad" was.
+    private var satKey = ""
+    private var satTiles: List<MeshTile> = emptyList()
+
     // --- imported terrain --------------------------------------------------
 
     /**
@@ -756,8 +764,18 @@ class BngMapView @JvmOverloads constructor(
      */
     private fun drawSatellite(canvas: Canvas) {
         val m = mpp(zl)
-        val tiles = Satellite.tiles(context, viewportBounds(), m) { postInvalidateOnAnimation() }
-        for (t in tiles) {
+        val key = "${centreE.toInt()}/${centreN.toInt()}/${(zl * 64).toInt()}/$width/$height"
+        if (key != satKey) {
+            satKey = key
+            satTiles = Satellite.tiles(context, viewportBounds(), m) {
+                // A tile landed: let the next frame gather it in. Clearing
+                // the key is what re-asks, and it happens once per arrival
+                // rather than once per frame.
+                satKey = ""
+                postInvalidateOnAnimation()
+            }
+        }
+        for (t in satTiles) {
             val yN = mercY(t.north)
             val yS = mercY(t.south)
             var i = 0

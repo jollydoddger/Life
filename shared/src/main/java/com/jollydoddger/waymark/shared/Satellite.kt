@@ -52,12 +52,23 @@ object Satellite {
     /** Mapbox serves satellite to 18 over Britain; past that it upscales. */
     private const val MAX_Z = 18
 
-    /** Kept on disk so a revisited area works with no signal, exactly like
-     *  the OS tiles. Not synced anywhere — see the note above. */
-    private fun dir(ctx: Context) = File(ctx.filesDir, "satellite").apply { mkdirs() }
+    /**
+     * Kept on disk so a revisited area works with no signal, exactly like
+     * the OS tiles. Not synced anywhere — see the note above.
+     *
+     * v2: the first cut fetched `@2x` tiles, 512 square and a megabyte
+     * decoded. Those are dropped rather than mixed in — they are four times
+     * the memory for sharpness the zoom choice already gives, and a cache
+     * holding some of each would keep reintroducing the thrash the smaller
+     * ones were chosen to end.
+     */
+    private fun dir(ctx: Context): File {
+        File(ctx.filesDir, "satellite").takeIf { it.exists() }?.deleteRecursively()
+        return File(ctx.filesDir, "satellite2").apply { mkdirs() }
+    }
 
     private val memory = object : LruCache<String, Bitmap>(
-        (Runtime.getRuntime().maxMemory() / 8).toInt(),
+        (Runtime.getRuntime().maxMemory() / 6).toInt(),
     ) {
         override fun sizeOf(key: String, value: Bitmap) = value.byteCount
     }
@@ -102,8 +113,18 @@ object Satellite {
         return Math.round(ln(world / metresPerPx) / ln(2.0)).toInt().coerceIn(0, MAX_Z)
     }
 
+    /**
+     * Plain 256-pixel tiles, not `@2x`.
+     *
+     * The retina ones are 512 square — a megabyte each decoded, four times
+     * the memory for a sharpness that [zoomFor] already delivers by
+     * picking the zoom to match the pixels being drawn. At `@2x` a screenful
+     * could not fit in the cache at once and the tiles evicted each other
+     * as fast as they arrived, which on the map looked like the whole
+     * layer flickering and tearing.
+     */
     private fun url(z: Int, x: Int, y: Int, token: String): String =
-        "https://api.mapbox.com/v4/mapbox.satellite/$z/$x/$y@2x.jpg90?access_token=$token"
+        "https://api.mapbox.com/v4/mapbox.satellite/$z/$x/$y.jpg90?access_token=$token"
 
     // --- tiles for a viewport ------------------------------------------------
 
