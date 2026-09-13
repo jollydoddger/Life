@@ -217,4 +217,136 @@ object Traces {
     } catch (e: Exception) {
         null
     }
+
+    // --- a route's own corridor, rather than a viewport ----------------------
+    //
+    // The overlay asks "what is under the map right now". Checking a route
+    // asks something different — "what is under *this line*" — which is a
+    // long thin corridor that routinely spans more than the overlay's
+    // MAX_VIEW_DEG, and whose answer has to distinguish ground looked up
+    // and bare from ground never looked up at all. See TraceCheck for why
+    // that distinction is the whole feature.
+
+    /** The most cells one check will fetch. A long route crosses plenty,
+     *  and each is up to twenty pages off a shared public API. */
+    private const val MAX_CORRIDOR_FETCH = 40
+
+    /**
+     * What is on disk for the ground a route crosses.
+     *
+     * [known] is the load-bearing part: it answers "has this point's cell
+     * been fetched at all", so a check can leave unlooked-up ground out of
+     * its sums instead of reporting it as unwalked.
+     */
+    class Corridor(
+        val cells: List<FloatArray>,
+        val missing: Int,
+        val empty: Int,
+        val withData: Int,
+        private val fetched: Set<String>,
+        /** How a point maps to a cache key — supplied by the cache rather
+         *  than reimplemented here, so the two can never drift apart. */
+        private val keyOf: (En) -> String,
+    ) {
+        fun known(p: En): Boolean = keyOf(p) in fetched
+    }
+
+    /** The cache key for whatever cell a point falls in. */
+    private fun keyAt(p: En): String {
+        val (lat, lon) = Bng.toWgs84(p)
+        return key(Math.floor(lat / CELL_DEG).toInt(), Math.floor(lon / CELL_DEG).toInt())
+    }
+
+    /**
+     * Every 0.02° cell the line passes through, in order of first use.
+     *
+     * The segments are walked rather than the points sampled: a cell is
+     * over a kilometre across and an imported GPX can have a point every
+     * two hundred metres or every two thousand, so trusting its own
+     * spacing would step clean over a cell and then report the ground it
+     * holds as never looked up.
+     */
+    private fun cellsAlong(points: List<En>): List<Pair<Int, Int>> {
+        val seen = LinkedHashSet<Pair<Int, Int>>()
+        fun add(p: En) {
+            val (lat, lon) = Bng.toWgs84(p)
+            seen.add(Math.floor(lat / CELL_DEG).toInt() to Math.floor(lon / CELL_DEG).toInt())
+        }
+        if (points.isEmpty()) return emptyList()
+        add(points.first())
+        // Comfortably under the ~1.3 km narrow side of a cell at these
+        // latitudes, so nothing can be skipped.
+        val step = 200.0
+        for (i in 1 until points.size) {
+            val a = points[i - 1]
+            val b = points[i]
+            val d = kotlin.math.hypot(b.e - a.e, b.n - a.n)
+            var t = step
+            while (t < d) {
+                add(En(a.e + (b.e - a.e) * (t / d), a.n + (b.n - a.n) * (t / d)))
+                t += step
+            }
+            add(b)
+        }
+        return seen.toList()
+    }
+
+    private fun readCorridor(ctx: Context, cellKeys: List<Pair<Int, Int>>): Corridor {
+        val cells = ArrayList<FloatArray>()
+        val fetched = HashSet<String>()
+        var missing = 0
+        var empty = 0
+        for ((la, lo) in cellKeys) {
+            val k = key(la, lo)
+            val f = File(dir(ctx), k)
+            if (!f.exists()) {
+                missing++
+                continue
+            }
+            // On disk at all means somebody asked. An empty file is a real
+            // answer — "nobody has recorded here" — and must never read as
+            // "not looked up yet".
+            fetched.add(k)
+            val pts = load(f)
+            if (pts == null || pts.isEmpty()) empty++ else cells.add(pts)
+        }
+        return Corridor(cells, missing, empty, cells.size, fetched, ::keyAt)
+    }
+
+    /** What is already cached along a route. No network, safe on any thread. */
+    fun corridor(ctx: Context, points: List<En>): Corridor =
+        readCorridor(ctx, cellsAlong(points))
+
+    /**
+     * The same, having first fetched what is missing. Blocking: callers run
+     * it off the main thread. Bounded by [MAX_CORRIDOR_FETCH], so a very
+     * long route comes back partly unknown rather than hammering a free
+     * public API — and the report says so rather than papering over it.
+     */
+    fun fetchCorridor(
+        ctx: Context,
+        points: List<En>,
+        onProgress: (done: Int, total: Int) -> Unit = { _, _ -> },
+    ): Corridor {
+        val all = cellsAlong(points)
+        val todo = all.filter { (la, lo) -> !File(dir(ctx), key(la, lo)).exists() }
+            .take(MAX_CORRIDOR_FETCH)
+        for ((i, cellKey) in todo.withIndex()) {
+            val (la, lo) = cellKey
+            val k = key(la, lo)
+            val claimed = synchronized(inFlight) { inFlight.add(k) }
+            if (!claimed) continue
+            try {
+                save(File(dir(ctx), k), fetchCell(la, lo))
+            } catch (e: Exception) {
+                // No file written: the cell stays unknown, which is the
+                // honest state. A network blip must never be cached as
+                // "nobody walks here".
+            } finally {
+                synchronized(inFlight) { inFlight.remove(k) }
+            }
+            onProgress(i + 1, todo.size)
+        }
+        return readCorridor(ctx, all)
+    }
 }

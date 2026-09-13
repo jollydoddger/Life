@@ -747,6 +747,9 @@ class MainActivity : Activity() {
             ))
             addView(Ui.heading(this@MainActivity, "Route"))
             grid(
+                listOf(
+                    Ui.button(this@MainActivity, "Check the paths", filled = true) { checkPaths() },
+                ),
                 listOf(hideBtn, weightBtn),
                 listOf(
                     Ui.button(this@MainActivity, "Reverse") { reverseRoute() },
@@ -4061,6 +4064,71 @@ class MainActivity : Activity() {
             say("“${route.name}” is on the watch (or will be the moment it connects)")
         } catch (e: Exception) {
             say("“${route.name}” is set here; the watch will get it when it reconnects")
+        }
+        // Held against the record of where people have really walked — from
+        // what is already cached only, so it costs nothing and cannot delay
+        // a route being set. It speaks only when it has found something: a
+        // line about the trace archive after every single import is a line
+        // he stops reading, and then it is missed on the day it matters.
+        val cached = withContext(Dispatchers.IO) {
+            Traces.corridor(this@MainActivity, route.points).let { c ->
+                TraceCheck.check(
+                    route.points, c.cells, c::known, c.missing, c.empty, c.withData,
+                )
+            }
+        }
+        if (cached.stretches.isNotEmpty()) showTraceReport(cached)
+    }
+
+    // --- has anybody actually walked this? ----------------------------------
+
+    private var checkJob: kotlinx.coroutines.Job? = null
+
+    /**
+     * His oldest complaint about walking apps, answered: *"I've been on too
+     * many walks where the path ends or it's inaccessible."* No rating fixes
+     * that — a five-star write-up from 2019 does not know the stile became a
+     * fence. OpenStreetMap's public GPS traces are the one source that is a
+     * report from the ground rather than a claim about it, and this holds a
+     * route against them and names the metres that nobody has walked.
+     *
+     * Fetches what the route crosses and is not shy about the wait: the
+     * cells are a shared public API, and the alternative is answering from
+     * a third of the data and sounding confident about it.
+     */
+    private fun checkPaths() {
+        val route = RouteStore.load(this)
+        if (route == null || route.points.size < 2) {
+            say("No route loaded to check — set one first.")
+            return
+        }
+        checkJob?.cancel()
+        checkJob = scope.launch {
+            say("Checking who has actually walked this…")
+            val report = withContext(Dispatchers.IO) {
+                val c = Traces.fetchCorridor(this@MainActivity, route.points) { done, total ->
+                    runOnUiThread { say("Checking who has actually walked this… $done / $total") }
+                }
+                TraceCheck.check(route.points, c.cells, c::known, c.missing, c.empty, c.withData)
+            }
+            showTraceReport(report)
+        }
+    }
+
+    /**
+     * The finding, said and — when there is something to see — drawn. A
+     * grid reference is an answer you have to go and find; a dashed line
+     * over the moor is one you can see before you set off.
+     */
+    private fun showTraceReport(report: TraceCheck.Report) {
+        if (report.stretches.isEmpty()) {
+            map.setPreview(emptyList())
+            say(report.words())
+            return
+        }
+        map.setPreview(report.stretches.map { it.line })
+        sayAction(report.words(), "Show") {
+            report.stretches.maxByOrNull { it.metres }?.let { map.fitTo(it.line) }
         }
     }
 

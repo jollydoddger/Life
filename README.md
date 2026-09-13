@@ -311,6 +311,34 @@ sit behind a login, and Strava's API agreement forbids third-party surfacing
 of aggregate activity data — at any price. This overlay is the legal
 substitute, and its one weakness is recency.
 
+**Check the paths.** The dots answer "does this path get walked" only if you
+sit and squint at them, which nobody does at the trailhead. So *Check the
+paths*, on the menu's Map page, holds the loaded route against the same
+traces and names the specific metres nobody has a record of walking:
+
+> Worth a look before you go: 340 m with no recorded tracks at SE 062 281,
+> 2.1 km into the walk, and one other stretch like it.
+
+The doubtful stretches are drawn on the map as you're told about them, and
+*Show* frames the worst one. It runs automatically — from cached cells only,
+so it costs nothing — whenever a route is set, and speaks only when it has
+found something.
+
+This is the answer to the complaint that started it: *"I've been on too many
+walks where the path ends or it's inaccessible."* No amount of curation fixes
+that — a five-star write-up from 2019 doesn't know the stile became a fence —
+and it works on any route whatever its source: planned here, imported, or
+exported out of somebody else's app.
+
+**The rule it keeps, and the reason it's worth trusting: no traces is not no
+path.** OpenStreetMap's archive is thin in plenty of real places, so the check
+separates three states a naive version would collapse into one — ground with
+tracks on it, ground looked up and genuinely bare, and ground nobody has
+looked up at all. The third is never counted against a route, and gets said
+as ignorance rather than as a verdict. A check that cried wolf about every
+un-uploaded field is one you'd stop reading, and then it would be ignored on
+the day it was right.
+
 ## Weather over the map (optional, all off by default)
 
 Four switches in Settings, each independent, all fed from two sources and
