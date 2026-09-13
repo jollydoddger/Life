@@ -625,6 +625,29 @@ Both maps are always north-up, like the paper they're printed from; the arrow
 is you, rotated to the compass (corrected to grid north). A grey arrow means
 the GPS fix has gone stale — the arrow never pretends.
 
+## The same assistant, asked from anywhere
+
+Loose Ends — the other app on this phone — has an assistant on a side button
+that answers on any screen. It knows nothing about walking, and it should not:
+his walking sites, the index of what is on them, the router over the real path
+network and the OS map are all here, and a second walk finder over there would
+be two of them disagreeing within a month.
+
+So it asks this one instead. Say *"top ten walks round here"* to the side
+button anywhere on the phone and the question comes through `AskProvider` to
+Waymark's own assistant, which does the searching with its own tools and hands
+back a real answer with real walks in it. Waymark is never opened; the walks it
+found are waiting in the picker on the map for when it is.
+
+The question is answered asynchronously — a walk search is a web search, two
+page fetches and a route plan, and can take a minute and a half — so the
+provider hands back a ticket and reports what it is doing while it works.
+
+`AskProvider` is exported, because it has to be reachable from another
+application id at all, and it resolves the calling UID and refuses everything
+that is not Loose Ends. It runs an assistant with the API key and the last
+known location, which is a thing to hand to exactly one caller.
+
 ## Building
 
 Everything is built by GitHub Actions (`.github/workflows/build.yml`): every

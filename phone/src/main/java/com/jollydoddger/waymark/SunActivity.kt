@@ -62,6 +62,26 @@ class SunActivity : Activity() {
     private var bg: HandlerThread? = null
     private var bgHandler: Handler? = null
 
+    /**
+     * Which camera attempt is current.
+     *
+     * openCamera() is asynchronous: the request goes in on onResume and the
+     * answer arrives whenever the system gets round to it. Back out of this
+     * screen in that window — or rotate it, or let a notification take
+     * focus — and onPause has already run stopCamera(), quit the handler
+     * thread and dropped the TextureView's surface. The callback then lands
+     * anyway, on a thread that no longer exists, holding a device nobody is
+     * going to close and a SurfaceTexture that has been released.
+     *
+     * Every throw on that path is on a *camera callback thread*, which has
+     * no catch above it, so it takes the whole process with it — and the
+     * device that was never closed makes the next attempt fail too. Bumped
+     * on every stop; a callback carrying an old number closes its device and
+     * goes quietly.
+     */
+    @Volatile
+    private var attempt = 0
+
     private lateinit var sensors: SensorManager
     private var declination = 0.0
 
@@ -218,45 +238,95 @@ class SunActivity : Activity() {
 
         bg = HandlerThread("sun-cam").apply { start() }
         bgHandler = Handler(bg!!.looper)
+        val mine = attempt
 
         try {
             manager.openCamera(id, object : CameraDevice.StateCallback() {
                 override fun onOpened(device: CameraDevice) {
-                    camera = device
-                    val st = texture?.surfaceTexture ?: return
-                    st.setDefaultBufferSize(1280, 720)
-                    val surface = Surface(st)
-                    val request = device.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW).apply {
-                        addTarget(surface)
+                    // Late to a screen that has gone. Close the device here
+                    // and now: dropping it on the floor is what leaves the
+                    // camera held open, and the next visit to this screen
+                    // then fails on a phone that looks broken.
+                    if (mine != attempt) {
+                        runCatching { device.close() }
+                        return
                     }
-                    @Suppress("DEPRECATION")
-                    device.createCaptureSession(
-                        listOf(surface),
-                        object : CameraCaptureSession.StateCallback() {
-                            override fun onConfigured(s: CameraCaptureSession) {
-                                session = s
-                                runCatching {
-                                    request.set(
-                                        CaptureRequest.CONTROL_AF_MODE,
-                                        CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE,
-                                    )
-                                    s.setRepeatingRequest(request.build(), null, bgHandler)
-                                }
-                            }
+                    camera = device
 
-                            override fun onConfigureFailed(s: CameraCaptureSession) {
-                                runOnUiThread { overlay.setNoCamera("Camera wouldn't start — plain sky instead.") }
+                    // Everything below can throw, and all of it runs on a
+                    // camera callback thread where a throw is a crash rather
+                    // than an error: the SurfaceTexture is released when the
+                    // TextureView goes, createCaptureRequest refuses a
+                    // device the system has taken back, and createCaptureSession
+                    // wants a handler whose thread is still alive.
+                    val handler = bgHandler
+                    val started = runCatching {
+                        val st = texture?.surfaceTexture ?: error("no surface")
+                        st.setDefaultBufferSize(1280, 720)
+                        val surface = Surface(st)
+                        val request =
+                            device.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW).apply {
+                                addTarget(surface)
                             }
-                        },
-                        bgHandler,
-                    )
+                        @Suppress("DEPRECATION")
+                        device.createCaptureSession(
+                            listOf(surface),
+                            object : CameraCaptureSession.StateCallback() {
+                                override fun onConfigured(s: CameraCaptureSession) {
+                                    // Same race, one step later: configured
+                                    // after the screen closed is a session to
+                                    // shut, not one to start.
+                                    if (mine != attempt) {
+                                        runCatching { s.close() }
+                                        return
+                                    }
+                                    session = s
+                                    runCatching {
+                                        request.set(
+                                            CaptureRequest.CONTROL_AF_MODE,
+                                            CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE,
+                                        )
+                                        s.setRepeatingRequest(request.build(), null, handler)
+                                    }
+                                }
+
+                                override fun onConfigureFailed(s: CameraCaptureSession) {
+                                    runCatching { s.close() }
+                                    if (mine != attempt) return
+                                    runOnUiThread {
+                                        overlay.setNoCamera("Camera wouldn't start — plain sky instead.")
+                                    }
+                                }
+                            },
+                            handler,
+                        )
+                    }.isSuccess
+
+                    if (!started) {
+                        // Failing is allowed; failing silently is not, and
+                        // neither is failing while still holding the camera.
+                        runCatching { device.close() }
+                        if (camera === device) camera = null
+                        if (mine != attempt) return
+                        runOnUiThread {
+                            overlay.setNoCamera("Camera wouldn't start — plain sky instead.")
+                        }
+                    }
                 }
 
-                override fun onDisconnected(device: CameraDevice) { stopCamera() }
+                override fun onDisconnected(device: CameraDevice) {
+                    runCatching { device.close() }
+                    if (mine != attempt) return
+                    runOnUiThread { stopCamera() }
+                }
 
                 override fun onError(device: CameraDevice, error: Int) {
-                    stopCamera()
-                    runOnUiThread { overlay.setNoCamera("Camera error $error — plain sky instead.") }
+                    runCatching { device.close() }
+                    if (mine != attempt) return
+                    runOnUiThread {
+                        stopCamera()
+                        overlay.setNoCamera("Camera error $error — plain sky instead.")
+                    }
                 }
             }, bgHandler)
         } catch (e: SecurityException) {
@@ -267,6 +337,10 @@ class SunActivity : Activity() {
     }
 
     private fun stopCamera() {
+        // Bumped first, so a callback already in flight sees a number that
+        // does not match and closes its own device rather than reviving a
+        // screen that has gone.
+        attempt++
         runCatching { session?.close() }
         runCatching { camera?.close() }
         session = null

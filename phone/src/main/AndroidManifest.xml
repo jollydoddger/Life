@@ -96,6 +96,17 @@
             android:exported="false"
             android:grantUriPermissions="true" />
 
+        <!-- The way in from Loose Ends' assistant, so a walking question
+             asked on any screen of any app is answered by the app that
+             actually knows about walking. Exported because it has to be
+             reachable from another application id at all; AskProvider itself
+             resolves the calling UID and refuses everything that is not
+             Loose Ends. -->
+        <provider
+            android:name=".AskProvider"
+            android:authorities="com.jollydoddger.waymark.ask"
+            android:exported="true" />
+
         <!-- Keeps the trail growing with the screen off. Only ever started
              from the visible app, which is what keeps this clear of
              ACCESS_BACKGROUND_LOCATION. -->
