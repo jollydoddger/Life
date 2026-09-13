@@ -826,6 +826,19 @@ class MainActivity : Activity() {
             setPadding(dp(4), 0, 0, 0)
             menuTabs.forEach { addView(it) }
             addView(View(this@MainActivity), LinearLayout.LayoutParams(0, 1, 1f))
+            // On the header, where a growing panel can never push it out of
+            // reach. Settings sat at the bottom of the Map page until that
+            // page grew past the sheet's cap and became unreachable — the
+            // body scrolls now, but the way into Settings should not depend
+            // on that staying true.
+            addView(TextView(this@MainActivity).apply {
+                text = "\u2699"
+                textSize = 18f
+                setTextColor(Palette.inkMut)
+                setPadding(dp(12), dp(6), dp(8), dp(10))
+                background = Ui.ripple(null)
+                setOnClickListener { showPanel(Panel.ASK); openSettings() }
+            })
             addView(TextView(this@MainActivity).apply {
                 text = "\u2715"
                 textSize = 17f

@@ -70,14 +70,36 @@ class SheetLayout(ctx: Context) : LinearLayout(ctx) {
     }
 
     /**
-     * The body. A [FrameLayout] that refuses to grow past a share of the
-     * screen — it is a sheet over a map, not a screen pretending to be
-     * one — and that measures itself the rest of the time, so no caller
-     * has to know or remember how tall its contents are.
+     * The body: refuses to grow past a share of the screen — it is a sheet
+     * over a map, not a screen pretending to be one — and measures itself
+     * the rest of the time, so no caller has to know or remember how tall
+     * its contents are.
+     *
+     * It **scrolls**, and that is not decoration. Capping a panel without
+     * letting it scroll means anything past the cap is not merely off the
+     * screen but unreachable, with nothing on screen admitting it exists.
+     * The Map panel grew a Ground section and quietly put Settings beyond
+     * the cap — the same failure as the round where the sheet's options
+     * stopped appearing, arriving by a different road. A cap that hides
+     * things permanently is a bug however tidy it looks.
+     *
+     * A [ScrollView] rather than a FrameLayout with a scrolling child so
+     * that every panel gets this, including ones not written yet; it is a
+     * FrameLayout underneath, so callers and layout params are unchanged.
+     * The sheet only ever takes a drag from its handle or peek row, so a
+     * body that scrolls does not fight the sheet that holds it.
      */
-    class Capped(ctx: Context) : FrameLayout(ctx) {
+    class Capped(ctx: Context) : android.widget.ScrollView(ctx) {
         /** Room available to the whole sheet; 0 until the parent says. */
         var availablePx = 0
+
+        init {
+            isFillViewport = false
+            // The panels have their own padding and a glow at the edge of a
+            // settings list reads as damage rather than as a boundary.
+            overScrollMode = OVER_SCROLL_NEVER
+            isScrollbarFadingEnabled = true
+        }
 
         override fun onMeasure(widthSpec: Int, heightSpec: Int) {
             super.onMeasure(widthSpec, heightSpec)

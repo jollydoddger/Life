@@ -81,6 +81,11 @@ class Pager(ctx: Context) : FrameLayout(ctx) {
                 // into a page flip.
                 if (!swiping && abs(dx) > slop * 2 && abs(dx) > abs(dy) * 2) {
                     swiping = true
+                    // The sheet's body scrolls, and a scrolling parent sees
+                    // the touch first — without this a page flip with any
+                    // vertical wobble in it is taken as a scroll and the
+                    // tabs become the only way across.
+                    parent?.requestDisallowInterceptTouchEvent(true)
                     return true
                 }
             }

@@ -384,7 +384,11 @@ in 5 km tiles aligned to the National Grid, which is this app's own
 coordinate system, so a square lands on the map with no reprojection at all.
 Wales publishes the same thing.
 
-**Getting one:** environment.data.gov.uk/survey → draw a box over where you
+**Getting one:** GPX button → Map → Ground → *Import terrain…*, and pick the
+downloaded zip (Waymark finds the `.tif` inside it and ignores the metadata
+beside it). Or share the zip to Waymark from a file manager — what kind of
+file it is works itself out from the bytes. Download them from
+environment.data.gov.uk/survey → draw a box over where you
 walk → **LIDAR Composite DTM 2 m** → share the zip to Waymark, or *Import
 terrain…* on the Map page. It takes a few seconds to shade, then it is
 cached and offline for good. **Take the 2 m, not the 1 m**: a 1 m square is
