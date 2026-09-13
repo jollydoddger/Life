@@ -320,7 +320,13 @@ traces and names the specific metres nobody has a record of walking:
 > 2.1 km into the walk, and one other stretch like it.
 
 The doubtful stretches are drawn on the map as you're told about them, and
-*Show* frames the worst one. It runs automatically — from cached cells only,
+*Satellite ↗* opens Google's aerial view at the exact stretch it flagged,
+which is often the quickest way to see whether a path is worn into the ground
+at all. (A link out, not a layer: Google Maps Platform doesn't permit their
+tiles on another app's map or in a cache. *Satellite ↗* on the Map page does
+the same for wherever the map is sitting.)
+
+It runs automatically — from cached cells only,
 so it costs nothing — whenever a route is set, and speaks only when it has
 found something.
 

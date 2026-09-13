@@ -763,6 +763,7 @@ class MainActivity : Activity() {
             addView(Ui.heading(this@MainActivity, "More"))
             grid(
                 listOf(
+                    menuAction("Satellite \u2197") { openSatellite() },
                     menuAction("Timeline \u25b6") { openTimeline() },
                     menuAction("Forecast") { openWeather() },
                 ),
@@ -1492,6 +1493,35 @@ class MainActivity : Activity() {
      * His words were "wherever my map is", and that is the useful reading:
      * the walk he is weighing up is often an hour's drive away.
      */
+    /**
+     * The middle of the map, in Google's satellite view.
+     *
+     * A link out rather than a layer, and that is a licensing fact rather
+     * than a shortcut: Google Maps Platform does not permit their tiles on
+     * a third-party map surface or in a cache, so the honest version of
+     * "let me see the aerial" is their app showing their imagery. A real
+     * layer inside Waymark wants imagery whose licence allows it — the
+     * Environment Agency's, under the Open Government Licence.
+     *
+     * Zoom 19 because the question being asked is "is there a path worn
+     * into that field", which is not a question you can answer zoomed out.
+     */
+    private fun openSatellite(at: En? = null) {
+        val here = at ?: map.viewportBounds().let { b ->
+            En((b[0] + b[2]) / 2, (b[1] + b[3]) / 2)
+        }
+        val (lat, lon) = Bng.toWgs84(here)
+        val url = "https://www.google.com/maps/@?api=1&map_action=map" +
+            "&center=%.6f,%.6f&zoom=19&basemap=satellite".format(java.util.Locale.UK, lat, lon)
+        try {
+            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+        } catch (e: Exception) {
+            // No browser and no Maps app is unlikely but not impossible, and
+            // a dead button with no explanation is worse than the failure.
+            say("Nothing on the phone would open a map link.")
+        }
+    }
+
     /** The scrubber, open. Says why when there is nothing to scrub. */
     private fun openTimeline() {
         if (wxFrames.isEmpty()) {
@@ -4111,7 +4141,7 @@ class MainActivity : Activity() {
                 }
                 TraceCheck.check(route.points, c.cells, c::known, c.missing, c.empty, c.withData)
             }
-            showTraceReport(report)
+            showTraceReport(report, frame = true)
         }
     }
 
@@ -4120,15 +4150,21 @@ class MainActivity : Activity() {
      * grid reference is an answer you have to go and find; a dashed line
      * over the moor is one you can see before you set off.
      */
-    private fun showTraceReport(report: TraceCheck.Report) {
+    private fun showTraceReport(report: TraceCheck.Report, frame: Boolean = false) {
         if (report.stretches.isEmpty()) {
             map.setPreview(emptyList())
             say(report.words())
             return
         }
         map.setPreview(report.stretches.map { it.line })
-        sayAction(report.words(), "Show") {
-            report.stretches.maxByOrNull { it.metres }?.let { map.fitTo(it.line) }
+        val worst = report.stretches.maxByOrNull { it.metres }
+        if (frame && worst != null) {
+            // He asked for this check, so jumping to what it found is what
+            // he wants. The automatic one must never yank the map about.
+            map.fitTo(worst.line)
+            sayAction(report.words(), "Satellite") { openSatellite(worst.at) }
+        } else {
+            sayAction(report.words(), "Show") { worst?.let { map.fitTo(it.line) } }
         }
     }
 
