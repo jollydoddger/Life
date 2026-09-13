@@ -79,11 +79,20 @@ object Prefs {
         get() = p(this).getString("mapboxKey", "") ?: ""
         set(v) = p(this).edit().putString("mapboxKey", v.trim()).apply()
 
-    /** How strongly the aerial is drawn over the paper, 0-255. Remembered,
-     *  so flicking to it twice in a walk lands on the same blend. */
-    var Context.satelliteAlpha: Int
-        get() = p(this).getInt("satelliteAlpha", 0)
-        set(v) = p(this).edit().putInt("satelliteAlpha", v.coerceIn(0, 255)).apply()
+    /**
+     * Which picture is over the paper: 0 none, 1 aerial, 2 terrain. One
+     * setting rather than one per layer, because they are alternatives —
+     * two photographs of the same ground on top of each other say nothing.
+     */
+    var Context.overlayMode: Int
+        get() = p(this).getInt("overlayMode", 0)
+        set(v) = p(this).edit().putInt("overlayMode", v.coerceIn(0, 2)).apply()
+
+    /** How strongly that picture is drawn, 0-255. Half and half is the
+     *  useful setting for checking a path; full is for looking at it. */
+    var Context.overlayAlpha: Int
+        get() = p(this).getInt("overlayAlpha", 255)
+        set(v) = p(this).edit().putInt("overlayAlpha", v.coerceIn(60, 255)).apply()
 
     var Context.lastBackupAt: Long
         get() = p(this).getLong("lastBackupAt", 0L)

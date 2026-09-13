@@ -527,8 +527,9 @@ class BngMapView @JvmOverloads constructor(
         // together are the whole point: fading between a surveyed line and
         // the ground it claims is there is how you tell a real path from a
         // hopeful one.
-        if (satelliteAlpha < 250) drawTiles(canvas)
+        if (satelliteAlpha < 250 && terrainAlpha < 250) drawTiles(canvas)
         if (satelliteAlpha > 0) drawSatellite(canvas)
+        if (terrainAlpha > 0) drawTerrain(canvas)
         // Weather sits directly on the map paper and under everything he is
         // navigating by: a rain cell must never hide the line he is walking.
         drawField(canvas)
@@ -695,6 +696,57 @@ class BngMapView @JvmOverloads constructor(
 
     private val satellitePaint = Paint(Paint.FILTER_BITMAP_FLAG).apply { alpha = 0 }
     private val satMesh = FloatArray((radarMeshN + 1) * (radarMeshN + 1) * 2)
+
+    // --- imported terrain --------------------------------------------------
+
+    /**
+     * Where a shaded LIDAR tile comes from, if anywhere.
+     *
+     * A function rather than a store, because the store lives in the phone
+     * module and this view does not: the map asks for a tile and does not
+     * need to know that behind it sits a GeoTIFF he downloaded at the
+     * kitchen table. Returns null for ground no imported square covers,
+     * which is most of the country.
+     */
+    var terrainSource: ((z: Int, x: Int, y: Int) -> android.graphics.Bitmap?)? = null
+
+    var terrainAlpha: Int = 0
+        set(value) {
+            field = value.coerceIn(0, 255)
+            terrainPaint.alpha = field
+            invalidate()
+        }
+
+    private val terrainPaint = Paint(Paint.FILTER_BITMAP_FLAG).apply { alpha = 0 }
+
+    /**
+     * Terrain tiles are rendered onto this app's own National Grid pyramid
+     * when they are imported, so unlike the satellite they need no bending
+     * at all — they are already in the right projection at the right zooms.
+     * Absent tiles are simply skipped: an imported square is a few
+     * kilometres in a country, and everywhere else keeps the paper.
+     */
+    private fun drawTerrain(canvas: Canvas) {
+        val source = terrainSource ?: return
+        val m = mpp(zl)
+        val level = (zl - bias).roundToInt().coerceIn(0, TileGrid.MAX_Z)
+        val span = TileGrid.tileSpan(level)
+        val west = centreE - width / 2.0 * m
+        val east = centreE + width / 2.0 * m
+        val north = centreN + height / 2.0 * m
+        val south = centreN - height / 2.0 * m
+        for (x in TileGrid.tileX(west, level)..TileGrid.tileX(east, level)) {
+            for (y in TileGrid.tileY(north, level)..TileGrid.tileY(south, level)) {
+                val bmp = source(level, x, y) ?: continue
+                val left = sx(TileGrid.tileWest(x, level), m)
+                val top = sy(TileGrid.tileNorth(y, level), m)
+                val size = (span / m).toFloat()
+                dstRect.set(left, top, left + size, top + size)
+                srcRect.set(0, 0, bmp.width, bmp.height)
+                canvas.drawBitmap(bmp, srcRect, dstRect, terrainPaint)
+            }
+        }
+    }
 
     /**
      * Mercator tiles bent onto the National Grid, exactly as the radar is —

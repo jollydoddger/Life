@@ -57,7 +57,8 @@ import com.jollydoddger.waymark.shared.Prefs.recordingStartedAt
 import com.jollydoddger.waymark.shared.Prefs.routeColour
 import com.jollydoddger.waymark.shared.Prefs.routeWeight
 import com.jollydoddger.waymark.shared.Prefs.mapboxKey
-import com.jollydoddger.waymark.shared.Prefs.satelliteAlpha
+import com.jollydoddger.waymark.shared.Prefs.overlayMode
+import com.jollydoddger.waymark.shared.Prefs.overlayAlpha
 import com.jollydoddger.waymark.shared.Prefs.routeHidden
 import com.jollydoddger.waymark.shared.Prefs.routeReversed
 import com.jollydoddger.waymark.shared.Prefs.tempEnabled
@@ -142,6 +143,7 @@ class MainActivity : Activity() {
     private lateinit var layerGrid: LinearLayout
     private lateinit var hideBtn: TextView
     private lateinit var weightBtn: TextView
+    private lateinit var blendBtn: TextView
     private lateinit var peekSummary: TextView
     private lateinit var peekMic: View
     private lateinit var wxChip: TextView
@@ -269,6 +271,9 @@ class MainActivity : Activity() {
         super.onCreate(savedInstanceState)
 
         map = BngMapView(this)
+        // Where a shaded LIDAR tile comes from. The map asks; it does not
+        // need to know a GeoTIFF was read at the kitchen table to make it.
+        map.terrainSource = { z, x, y -> TerrainStore.bitmap(this, z, x, y) }
         val d = resources.displayMetrics.density
 
         fun iconButton(glyph: Glyph, onClick: () -> Unit): View =
@@ -744,6 +749,17 @@ class MainActivity : Activity() {
         layerGrid = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         hideBtn = Ui.button(this, "Hide route") { toggleRouteHidden() }
         weightBtn = Ui.button(this, "Line") { cycleRouteWeight() }
+        // Half and half is the setting that answers "is that dashed line
+        // real"; full is for looking at the picture on its own.
+        blendBtn = Ui.button(this, "Blend") {
+            overlayAlpha = if (overlayAlpha > 200) 150 else 255
+            applyOverlay(overlayMode)
+            refreshControls()
+            sayBriefly(
+                if (overlayAlpha > 200) "Overlay at full strength."
+                else "Overlay at half \u2014 the paper reads through it.",
+            )
+        }
         val mapPage = page {
             addView(Ui.heading(this@MainActivity, "Layers"))
             addView(layerGrid, LinearLayout.LayoutParams(
@@ -764,6 +780,14 @@ class MainActivity : Activity() {
                     },
                 ),
             )
+            addView(Ui.heading(this@MainActivity, "Ground"))
+            grid(
+                listOf(
+                    menuAction("Import terrain\u2026") { pickTerrain() },
+                    blendBtn,
+                ),
+            )
+
             addView(Ui.heading(this@MainActivity, "More"))
             grid(
                 listOf(
@@ -1058,8 +1082,40 @@ class MainActivity : Activity() {
             Intent.ACTION_SEND -> @Suppress("DEPRECATION") intent.getParcelableExtra<Uri>(Intent.EXTRA_STREAM)
             else -> null
         }
-        uri?.let { importGpx(it) }
+        uri?.let { importShared(it) }
     }
+
+    /**
+     * Something arrived from another app. It is nearly always a GPX, and is
+     * now sometimes a LIDAR square off the Environment Agency — a zip of
+     * GeoTIFF, twenty megabytes of it. Which one it is decides itself from
+     * the name and the first bytes rather than from the MIME type, because
+     * a file manager will happily call a zip `application/octet-stream`.
+     */
+    private fun importShared(uri: Uri) {
+        importJob?.cancel()
+        importJob = scope.launch {
+            val name = displayName(uri)
+            val bytes = withContext(Dispatchers.IO) {
+                runCatching { contentResolver.openInputStream(uri)!!.use { it.readBytes() } }.getOrNull()
+            }
+            if (bytes == null) {
+                say("Couldn\u2019t read that file.")
+                return@launch
+            }
+            val grid = withContext(Dispatchers.IO) {
+                runCatching { TerrainStore.gridFrom(name, bytes) }.getOrNull()
+            }
+            if (grid != null) adoptTerrain(name, grid) else importGpxBytes(name, bytes)
+        }
+    }
+
+    private fun displayName(uri: Uri): String = runCatching {
+        contentResolver.query(uri, null, null, null, null)?.use { c ->
+            val i = c.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
+            if (i >= 0 && c.moveToFirst()) c.getString(i) else null
+        }
+    }.getOrNull() ?: uri.lastPathSegment.orEmpty()
 
     override fun onResume() {
         super.onResume()
@@ -1078,9 +1134,15 @@ class MainActivity : Activity() {
         map.setPois(PoiStore.load(this))
         map.setColours(routeColour, arrowColour, trailColour)
         map.setRouteWeight(BngMapView.RouteWeight.of(routeWeight))
-        // The aerial blend is remembered, so flicking to it twice in a walk
-        // lands on the same mix rather than starting from the paper again.
-        map.satelliteAlpha = if (mapboxKey.isEmpty()) 0 else satelliteAlpha
+        // Which picture was over the paper is remembered, so flicking to it
+        // twice in a walk lands where it did before.
+        applyOverlay(
+            when {
+                overlayMode == 1 && mapboxKey.isEmpty() -> 0
+                overlayMode == 2 && TerrainStore.squares(this).isEmpty() -> 0
+                else -> overlayMode
+            },
+        )
         // A Start pressed on the watch while this app was closed waits here.
         // The timestamp too: this path never set one, so a watch-started
         // walk showed hours-old elapsed time and saved with a wrong duration.
@@ -1484,6 +1546,7 @@ class MainActivity : Activity() {
                 if (weatherShown) Color.TRANSPARENT else Palette.stroke,
             ),
         )
+        blendBtn.text = if (overlayAlpha > 200) "Overlay: full" else "Overlay: half"
         hideBtn.text = if (routeHidden) "Show route" else "Hide route"
         weightBtn.text = "Line: " + when (BngMapView.RouteWeight.of(routeWeight)) {
             BngMapView.RouteWeight.SOLID -> "solid"
@@ -2162,30 +2225,38 @@ class MainActivity : Activity() {
      * whether anything is actually worn there.
      */
     private fun cycleAerial() {
-        if (mapboxKey.isEmpty()) {
-            sayAction("No aerial imagery without a Mapbox token — it's free.", "Settings") {
-                openSettings()
-            }
+        val haveAerial = mapboxKey.isNotEmpty()
+        val haveTerrain = TerrainStore.squares(this).isNotEmpty()
+        if (!haveAerial && !haveTerrain) {
+            sayAction(
+                "Nothing to flick to yet — a free Mapbox token gives you aerial, " +
+                    "and a LIDAR square gives you the ground itself.",
+                "Settings",
+            ) { openSettings() }
             return
         }
-        val next = when {
-            satelliteAlpha < 60 -> 140
-            satelliteAlpha < 200 -> 255
-            else -> 0
+        // Forward to the next layer that actually exists; off is always
+        // available, so this always terminates.
+        var next = overlayMode
+        for (i in 1..3) {
+            val cand = (overlayMode + i) % 3
+            if (cand == 0 || (cand == 1 && haveAerial) || (cand == 2 && haveTerrain)) {
+                next = cand
+                break
+            }
         }
-        satelliteAlpha = next
-        map.satelliteAlpha = next
+        applyOverlay(next)
         sayBriefly(
             when (next) {
                 0 -> "Back to the OS map."
-                140 -> "Aerial over the paper — half and half."
-                else -> "Aerial photography. Mapbox, © Maxar and contributors."
+                1 -> "Aerial photography. Mapbox, \u00a9 Maxar and contributors."
+                else -> "The ground with the trees taken off it. LIDAR, \u00a9 Environment Agency."
             },
         )
-        // A refused token draws nothing at all, which looks exactly like a
-        // broken feature and tells him nothing. The answer only exists once
-        // a tile has actually been asked for, so this looks again shortly.
-        if (next > 0) {
+        if (next == 1) {
+            // A refused token draws nothing at all, which looks exactly like
+            // a broken feature and tells him nothing. The answer only exists
+            // once a tile has been asked for, so this looks again shortly.
             status.postDelayed({
                 val code = Satellite.lastAuthError
                 if (alive && code != 0 && map.satelliteAlpha > 0) {
@@ -2193,6 +2264,14 @@ class MainActivity : Activity() {
                 }
             }, 3_000)
         }
+    }
+
+    /** Put the chosen picture over the paper, and remember it. */
+    private fun applyOverlay(mode: Int) {
+        overlayMode = mode
+        val a = overlayAlpha
+        map.satelliteAlpha = if (mode == 1) a else 0
+        map.terrainAlpha = if (mode == 2) a else 0
     }
 
     /** Solid → see-through → faint → solid. On the rail and on the Map
@@ -3999,7 +4078,8 @@ class MainActivity : Activity() {
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
         if (requestCode == REQ_WALKS && resultCode == RESULT_OK && data != null) walksResult(data)
-        if (requestCode == 2 && resultCode == RESULT_OK) data?.data?.let { importGpx(it) }
+        if (requestCode == 2 && resultCode == RESULT_OK) data?.data?.let { importShared(it) }
+        if (requestCode == REQ_TERRAIN && resultCode == RESULT_OK) data?.data?.let { importShared(it) }
         if (requestCode == 5 && resultCode == RESULT_OK) data?.data?.let { tree ->
             // Keep the grant across reboots, or every rescan would need re-picking.
             contentResolver.takePersistableUriPermission(tree, Intent.FLAG_GRANT_READ_URI_PERMISSION)
@@ -4098,21 +4178,71 @@ class MainActivity : Activity() {
         b.show()
     }
 
-    private fun importGpx(uri: Uri) {
-        importJob?.cancel()
-        importJob = scope.launch {
-            try {
-                val route = withContext(Dispatchers.IO) {
-                    contentResolver.openInputStream(uri)!!.use { Gpx.parse(it) }
-                        .also { RouteStore.save(this@MainActivity, it) }
-                }
-                say("Imported “${route.name}” — fetching offline tiles…")
-                publishRoute(route)
-            } catch (e: Exception) {
-                say("Import failed: ${e.message ?: e.javaClass.simpleName}")
+    private fun importGpx(uri: Uri) = importShared(uri)
+
+    private suspend fun importGpxBytes(name: String, bytes: ByteArray) {
+        try {
+            val route = withContext(Dispatchers.IO) {
+                Gpx.parse(bytes.inputStream()).also { RouteStore.save(this@MainActivity, it) }
             }
+            say("Imported “${route.name}” — fetching offline tiles…")
+            publishRoute(route)
+        } catch (e: Exception) {
+            say(
+                if (name.lowercase().endsWith(".zip")) {
+                    "That zip has no GPX and no terrain tile in it."
+                } else {
+                    "Import failed: ${e.message ?: e.javaClass.simpleName}"
+                },
+            )
         }
     }
+
+    // --- imported terrain ----------------------------------------------------
+
+    /**
+     * Shade a downloaded LIDAR square and keep it. Slow — several seconds of
+     * real work on six million heights — so it counts itself out loud rather
+     * than looking frozen.
+     */
+    private suspend fun adoptTerrain(name: String, grid: Terrain.Grid) {
+        val label = name.substringBeforeLast('.').ifBlank { "terrain" }
+        say("Reading the ground… ${grid.cols} × ${grid.rows} at ${fmtCell(grid.cellSize)}")
+        val square = withContext(Dispatchers.IO) {
+            TerrainStore.importGrid(this@MainActivity, label, grid) { done, total ->
+                if (done % 12 == 0 || done == total) {
+                    runOnUiThread { say("Shading the ground… $done / $total") }
+                }
+            }
+        }
+        applyOverlay(2)
+        val km = ((square.east - square.west) / 1000).roundToInt()
+        sayAction(
+            "“$label” is in — ${km} km of ground with the trees taken off it.",
+            "Show",
+        ) {
+            map.fitTo(
+                listOf(
+                    En(square.west, square.south), En(square.east, square.north),
+                ),
+            )
+        }
+    }
+
+    private fun fmtCell(m: Double): String =
+        if (m >= 1) "${m.roundToInt()} m" else "%.1f m".format(java.util.Locale.UK, m)
+
+    /** Open a downloaded square from wherever he saved it. */
+    private fun pickTerrain() {
+        val pick = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = "*/*"
+        }
+        @Suppress("DEPRECATION")
+        startActivityForResult(pick, REQ_TERRAIN)
+    }
+
+    private val REQ_TERRAIN = 8
 
     /**
      * A route became current — imported or planned by the assistant. Draw it,

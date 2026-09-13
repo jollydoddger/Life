@@ -347,8 +347,10 @@ the day it was right.
 
 ## Aerial photography under the paper (optional, needs a free token)
 
-The ◱ button on the right-hand rail flicks: **OS paper → half and half →
-photograph → back**. The middle stop is the one that earns it — a dashed
+The ◱ button on the right-hand rail flicks between whichever layers exist:
+**OS paper → aerial → LIDAR terrain → back**, skipping any you haven't set
+up. *Overlay: full / half* on the Map page sets how strongly it draws, and
+half is the one that earns it — a dashed
 right-of-way laid over the ground it claims to cross, so you can see in one
 look whether anything is actually worn there. An OS map is a survey:
 authoritative about what was there, silent about what has happened since.
@@ -367,6 +369,35 @@ better — 10–50 cm, Open Government Licence, free for any use — but it ship
 as bulk GeoTIFF downloads by grid square with only an *index* WMS, so it
 can't be streamed onto a map. If that ever gains a real image service it is
 one URL builder away from being the layer instead.
+
+## The ground itself — LIDAR (optional, free, needs a download)
+
+The one layer that sees **through trees**, and the reason it is worth the
+trouble: aerial photography and the satellite layer both stop at the canopy,
+and in a wooded clough that is most of the walk. A LIDAR terrain model is
+bare earth with the vegetation stripped, so a worn path, a holloway or an
+old terrace shows in hillshade under woodland — and an abandoned right of
+way shows there and nowhere else.
+
+The Environment Agency publish it free under the **Open Government Licence**
+in 5 km tiles aligned to the National Grid, which is this app's own
+coordinate system, so a square lands on the map with no reprojection at all.
+Wales publishes the same thing.
+
+**Getting one:** environment.data.gov.uk/survey → draw a box over where you
+walk → **LIDAR Composite DTM 2 m** → share the zip to Waymark, or *Import
+terrain…* on the Map page. It takes a few seconds to shade, then it is
+cached and offline for good. **Take the 2 m, not the 1 m**: a 1 m square is
+25 million heights and 100 MB as floats, more than the app's heap, so it is
+sampled down to 2 m anyway.
+
+The picture is a hillshade of a *partial* local relief model — most of the
+smoothed hillside subtracted, so a path worn 30 cm into a valley side is not
+lost against 200 m of hill, but enough landscape kept that it still reads as
+countryside rather than grey noise.
+
+Nothing here touches the network: the file is one he downloaded, and this
+reads it.
 
 ## Weather over the map (optional, all off by default)
 

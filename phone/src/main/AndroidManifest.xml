@@ -56,6 +56,14 @@
                 <category android:name="android.intent.category.DEFAULT" />
                 <data android:mimeType="application/gpx+xml" />
             </intent-filter>
+            <!-- A LIDAR square off the Environment Agency arrives as a zip
+                 of GeoTIFF. Which kind of file it is decides itself from
+                 the bytes; this only has to get it through the door. -->
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="application/zip" />
+            </intent-filter>
         </activity>
 
         <activity

@@ -216,14 +216,21 @@ object Terrain {
      * worth having on exactly the ground he walks.
      *
      * [radius] is in cells: roughly the size of the features to keep.
+     *
+     * [keep] leaves that fraction of the landscape in. At zero the result is
+     * a pure relief model, which finds everything and looks like grey noise
+     * — no hills, no valleys, nothing a person can navigate by. A little of
+     * the hillside back and it reads as countryside *with* the small things
+     * showing, which is the picture actually worth putting on a map.
      */
-    fun localRelief(g: Grid, radius: Int = 12): Grid {
+    fun localRelief(g: Grid, radius: Int = 12, keep: Double = 0.0): Grid {
         val smooth = boxBlur(g, radius)
+        val f = (1.0 - keep).toFloat()
         val out = FloatArray(g.heights.size)
         for (i in g.heights.indices) {
             val a = g.heights[i]
             val b = smooth[i]
-            out[i] = if (a.isNaN() || b.isNaN()) Float.NaN else a - b
+            out[i] = if (a.isNaN() || b.isNaN()) Float.NaN else a - f * b
         }
         return Grid(g.west, g.south, g.cellSize, g.cols, g.rows, out)
     }

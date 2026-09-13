@@ -104,6 +104,28 @@ class SettingsActivity : Activity() {
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
             setText(mapboxKey)
         }
+        val groundNote = TextView(this).apply {
+            textSize = 15f
+            val squares = TerrainStore.squares(this@SettingsActivity)
+            val mb = TerrainStore.bytes(this@SettingsActivity) / 1_000_000
+            text = if (squares.isEmpty()) {
+                "No LIDAR squares imported. Download a 2 m DTM tile from " +
+                    "environment.data.gov.uk/survey and share it to Waymark, or use " +
+                    "Import terrain on the map's Map page. It is free under the Open " +
+                    "Government Licence, and it shows worn paths under tree cover, " +
+                    "which no photograph can."
+            } else {
+                "${squares.size} square${if (squares.size == 1) "" else "s"} imported, " +
+                    "$mb MB: ${squares.joinToString(", ") { it.name }}"
+            }
+        }
+        val groundClear = Button(this).apply {
+            text = "Forget imported terrain"
+            setOnClickListener {
+                TerrainStore.clear(this@SettingsActivity)
+                groundNote.text = "Terrain cleared."
+            }
+        }
         val aerialSave = Button(this).apply {
             text = "Save token"
             setOnClickListener {
@@ -542,6 +564,10 @@ class SettingsActivity : Activity() {
                 LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT,
             ).apply { topMargin = dp(16) })
             addView(aerialSave)
+
+            addView(heading("The ground itself (LIDAR)"))
+            addView(groundNote)
+            addView(groundClear)
 
             addView(heading("Assistant"))
             addView(claudeSwitch)
