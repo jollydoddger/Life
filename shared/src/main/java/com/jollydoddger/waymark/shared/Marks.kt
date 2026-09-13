@@ -16,8 +16,26 @@ import kotlin.math.hypot
  * route they were tapped on: a new route silently retires them, because a
  * flag on a line he is no longer walking is a lie waiting for an alarm.
  */
-class Mark(val number: Int, val e: Double, val n: Double, val alongM: Double) {
+class Mark(
+    val number: Int,
+    val e: Double,
+    val n: Double,
+    val alongM: Double,
+    /**
+     * Why this flag is here, when it was not put here by hand.
+     *
+     * Blank for one he tapped: he knows why he tapped it. Set for one the
+     * app raised on his behalf — "692 m with no recorded tracks" — which
+     * makes the flag explain itself when it is tapped weeks later, and is
+     * the only thing separating the app's flags from his own. Nothing may
+     * remove or overwrite a blank one.
+     */
+    val why: String = "",
+) {
     fun en() = En(e, n)
+
+    /** Raised by the app rather than tapped by him. */
+    val automatic: Boolean get() = why.isNotBlank()
 }
 
 object Marks {
@@ -39,7 +57,10 @@ object Marks {
             val arr = o.getJSONArray("marks")
             (0 until arr.length()).map { i ->
                 val m = arr.getJSONObject(i)
-                Mark(m.getInt("number"), m.getDouble("e"), m.getDouble("n"), m.getDouble("alongM"))
+                Mark(
+                    m.getInt("number"), m.getDouble("e"), m.getDouble("n"),
+                    m.getDouble("alongM"), m.optString("why"),
+                )
             }
         } catch (e: Exception) {
             emptyList()
@@ -56,7 +77,10 @@ object Marks {
             val arr = o.getJSONArray("marks")
             (0 until arr.length()).map { i ->
                 val m = arr.getJSONObject(i)
-                Mark(m.getInt("number"), m.getDouble("e"), m.getDouble("n"), m.getDouble("alongM"))
+                Mark(
+                    m.getInt("number"), m.getDouble("e"), m.getDouble("n"),
+                    m.getDouble("alongM"), m.optString("why"),
+                )
             }
         } catch (e: Exception) {
             emptyList()
@@ -70,6 +94,50 @@ object Marks {
         val mark = Mark(number, e, n, alongM)
         save(c, routeFingerprint, existing + mark)
         return mark
+    }
+
+    /**
+     * Put the app's own flags on the route: every mark it raised before is
+     * replaced, and every mark he tapped himself is left exactly where it
+     * is. Returns how many landed and how many would not fit.
+     *
+     * His flags come first for the five slots, always. A check that found
+     * seven doubtful stretches must not quietly evict the summit he
+     * flagged last week to make room for them — the automatic ones are a
+     * convenience and his are the point of the feature.
+     */
+    fun raise(
+        c: Context,
+        routeFingerprint: String,
+        found: List<Triple<Double, Double, Double>>,
+        why: (Int) -> String,
+    ): Pair<Int, Int> {
+        val after = raised(load(c, routeFingerprint), found, why)
+        save(c, routeFingerprint, after)
+        val placed = after.count { it.automatic }
+        return placed to (found.size - placed)
+    }
+
+    /**
+     * The list a [raise] produces — separated from the file so the one
+     * promise in here that matters can be tested: **a flag he tapped is
+     * never removed, renumbered or crowded out.** His come first for the
+     * five slots, and what will not fit is reported rather than dropped
+     * quietly.
+     */
+    fun raised(
+        existing: List<Mark>,
+        found: List<Triple<Double, Double, Double>>,
+        why: (Int) -> String,
+    ): List<Mark> {
+        val his = existing.filter { !it.automatic }
+        val room = (MAX - his.size).coerceAtLeast(0)
+        val take = minOf(room, found.size)
+        var number = his.maxOfOrNull { it.number } ?: 0
+        return his + (0 until take).map { i ->
+            val (e, n, alongM) = found[i]
+            Mark(++number, e, n, alongM, why(i))
+        }
     }
 
     fun remove(c: Context, routeFingerprint: String, number: Int) {
@@ -147,7 +215,7 @@ object Marks {
         for (m in marks) {
             arr.put(
                 JSONObject().put("number", m.number).put("e", m.e).put("n", m.n)
-                    .put("alongM", m.alongM),
+                    .put("alongM", m.alongM).put("why", m.why),
             )
         }
         writeAtomic(file(c), JSONObject().put("route", routeFingerprint).put("marks", arr).toString())

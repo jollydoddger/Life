@@ -3712,8 +3712,17 @@ class MainActivity : Activity() {
                     ?: "\nNo height data yet — time is pace only",
             )
 
+            // A flag the app raised explains itself. Weeks later "why is
+            // there a mark here" is a real question, and the answer is the
+            // whole reason it was worth raising.
+            existing?.why?.takeIf { it.isNotBlank() }?.let { sb.append("\n\n").append(it) }
+
             val dialog = AlertDialog.Builder(this@MainActivity)
-                .setTitle(existing?.let { "Mark ${it.number}" } ?: "This point on the route")
+                .setTitle(
+                    existing?.let {
+                        if (it.automatic) "Mark ${it.number} — worth a look" else "Mark ${it.number}"
+                    } ?: "This point on the route",
+                )
                 .setMessage(sb.toString())
             if (existing == null) {
                 dialog.setPositiveButton("Buzz me there") { _, _ -> armMark(en, targetAlong, mins) }
@@ -4242,6 +4251,24 @@ class MainActivity : Activity() {
         }
     }
 
+    /**
+     * What became of the flags. Said plainly including the part he will not
+     * like: with five of his own on the route there is no room, and a
+     * silent nothing would read as the feature being broken.
+     */
+    private fun flagNote(flagged: Pair<Int, Int>?): String {
+        if (flagged == null) return ""
+        val (placed, dropped) = flagged
+        return when {
+            placed == 0 && dropped > 0 ->
+                " Nothing flagged \u2014 your own five marks have the route; remove one and check again."
+            placed > 0 && dropped > 0 ->
+                " The worst $placed flagged on the route; $dropped more wouldn\u2019t fit."
+            placed > 0 -> " Flagged on the route."
+            else -> ""
+        }
+    }
+
     private fun fmtCell(m: Double): String =
         if (m >= 1) "${m.roundToInt()} m" else "%.1f m".format(java.util.Locale.UK, m)
 
@@ -4350,14 +4377,29 @@ class MainActivity : Activity() {
             return
         }
         map.setPreview(report.stretches.map { it.line })
+        // Drawing the doubtful ground is half an answer: a dashed line is
+        // gone the moment he pans away, and he asked for this to reach him
+        // on the walk. Marks already do that — they sit on the route, count
+        // themselves down and buzz on arrival — so the check raises them,
+        // biggest doubt first, and never touches a flag he set himself.
+        val byWorst = report.stretches.sortedByDescending { it.metres }
+        val flagged = RouteStore.load(this)?.let { route ->
+            val placed = Marks.raise(
+                this,
+                RouteHeights.fingerprint(route),
+                byWorst.map { Triple(it.at.e, it.at.n, it.fromM) },
+            ) { i -> "${byWorst[i].metres.roundToInt()} m with no recorded tracks" }
+            refreshMarks()
+            placed
+        }
         val worst = report.stretches.maxByOrNull { it.metres }
         if (frame && worst != null) {
             // He asked for this check, so jumping to what it found is what
             // he wants. The automatic one must never yank the map about.
             map.fitTo(worst.line)
-            sayAction(report.words(), "Satellite") { openSatellite(worst.at) }
+            sayAction(report.words() + flagNote(flagged), "Satellite") { openSatellite(worst.at) }
         } else {
-            sayAction(report.words(), "Show") { worst?.let { map.fitTo(it.line) } }
+            sayAction(report.words() + flagNote(flagged), "Show") { worst?.let { map.fitTo(it.line) } }
         }
     }
 

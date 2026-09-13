@@ -319,7 +319,14 @@ traces and names the specific metres nobody has a record of walking:
 > Worth a look before you go: 340 m with no recorded tracks at SE 062 281,
 > 2.1 km into the walk, and one other stretch like it.
 
-The doubtful stretches are drawn on the map as you're told about them, and
+**It flags them on the route.** A dashed line is gone the moment you pan
+away, so the doubtful stretches also become **marks** — the same flags a tap
+sets, which sit on the line, count themselves down as you walk and buzz on
+arrival. Biggest doubt first, and tapping one says why it is there. There are
+five slots and **yours always come first**: a check that found seven stretches
+will not evict the summit you flagged last week, it says how many wouldn't fit.
+
+The doubtful stretches are also drawn on the map as you're told about them, and
 *Satellite ↗* opens Google's aerial view at the exact stretch it flagged,
 which is often the quickest way to see whether a path is worn into the ground
 at all. (A link out, not a layer: Google Maps Platform doesn't permit their
