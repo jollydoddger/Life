@@ -69,6 +69,22 @@ object Prefs {
         get() = p(this).getString("backupFolder", "") ?: ""
         set(v) = p(this).edit().putString("backupFolder", v).apply()
 
+    /**
+     * A Mapbox token, for the aerial layer. His own and free-tier, entered
+     * on the phone exactly as the OS key is, and for the same reason: the
+     * imagery worth having is not ours to give away with the app. Empty
+     * means the layer simply is not there.
+     */
+    var Context.mapboxKey: String
+        get() = p(this).getString("mapboxKey", "") ?: ""
+        set(v) = p(this).edit().putString("mapboxKey", v.trim()).apply()
+
+    /** How strongly the aerial is drawn over the paper, 0-255. Remembered,
+     *  so flicking to it twice in a walk lands on the same blend. */
+    var Context.satelliteAlpha: Int
+        get() = p(this).getInt("satelliteAlpha", 0)
+        set(v) = p(this).edit().putInt("satelliteAlpha", v.coerceIn(0, 255)).apply()
+
     var Context.lastBackupAt: Long
         get() = p(this).getLong("lastBackupAt", 0L)
         set(v) = p(this).edit().putLong("lastBackupAt", v).apply()

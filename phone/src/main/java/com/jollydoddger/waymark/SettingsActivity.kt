@@ -28,6 +28,7 @@ import com.jollydoddger.waymark.shared.Prefs.arrowColour
 import com.jollydoddger.waymark.shared.Prefs.assistantEnabled
 import com.jollydoddger.waymark.shared.Prefs.cloudEnabled
 import com.jollydoddger.waymark.shared.Prefs.osApiKey
+import com.jollydoddger.waymark.shared.Prefs.mapboxKey
 import com.jollydoddger.waymark.shared.Prefs.prowEnabled
 import com.jollydoddger.waymark.shared.Prefs.prowShown
 import com.jollydoddger.waymark.shared.Prefs.radarEnabled
@@ -85,6 +86,35 @@ class SettingsActivity : Activity() {
         }
 
         val result = TextView(this).apply { textSize = 15f }
+
+        // The aerial layer's own key. Separate from the OS one and
+        // deliberately optional: with it empty the layer is simply absent,
+        // the same way the assistant is when there is no Anthropic key.
+        val aerialIntro = TextView(this).apply {
+            textSize = 15f
+            text = "Aerial photography, faded over the paper — for when a path is drawn on " +
+                "the map and you want to see whether it is worn into the ground. Needs a " +
+                "free Mapbox token from mapbox.com (Account → Tokens → the default public " +
+                "token). Leave it empty and the layer just isn't there.\n\n" +
+                "Aerial tiles stay on this phone and are never sent to the watch — Mapbox " +
+                "allow the imagery in an app like this one, but not passing it on."
+        }
+        val aerialBox = EditText(this).apply {
+            hint = "Mapbox public token (pk....)"
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
+            setText(mapboxKey)
+        }
+        val aerialSave = Button(this).apply {
+            text = "Save token"
+            setOnClickListener {
+                mapboxKey = aerialBox.text.toString()
+                result.text = if (mapboxKey.isEmpty()) {
+                    "Aerial layer off."
+                } else {
+                    "Saved. The aerial button is on the map's right-hand rail."
+                }
+            }
+        }
 
         val save = Button(this).apply {
             text = "Save"
@@ -505,6 +535,13 @@ class SettingsActivity : Activity() {
             addView(result, LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT,
             ).apply { topMargin = dp(12) })
+
+            addView(heading("Aerial photography"))
+            addView(aerialIntro)
+            addView(aerialBox, LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT,
+            ).apply { topMargin = dp(16) })
+            addView(aerialSave)
 
             addView(heading("Assistant"))
             addView(claudeSwitch)

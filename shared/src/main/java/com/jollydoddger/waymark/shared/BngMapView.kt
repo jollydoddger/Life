@@ -522,7 +522,13 @@ class BngMapView @JvmOverloads constructor(
     override fun onDraw(canvas: Canvas) {
         if (width == 0 || height == 0) return
         canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), bgPaint)
-        drawTiles(canvas)
+        // The paper first, the photograph over it. At full opacity the paper
+        // underneath is only wasted overdraw, but at anything less the two
+        // together are the whole point: fading between a surveyed line and
+        // the ground it claims is there is how you tell a real path from a
+        // hopeful one.
+        if (satelliteAlpha < 250) drawTiles(canvas)
+        if (satelliteAlpha > 0) drawSatellite(canvas)
         // Weather sits directly on the map paper and under everything he is
         // navigating by: a rain cell must never hide the line he is walking.
         drawField(canvas)
@@ -671,6 +677,52 @@ class BngMapView @JvmOverloads constructor(
     /** Mesh resolution per tile: 6x6 quads is plenty at county scale. */
     private val radarMeshN = 6
     private val radarMesh = FloatArray((radarMeshN + 1) * (radarMeshN + 1) * 2)
+
+    // --- aerial photography under the paper ---------------------------------
+
+    /**
+     * How strongly the aerial layer is drawn, 0 (off) to 255. An opacity
+     * rather than a switch because the useful question is rarely "show me
+     * the photo" — it is "does the path on the map exist on the ground",
+     * and that is answered by the two together. See [Satellite].
+     */
+    var satelliteAlpha: Int = 0
+        set(value) {
+            field = value.coerceIn(0, 255)
+            satellitePaint.alpha = field
+            invalidate()
+        }
+
+    private val satellitePaint = Paint(Paint.FILTER_BITMAP_FLAG).apply { alpha = 0 }
+    private val satMesh = FloatArray((radarMeshN + 1) * (radarMeshN + 1) * 2)
+
+    /**
+     * Mercator tiles bent onto the National Grid, exactly as the radar is —
+     * same problem, same solved answer. Asked for on the draw path and
+     * answered from memory; anything missing is fetched off it and redraws
+     * when it lands, so a pan never blanks.
+     */
+    private fun drawSatellite(canvas: Canvas) {
+        val m = mpp(zl)
+        val tiles = Satellite.tiles(context, viewportBounds(), m) { postInvalidateOnAnimation() }
+        for (t in tiles) {
+            val yN = mercY(t.north)
+            val yS = mercY(t.south)
+            var i = 0
+            for (r in 0..radarMeshN) {
+                val lat = invMercY(yN + (yS - yN) * r / radarMeshN)
+                for (c in 0..radarMeshN) {
+                    val lon = t.west + (t.east - t.west) * c / radarMeshN
+                    val en = Bng.fromWgs84(lat, lon)
+                    satMesh[i++] = sx(en.e, m)
+                    satMesh[i++] = sy(en.n, m)
+                }
+            }
+            canvas.drawBitmapMesh(
+                t.bitmap, radarMeshN, radarMeshN, satMesh, 0, null, 0, satellitePaint,
+            )
+        }
+    }
 
     private fun drawRadar(canvas: Canvas) {
         if (radarTiles.isEmpty()) return

@@ -56,6 +56,8 @@ import com.jollydoddger.waymark.shared.Prefs.recording
 import com.jollydoddger.waymark.shared.Prefs.recordingStartedAt
 import com.jollydoddger.waymark.shared.Prefs.routeColour
 import com.jollydoddger.waymark.shared.Prefs.routeWeight
+import com.jollydoddger.waymark.shared.Prefs.mapboxKey
+import com.jollydoddger.waymark.shared.Prefs.satelliteAlpha
 import com.jollydoddger.waymark.shared.Prefs.routeHidden
 import com.jollydoddger.waymark.shared.Prefs.routeReversed
 import com.jollydoddger.waymark.shared.Prefs.tempEnabled
@@ -72,6 +74,7 @@ import com.jollydoddger.waymark.shared.Prefs.weatherOpacity
 import com.jollydoddger.waymark.shared.Prefs.windEnabled
 import com.jollydoddger.waymark.shared.Prefs.windStyle
 import com.jollydoddger.waymark.shared.RouteStore
+import com.jollydoddger.waymark.shared.Satellite
 import com.jollydoddger.waymark.shared.Sun
 import com.jollydoddger.waymark.shared.Sync
 import com.jollydoddger.waymark.shared.TileGrid
@@ -282,10 +285,11 @@ class MainActivity : Activity() {
         recordIcon = IconDrawable(Glyph.RECORD, d)
         val recordBtn = Ui.iconButton(this, recordIcon) { toggleRecording() }
         val opacityBtn = iconButton(Glyph.OPACITY) { cycleRouteWeight() }
+        val aerialBtn = iconButton(Glyph.AERIAL) { cycleAerial() }
 
         buttons = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            listOf(menuBtn, recentreBtn, recordBtn, opacityBtn).forEach {
+            listOf(menuBtn, recentreBtn, recordBtn, opacityBtn, aerialBtn).forEach {
                 addView(it, LinearLayout.LayoutParams(dp(52), dp(52)).apply { topMargin = dp(9) })
             }
         }
@@ -1074,6 +1078,9 @@ class MainActivity : Activity() {
         map.setPois(PoiStore.load(this))
         map.setColours(routeColour, arrowColour, trailColour)
         map.setRouteWeight(BngMapView.RouteWeight.of(routeWeight))
+        // The aerial blend is remembered, so flicking to it twice in a walk
+        // lands on the same mix rather than starting from the paper again.
+        map.satelliteAlpha = if (mapboxKey.isEmpty()) 0 else satelliteAlpha
         // A Start pressed on the watch while this app was closed waits here.
         // The timestamp too: this path never set one, so a watch-started
         // walk showed hours-old elapsed time and saved with a wrong duration.
@@ -2143,6 +2150,49 @@ class MainActivity : Activity() {
             if (routeHidden) "Route hidden \u2014 still stored, still on the watch."
             else "Route back on the map.",
         )
+    }
+
+    /**
+     * Paper → half and half → photograph → paper.
+     *
+     * On the rail because he asked for it there in as many words: something
+     * to "seamlessly flick between on the screen to check". The middle stop
+     * is the one that earns the feature — a dashed path on the OS map laid
+     * over the ground it claims to cross, where you can see in one look
+     * whether anything is actually worn there.
+     */
+    private fun cycleAerial() {
+        if (mapboxKey.isEmpty()) {
+            sayAction("No aerial imagery without a Mapbox token — it's free.", "Settings") {
+                openSettings()
+            }
+            return
+        }
+        val next = when {
+            satelliteAlpha < 60 -> 140
+            satelliteAlpha < 200 -> 255
+            else -> 0
+        }
+        satelliteAlpha = next
+        map.satelliteAlpha = next
+        sayBriefly(
+            when (next) {
+                0 -> "Back to the OS map."
+                140 -> "Aerial over the paper — half and half."
+                else -> "Aerial photography. Mapbox, © Maxar and contributors."
+            },
+        )
+        // A refused token draws nothing at all, which looks exactly like a
+        // broken feature and tells him nothing. The answer only exists once
+        // a tile has actually been asked for, so this looks again shortly.
+        if (next > 0) {
+            status.postDelayed({
+                val code = Satellite.lastAuthError
+                if (alive && code != 0 && map.satelliteAlpha > 0) {
+                    sayAction("Mapbox refused the token (HTTP $code).", "Settings") { openSettings() }
+                }
+            }, 3_000)
+        }
     }
 
     /** Solid → see-through → faint → solid. On the rail and on the Map

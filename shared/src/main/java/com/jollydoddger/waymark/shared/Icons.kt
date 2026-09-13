@@ -10,7 +10,7 @@ import android.graphics.RectF
 import android.graphics.drawable.Drawable
 
 /** The buttons this app has. */
-enum class Glyph { LOCATE, RECORD, REVERSE, ROUTE, DOWNLOAD, SUN, SETTINGS, MIC, SEND, OPACITY }
+enum class Glyph { LOCATE, RECORD, REVERSE, ROUTE, DOWNLOAD, SUN, SETTINGS, MIC, SEND, OPACITY, AERIAL }
 
 /**
  * The map controls, drawn rather than typed.
@@ -177,6 +177,25 @@ class IconDrawable(
                 box.set(cx - g * 0.68f, cy - g * 0.5f, cx + g * 0.68f, cy + g * 0.62f)
                 canvas.drawArc(box, 10f, 160f, false, line)
                 canvas.drawLine(cx, cy + g * 0.62f, cx, cy + g * 1.05f, line)
+            }
+
+            Glyph.AERIAL -> {
+                // A photograph of a hill: the frame says "picture", the
+                // hill and sun say "of the ground". Unmistakable at 52dp
+                // against pale map paper, which a satellite dish is not.
+                box.set(cx - g * 1.0f, cy - g * 0.8f, cx + g * 1.0f, cy + g * 0.8f)
+                line.strokeWidth = 1.8f * density
+                canvas.drawRoundRect(box, g * 0.2f, g * 0.2f, line)
+                canvas.drawCircle(cx + g * 0.45f, cy - g * 0.35f, g * 0.18f, fill)
+                path.rewind()
+                path.moveTo(cx - g * 0.85f, cy + g * 0.6f)
+                path.lineTo(cx - g * 0.2f, cy - g * 0.25f)
+                path.lineTo(cx + g * 0.28f, cy + g * 0.22f)
+                path.lineTo(cx + g * 0.55f, cy - g * 0.05f)
+                path.lineTo(cx + g * 0.85f, cy + g * 0.6f)
+                path.close()
+                canvas.drawPath(path, fill)
+                line.strokeWidth = 2f * density
             }
 
             Glyph.OPACITY -> {

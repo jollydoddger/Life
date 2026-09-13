@@ -345,6 +345,29 @@ as ignorance rather than as a verdict. A check that cried wolf about every
 un-uploaded field is one you'd stop reading, and then it would be ignored on
 the day it was right.
 
+## Aerial photography under the paper (optional, needs a free token)
+
+The ◱ button on the right-hand rail flicks: **OS paper → half and half →
+photograph → back**. The middle stop is the one that earns it — a dashed
+right-of-way laid over the ground it claims to cross, so you can see in one
+look whether anything is actually worn there. An OS map is a survey:
+authoritative about what was there, silent about what has happened since.
+
+Needs a free **Mapbox** public token in ⚙ (Account → Tokens). Empty and the
+layer simply isn't there, the same way the assistant isn't without its key.
+Tiles cache on the phone so a revisited area works offline, and are **never
+sent to the watch** — Mapbox permit the imagery in an app like this one but
+not passing it on.
+
+Two sources that would have been better and are not usable, recorded so
+nobody re-treads it: **Google's** imagery can't go on a third-party map or
+into a cache under Maps Platform's terms, so Google stays the *Satellite ↗*
+link out. The **Environment Agency's** vertical aerial photography is far
+better — 10–50 cm, Open Government Licence, free for any use — but it ships
+as bulk GeoTIFF downloads by grid square with only an *index* WMS, so it
+can't be streamed onto a map. If that ever gains a real image service it is
+one URL builder away from being the layer instead.
+
 ## Weather over the map (optional, all off by default)
 
 Four switches in Settings, each independent, all fed from two sources and
