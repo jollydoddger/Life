@@ -164,23 +164,52 @@ object Satellite {
         if ((x1 - x0 + 1).toLong() * (y1 - y0 + 1) > 64) return emptyList()
 
         val out = ArrayList<BngMapView.MeshTile>()
+        // Ancestors already added for a missing child — a coarser tile
+        // covers several children at once, so the second and third child
+        // that needs it must not draw it again.
+        val fallbackDrawn = HashSet<String>()
         for (x in x0..x1) {
             for (y in y0..y1) {
                 if (x < 0 || y < 0 || x >= (1 shl z) || y >= (1 shl z)) continue
                 val k = key(z, x, y)
-                val bmp = memory.get(k) ?: run { load(ctx, z, x, y, k, token, onReady); null }
+                val bmp = memory.get(k)
                 if (bmp != null) {
-                    out.add(
-                        BngMapView.MeshTile(
-                            bmp,
-                            yToLat(y + 1, z), xToLon(x, z), yToLat(y, z), xToLon(x + 1, z),
-                        ),
-                    )
+                    out.add(meshTile(bmp, z, x, y))
+                    continue
+                }
+                load(ctx, z, x, y, k, token, onReady)
+                // The real tile is on its way; meanwhile draw whatever
+                // coarser one is already held, the way the OS paper and
+                // the LIDAR layer both do. Without this the layer went
+                // blank rather than blurry — not only while a tile was
+                // still loading, but for good on ground where Mapbox's
+                // own imagery does not reach this deep, which rural
+                // Britain quite often is. "Zoom stops here or the picture
+                // disappears" is the one thing that reads as broken.
+                var up = 1
+                while (up <= 6) {
+                    val zp = z - up
+                    if (zp < 0) break
+                    val xp = x shr up
+                    val yp = y shr up
+                    val pk = key(zp, xp, yp)
+                    if (pk in fallbackDrawn) break // already covers this cell
+                    val parent = memory.get(pk)
+                    if (parent != null) {
+                        out.add(meshTile(parent, zp, xp, yp))
+                        fallbackDrawn.add(pk)
+                        break
+                    }
+                    up++
                 }
             }
         }
         return out
     }
+
+    private fun meshTile(bmp: Bitmap, z: Int, x: Int, y: Int) = BngMapView.MeshTile(
+        bmp, yToLat(y + 1, z), xToLon(x, z), yToLat(y, z), xToLon(x + 1, z),
+    )
 
     private fun load(ctx: Context, z: Int, x: Int, y: Int, k: String, token: String, onReady: () -> Unit) {
         synchronized(inFlight) {

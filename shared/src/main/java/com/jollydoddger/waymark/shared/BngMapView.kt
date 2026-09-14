@@ -53,9 +53,31 @@ class BngMapView @JvmOverloads constructor(
     private val density = resources.displayMetrics.density
     private val bias = min(ln(density.toDouble()) / ln(2.0), 1.25)
     private val minZl = 1.0
-    // +1.0 past the density-corrected native level = 2x magnification of
-    // OS's finest tiles: bigger for tired eyes and gloved taps, still legible.
-    private val maxZl = TileGrid.MAX_Z + bias + 1.0
+
+    /**
+     * How far past the OS paper's own sharpest tile a pinch may go.
+     *
+     * +1.0 past the density-corrected native level is 2x magnification of
+     * OS's finest tiles — bigger for tired eyes and gloved taps, still
+     * legible, and as far as it is honest to take a *survey*: past that it
+     * is not showing him anything the paper did not already say, just
+     * bigger letters.
+     *
+     * A photograph or a hillshade is a different kind of thing to zoom into
+     * than a map, and he asked for exactly this: *"I understand it's
+     * probably displaying at its highest res but I would like to zoom in
+     * ... it's a phone with a small screen."* Bigger is still more legible
+     * than sharper on a screen that size, whatever the pixels underneath
+     * are doing — Google Maps and every other slippy map let a pinch run
+     * well past the deepest real tile for the same reason. So the ceiling
+     * lifts while either overlay is actually showing, and only then: the
+     * paper alone keeps its honest limit.
+     */
+    private val maxZl: Double
+        get() {
+            val overlayShown = satelliteAlpha > 0 || terrainAlpha > 0
+            return TileGrid.MAX_Z + bias + if (overlayShown) 4.0 else 1.0
+        }
 
     private var centreE = 400_000.0 // mid-GB until a fix or a route arrives
     private var centreN = 300_000.0

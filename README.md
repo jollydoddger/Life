@@ -362,6 +362,16 @@ right-of-way laid over the ground it claims to cross, so you can see in one
 look whether anything is actually worn there. An OS map is a survey:
 authoritative about what was there, silent about what has happened since.
 
+**Pinch further in than the paper allows.** A survey stops being useful to
+magnify past its own sharpest print; a photograph or a hillshade is worth
+enlarging well past that on a small screen, blurry pixels and all — so the
+zoom ceiling lifts on its own while either overlay is actually showing, the
+same trade every other slippy map makes. If a tile at the deepest real zoom
+isn't in yet — still loading, or Mapbox simply doesn't hold imagery that
+close for that stretch of ground, which happens in rural areas — the nearest
+coarser one already held is shown enlarged in its place rather than a gap:
+the same "blurry beats blank" the OS paper and the LIDAR layer already do.
+
 Needs a free **Mapbox** public token in ⚙ (Account → Tokens). Empty and the
 layer simply isn't there, the same way the assistant isn't without its key.
 Tiles cache on the phone so a revisited area works offline, and are **never
