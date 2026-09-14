@@ -21,8 +21,21 @@ jobs:
           distribution: temurin
           java-version: '17'
 
+      # No explicit `packages` used to mean the action's own default,
+      # "tools platform-tools" — and Google has now pulled the legacy
+      # `tools` package from the SDK repository index entirely, so that
+      # default install fails on a fresh runner with "Failed to find
+      # package 'tools'" before a line of this repo's own Kotlin is ever
+      # touched. Named here instead: platform-tools is the one piece this
+      # step actually needs to hand off (adb, for whatever AGP itself
+      # shells out to); compileSdk, build-tools and everything else the
+      # build actually compiles against are resolved by the Android
+      # Gradle Plugin from its own repositories once Gradle starts, not
+      # by this step at all.
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
