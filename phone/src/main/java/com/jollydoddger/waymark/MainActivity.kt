@@ -783,9 +783,13 @@ class MainActivity : Activity() {
             addView(Ui.heading(this@MainActivity, "Ground"))
             grid(
                 listOf(
+                    // Not menuAction: this reports progress in place over
+                    // several seconds, the same shape as Check the paths,
+                    // and closing the panel on tap would only hide that.
+                    Ui.button(this@MainActivity, "Fetch this area") { fetchTerrainHere() },
                     menuAction("Import terrain\u2026") { pickTerrain() },
-                    blendBtn,
                 ),
+                listOf(blendBtn),
             )
 
             addView(Ui.heading(this@MainActivity, "More"))
@@ -4283,6 +4287,39 @@ class MainActivity : Activity() {
     }
 
     private val REQ_TERRAIN = 8
+
+    /**
+     * "Whatever the map is on at the moment, click and it does its stuff."
+     *
+     * A square of LIDAR for wherever he is looking, fetched live off the
+     * Environment Agency's WCS — no zip, no file picker. Reuses
+     * [adoptTerrain] for everything past the bytes arriving, so a fetched
+     * square and a manually downloaded one shade, tile and list exactly
+     * the same way.
+     */
+    private fun fetchTerrainHere() {
+        val b = map.viewportBounds()
+        val centre = En((b[0] + b[2]) / 2, (b[1] + b[3]) / 2)
+        if (TerrainFetch.obviouslyOutside(centre)) {
+            say(
+                "That's well outside where this dataset reaches — it only covers England. " +
+                    "For Wales or Scotland, download a square yourself and share it in.",
+            )
+            return
+        }
+        importJob?.cancel()
+        importJob = scope.launch {
+            say("Reading the ground here…")
+            val result = withContext(Dispatchers.IO) { runCatching { TerrainFetch.fetch(centre) } }
+            result.onSuccess { grid ->
+                val name = Bng.gridRef(centre, 3)?.let { "LIDAR $it" } ?: "LIDAR square"
+                adoptTerrain(name, grid)
+            }.onFailure { e ->
+                if (e is kotlinx.coroutines.CancellationException) throw e
+                say("Couldn’t get the ground here: ${e.message ?: e.javaClass.simpleName}")
+            }
+        }
+    }
 
     /**
      * A route became current — imported or planned by the assistant. Draw it,

@@ -10,7 +10,12 @@ import java.net.URLEncoder
  * and every free service here deserves the same courtesy.
  */
 object Net {
-    private const val UA = "Waymark/0.1 (personal walking app; github.com/jollydoddger/Life)"
+    // Not private: TerrainFetch's WCS client reads a response body on a
+    // 4xx too, which none of the throwing helpers below do, so it opens
+    // its own connection — but it is asking a free public service for
+    // real data, so it deserves the same honest header the rest of this
+    // file already sends everywhere else.
+    const val UA = "Waymark/0.1 (personal walking app; github.com/jollydoddger/Life)"
 
     fun encode(v: String): String = URLEncoder.encode(v, "UTF-8")
 

@@ -401,7 +401,18 @@ in 5 km tiles aligned to the National Grid, which is this app's own
 coordinate system, so a square lands on the map with no reprojection at all.
 Wales publishes the same thing.
 
-**Getting one:** GPX button → Map → Ground → *Import terrain…*, and pick the
+**Getting one — the easy way.** GPX button → Map → Ground → *Fetch this
+area*, and Waymark asks the Environment Agency itself for a 5 km square
+centred on wherever the map is currently looking — no download, no zip, no
+leaving the app. It shades and appears exactly like an imported square,
+because past the bytes arriving it *is* one: same reader, same cache, same
+entry on the Ground list. This only reaches **England** — the dataset's own
+box happens to also span Wales, so a square that comes back entirely empty
+is read as "not covered here" and says so, with where to get Wales's
+instead, rather than pretending the ground was surveyed and came back flat.
+
+**Getting one — the manual way**, for Wales or for a square larger than
+5 km: GPX button → Map → Ground → *Import terrain…*, and pick the
 downloaded zip (Waymark finds the `.tif` inside it and ignores the metadata
 beside it). Or share the zip to Waymark from a file manager — what kind of
 file it is works itself out from the bytes. Download them from
