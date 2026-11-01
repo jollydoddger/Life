@@ -9,6 +9,11 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Updating itself (WatchUpdate), so a new build no longer needs ADB.
+         The second lets a self-update skip the confirmation where Android
+         allows it (13 and up); it is a normal permission and asks nothing. -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <uses-permission android:name="android.permission.UPDATE_PACKAGES_WITHOUT_USER_ACTION" />
 
     <application
         android:label="@string/app_name"
@@ -52,5 +57,10 @@
             android:name="com.jollydoddger.waymark.shared.TrackingService"
             android:exported="false"
             android:foregroundServiceType="location" />
+        <!-- The installer's verdict on an update. Reached only through our
+             own explicit PendingIntent, so it is not exported. -->
+        <receiver
+            android:name=".InstallResultReceiver"
+            android:exported="false" />
     </application>
 </manifest>

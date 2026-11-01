@@ -17,6 +17,7 @@ import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
 import android.widget.FrameLayout
+import android.widget.LinearLayout
 import android.widget.TextView
 import com.google.android.gms.wearable.DataClient
 import com.google.android.gms.wearable.DataEvent
@@ -71,6 +72,7 @@ class MainActivity : Activity(), DataClient.OnDataChangedListener {
     private lateinit var map: BngMapView
     private lateinit var hint: TextView
     private lateinit var weather: TextView
+    private lateinit var updateLine: TextView
     private var locator: Locator? = null
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
 
@@ -100,6 +102,33 @@ class MainActivity : Activity(), DataClient.OnDataChangedListener {
             setOnClickListener {
                 map.recentre()
                 keepAwake()
+            }
+            // Holding it looks for a new watch build now rather than at the
+            // next six-hourly check — the one button keeps its one job on a
+            // tap, and an update is not worth a second button on a 45mm dial.
+            setOnLongClickListener {
+                scope.launch { WatchUpdate.check(this@MainActivity, force = true) }
+                true
+            }
+        }
+
+        // A new watch build, offered with a tap, and the install's progress.
+        // Tapping a finished line puts it away.
+        updateLine = TextView(this).apply {
+            setTextColor(Color.WHITE)
+            setBackgroundColor(Color.argb(220, 20, 60, 120))
+            textSize = 11f
+            gravity = Gravity.CENTER
+            maxLines = 4
+            setPadding(dp(10), dp(5), dp(10), dp(5))
+            visibility = View.GONE
+            setOnClickListener {
+                val now = WatchUpdate.state.value
+                val offer = now.offer
+                when {
+                    offer != null -> scope.launch { WatchUpdate.install(this@MainActivity, offer) }
+                    !now.busy -> WatchUpdate.dismiss()
+                }
             }
         }
 
@@ -132,10 +161,22 @@ class MainActivity : Activity(), DataClient.OnDataChangedListener {
             addView(recentreBtn, FrameLayout.LayoutParams(dp(48), dp(48), Gravity.START or Gravity.CENTER_VERTICAL).apply {
                 leftMargin = dp(6)
             })
-            addView(hint, FrameLayout.LayoutParams(
+            // The update line above the hint, in one column, so the two
+            // cannot sit on top of each other at the top of the dial.
+            val top = LinearLayout(this@MainActivity).apply {
+                orientation = LinearLayout.VERTICAL
+                gravity = Gravity.CENTER_HORIZONTAL
+                addView(updateLine, LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT,
+                ).apply { bottomMargin = dp(4) })
+                addView(hint, LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT,
+                ))
+            }
+            addView(top, FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT,
                 Gravity.TOP or Gravity.CENTER_HORIZONTAL,
-            ).apply { topMargin = dp(26) })
+            ).apply { topMargin = dp(26); leftMargin = dp(28); rightMargin = dp(28) })
             addView(weather, FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT,
                 Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL,
@@ -144,6 +185,8 @@ class MainActivity : Activity(), DataClient.OnDataChangedListener {
         setContentView(root)
 
         applySettings()
+
+        scope.launch { WatchUpdate.state.collect { showUpdate(it) } }
 
         val wanted = mutableListOf(
             Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION,
@@ -221,6 +264,9 @@ class MainActivity : Activity(), DataClient.OnDataChangedListener {
         startRecordingIfWanted()
         keepGpsWarm()
 
+        // At most every six hours, and silent unless there is a new build.
+        scope.launch { WatchUpdate.check(this@MainActivity, force = false) }
+
         if (checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
             locator = Locator(this, { en, stale -> map.setFix(en.e, en.n, stale) }, { map.setHeading(it) })
                 .also { it.start() }
@@ -278,6 +324,23 @@ class MainActivity : Activity(), DataClient.OnDataChangedListener {
         lastWarmStamp = now
         warmUntil = now + WARM_HOLD_MS
         TrackingService.warm(this)
+    }
+
+    /**
+     * The update line. While it is busy the screen is held on: a download
+     * takes a while, and the installer's confirmation can only be put in
+     * front of him while Waymark is the app on screen.
+     */
+    private fun showUpdate(state: WatchUpdate.State) {
+        val text = state.text
+        updateLine.text = text.orEmpty()
+        updateLine.visibility = if (text.isNullOrBlank()) View.GONE else View.VISIBLE
+        if (state.busy) {
+            handler.removeCallbacks(sleepScreen)
+            window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        } else {
+            keepAwake()
+        }
     }
 
     private fun showWeather() {
