@@ -55,6 +55,20 @@ update, from any computer on the same Wi-Fi as the watch:
    `adb connect <watch-ip>:<port>` (accept the prompt on the watch) and
    `adb install -r waymark-watch.apk`.
 
+**After that, the watch updates itself.** Every few hours, opening Waymark on
+the watch checks the release for a newer `waymark-watch.apk`. If there is one,
+a blue line at the top says so: tap it and the watch downloads the build and
+installs it over itself. Hold ◉ to check straight away. The screen stays on
+while it runs.
+
+Installing its own updates needs Android's "install unknown apps" permission,
+and a watch usually has no screen for it. So while you are connected for that
+first install, run this once:
+
+    adb shell appops set com.jollydoddger.waymark REQUEST_INSTALL_PACKAGES allow
+
+If an update fails because that is missing, the watch shows the same line.
+
 ## Using it
 
 **Zoom, on both devices: tap the map to zoom in, press and hold to zoom out.**
