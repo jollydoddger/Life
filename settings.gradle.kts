@@ -18,3 +18,5 @@ rootProject.name = "waymark"
 include(":shared")
 include(":phone")
 include(":wear")
+include(":photoframe")
+include(":photoframe-phone")

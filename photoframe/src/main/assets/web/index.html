@@ -1,0 +1,388 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#16181e">
+<title>Photo Frame</title>
+<style>
+  :root { --bg:#16181e; --card:#1f222a; --line:#2c303a; --text:#eceef2; --dim:#9aa0ab; --acc:#f0c878; --bad:#ef6b6b; --ok:#6bd49a; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font:16px/1.45 -apple-system, system-ui, Roboto, sans-serif; padding-bottom:84px; }
+  header { padding:18px 18px 6px; display:flex; align-items:center; gap:10px; }
+  header h1 { font-size:21px; margin:0; flex:1; }
+  .pill { font-size:13px; padding:4px 10px; border-radius:99px; background:var(--card); color:var(--dim); white-space:nowrap; }
+  .pill.on { color:var(--ok); } .pill.off { color:var(--bad); }
+  main { padding:8px 14px; max-width:860px; margin:0 auto; }
+  section { display:none; } section.active { display:block; }
+  .card { background:var(--card); border-radius:16px; padding:16px; margin:12px 0; }
+  h2 { font-size:15px; margin:0 0 10px; color:var(--dim); font-weight:600; text-transform:uppercase; letter-spacing:.04em; }
+  label.row { display:flex; justify-content:space-between; align-items:center; gap:12px; padding:9px 0; border-top:1px solid var(--line); }
+  label.row:first-of-type { border-top:none; }
+  select, input[type=text], input[type=number], input[type=time] { background:#2a2e38; color:var(--text); border:1px solid var(--line); border-radius:10px; padding:8px 10px; font-size:15px; }
+  input[type=number] { width:84px; }
+  input[type=checkbox] { width:22px; height:22px; accent-color:var(--acc); }
+  button { background:#2f3440; color:var(--text); border:0; border-radius:12px; padding:11px 16px; font-size:15px; font-weight:600; }
+  button.primary { background:var(--acc); color:#1b1b1b; }
+  button.danger { background:#4a2629; color:#ffb4b4; }
+  .drop { border:2px dashed #3a3f4b; border-radius:16px; padding:30px 14px; text-align:center; color:var(--dim); }
+  .drop.hover { border-color:var(--acc); color:var(--text); }
+  body.dragging::after { content:"Drop to send to the TV"; position:fixed; inset:0; display:flex; align-items:center; justify-content:center; font-size:24px; font-weight:600; background:rgba(22,24,30,.88); border:3px dashed var(--acc); color:var(--acc); z-index:9; pointer-events:none; }
+  .touch { display:none; }
+  @media (pointer:coarse) { .desk { display:none; } .touch { display:inline; } }
+  .drop button { margin-top:12px; }
+  .bar { height:6px; background:#2a2e38; border-radius:4px; overflow:hidden; margin-top:6px; }
+  .bar > i { display:block; height:100%; width:0; background:var(--acc); transition:width .2s; }
+  .qitem { padding:8px 0; border-top:1px solid var(--line); font-size:14px; }
+  .qitem:first-child { border-top:none; }
+  .qitem .n { display:flex; justify-content:space-between; gap:8px; }
+  .qitem .n span:first-child { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .chips { display:flex; gap:8px; overflow-x:auto; padding-bottom:4px; }
+  .chip { flex:none; padding:7px 13px; border-radius:99px; background:#2a2e38; color:var(--dim); font-size:14px; border:0; font-weight:500; }
+  .chip.sel { background:var(--acc); color:#1b1b1b; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(104px,1fr)); gap:6px; margin-top:12px; }
+  .tile { position:relative; aspect-ratio:1; border-radius:10px; overflow:hidden; background:#2a2e38; }
+  .tile img { width:100%; height:100%; object-fit:cover; display:block; }
+  .tile .v { position:absolute; left:6px; bottom:6px; font-size:12px; background:rgba(0,0,0,.6); padding:2px 6px; border-radius:6px; }
+  .tile.sel { outline:3px solid var(--acc); outline-offset:-3px; }
+  .tile.sel::after { content:"✓"; position:absolute; top:6px; right:8px; font-weight:700; color:var(--acc); text-shadow:0 0 4px #000; }
+  .remote { display:grid; grid-template-columns:repeat(3,1fr); gap:10px; }
+  .remote button { padding:16px 0; font-size:18px; }
+  .phone { display:flex; gap:8px; margin:8px 0; align-items:center; }
+  .phone input { flex:1; min-width:0; }
+  .phone .seen { font-size:12px; color:var(--dim); width:76px; text-align:right; }
+  .muted { color:var(--dim); font-size:14px; }
+  .actions { display:flex; gap:10px; flex-wrap:wrap; margin-top:12px; }
+  nav { position:fixed; left:0; right:0; bottom:0; display:flex; background:#121318; border-top:1px solid var(--line); padding-bottom:env(safe-area-inset-bottom); }
+  nav button { flex:1; background:none; border-radius:0; padding:12px 0 14px; color:var(--dim); font-size:13px; font-weight:500; }
+  nav button b { display:block; font-size:20px; line-height:1.2; }
+  nav button.active { color:var(--acc); }
+  .toast { position:fixed; left:50%; bottom:92px; transform:translateX(-50%); background:#2f3440; padding:10px 16px; border-radius:12px; opacity:0; transition:opacity .25s; pointer-events:none; }
+  .toast.show { opacity:1; }
+</style>
+</head>
+<body>
+<header>
+  <h1>📺 Photo Frame</h1>
+  <span id="awake" class="pill">…</span>
+</header>
+<main>
+  <!-- UPLOAD -->
+  <section id="tab-upload" class="active">
+    <div class="card">
+      <h2>Upload to</h2>
+      <div style="display:flex; gap:8px">
+        <select id="upAlbum" style="flex:1"></select>
+        <button onclick="newAlbum()">+ Album</button>
+      </div>
+    </div>
+    <div class="card">
+      <div id="drop" class="drop">
+        <span class="desk">Drop photos, videos or whole folders anywhere on this page<br><span class="muted">a folder becomes an album with its name</span><br></span>
+        <span class="touch">Pick photos &amp; videos to send<br></span>
+        <button class="primary" onclick="document.getElementById('pick').click()">Choose files</button>
+        <button class="desk" onclick="document.getElementById('pickDir').click()">Choose folder</button>
+        <input id="pick" type="file" multiple accept="image/*,video/*" hidden>
+        <input id="pickDir" type="file" webkitdirectory multiple hidden>
+      </div>
+      <div id="queue" style="margin-top:12px"></div>
+    </div>
+    <div class="card muted" id="storageInfo">…</div>
+  </section>
+
+  <!-- LIBRARY -->
+  <section id="tab-library">
+    <div class="card">
+      <div class="chips" id="albumChips"></div>
+      <div class="actions">
+        <button class="danger" id="delBtn" onclick="deleteSelected()" disabled>Delete selected</button>
+        <button onclick="clearSel()">Clear</button>
+        <button id="delAlbumBtn" onclick="deleteAlbum()" style="display:none">Remove empty album</button>
+      </div>
+      <div class="grid" id="grid"></div>
+      <p class="muted" id="libEmpty" style="display:none">Nothing here yet.</p>
+    </div>
+  </section>
+
+  <!-- SETTINGS -->
+  <section id="tab-settings">
+    <form id="sf" onsubmit="return false">
+      <div class="card">
+        <h2>Display</h2>
+        <label class="row">Mode <select name="mode"><option value="slideshow">Slideshow</option><option value="wall">Photo wall</option><option value="mixed">Mixed (alternate)</option></select></label>
+        <label class="row">Seconds per photo <input type="number" name="intervalSec" min="3" max="3600"></label>
+        <label class="row">Transition <select name="transition"><option value="kenburns">Ken Burns (slow pan/zoom)</option><option value="fade">Crossfade</option><option value="none">None</option></select></label>
+        <label class="row">Photo fit <select name="fit"><option value="blur">Fit + blurred background</option><option value="fit">Fit (black bars)</option><option value="fill">Fill screen (crop)</option></select></label>
+        <label class="row">Wall layout <select name="wallLayout"><option value="mosaic">Mosaic (1 big + 4)</option><option value="grid">Grid 3×2</option><option value="grid12">Grid 4×3</option></select></label>
+        <label class="row">Mixed: switch every (min) <input type="number" name="mixedMinutes" min="1" max="240"></label>
+        <label class="row">Shuffle <input type="checkbox" name="shuffle"></label>
+        <label class="row">Show clock <input type="checkbox" name="showClock"></label>
+      </div>
+      <div class="card">
+        <h2>Videos</h2>
+        <label class="row">Include videos <input type="checkbox" name="includeVideos"></label>
+        <label class="row">Max seconds per video <input type="number" name="videoMaxSec" min="5" max="3600"></label>
+        <label class="row">Play sound <input type="checkbox" name="videoSound"></label>
+      </div>
+      <div class="card">
+        <h2>Albums to show</h2>
+        <div class="muted" style="margin-bottom:6px">None ticked = show everything.</div>
+        <div id="albumPick"></div>
+      </div>
+      <div class="card">
+        <h2>Schedule</h2>
+        <label class="row">Only show between set times <input type="checkbox" name="scheduleEnabled"></label>
+        <label class="row">On at <input type="time" name="onTime"></label>
+        <label class="row">Off at <input type="time" name="offTime"></label>
+      </div>
+      <div class="card">
+        <h2>Only when we're home</h2>
+        <label class="row">Turn off when phones leave <input type="checkbox" name="presenceEnabled"></label>
+        <label class="row">Off after nobody seen for (min) <input type="number" name="awayGraceMin" min="1" max="720"></label>
+        <div id="phones"></div>
+        <button type="button" onclick="addPhone()">+ Add phone</button>
+        <p class="muted">Use each phone's fixed IP (set a DHCP reservation in your router) and turn off "private / random Wi-Fi address" for your home network on the phone.</p>
+      </div>
+      <div class="card">
+        <h2>When off</h2>
+        <label class="row">Screen <select name="sleepAction"><option value="black">Black screen (reliable)</option><option value="sleep">Let TV sleep (experimental)</option></select></label>
+        <p class="muted">Black uses local dimming, so the backlight is almost off. "Let TV sleep" lets the TV's own screen-off timer take over and tries to wake it again.</p>
+      </div>
+      <div class="actions" style="margin-bottom:20px"><button class="primary" onclick="saveSettings()">Save settings</button></div>
+    </form>
+  </section>
+
+  <!-- REMOTE / STATUS -->
+  <section id="tab-remote">
+    <div class="card">
+      <h2>Remote</h2>
+      <div class="remote">
+        <button onclick="ctl('prev')">◀</button>
+        <button onclick="ctl('pause')">❚❚ / ▶</button>
+        <button onclick="ctl('next')">▶</button>
+        <button onclick="ctl('wake')">☀ Wake</button>
+        <button onclick="ctl('info')">ⓘ Info</button>
+        <button onclick="ctl('sleep')">☾ Sleep</button>
+      </div>
+    </div>
+    <div class="card">
+      <h2>Status</h2>
+      <div id="statusBox" class="muted">…</div>
+    </div>
+  </section>
+</main>
+
+<nav>
+  <button class="active" data-tab="upload"><b>⬆</b>Upload</button>
+  <button data-tab="library"><b>▦</b>Library</button>
+  <button data-tab="settings"><b>⚙</b>Settings</button>
+  <button data-tab="remote"><b>◉</b>Remote</button>
+</nav>
+<div class="toast" id="toast"></div>
+
+<script>
+const $ = s => document.querySelector(s);
+const api = (p, o) => fetch(p, o).then(async r => { const j = await r.json().catch(() => ({})); if (!r.ok) throw new Error(j.error || r.statusText); return j; });
+const esc = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const fmtBytes = b => b > 1e9 ? (b/1e9).toFixed(1)+' GB' : b > 1e6 ? (b/1e6).toFixed(0)+' MB' : Math.round(b/1e3)+' KB';
+function toast(t) { const el = $('#toast'); el.textContent = t; el.classList.add('show'); clearTimeout(toast.t); toast.t = setTimeout(() => el.classList.remove('show'), 2000); }
+
+// ---------- tabs ----------
+document.querySelectorAll('nav button').forEach(b => b.onclick = () => {
+  document.querySelectorAll('nav button').forEach(x => x.classList.toggle('active', x === b));
+  document.querySelectorAll('section').forEach(s => s.classList.toggle('active', s.id === 'tab-' + b.dataset.tab));
+  if (b.dataset.tab === 'library') loadLibrary();
+  if (b.dataset.tab === 'settings') loadSettings();
+});
+
+// ---------- albums ----------
+let albums = [];
+async function loadAlbums() {
+  albums = await api('/api/albums');
+  const sel = $('#upAlbum'), cur = sel.value;
+  sel.innerHTML = albums.map(a => `<option value="${esc(a.name)}">${a.name ? esc(a.name) : 'Unsorted'} (${a.count})</option>`).join('');
+  if (albums.some(a => a.name === cur)) sel.value = cur;
+}
+async function newAlbum() {
+  const n = prompt('Album name (e.g. Holidays 2026)');
+  if (!n) return;
+  await api('/api/albums?name=' + encodeURIComponent(n), { method:'POST' });
+  await loadAlbums();
+  $('#upAlbum').value = albums.find(a => a.name.toLowerCase() === n.trim().toLowerCase())?.name ?? '';
+  toast('Album created');
+}
+
+// ---------- upload ----------
+const queue = [];
+let uploading = false;
+const MEDIA = /\.(jpe?g|png|webp|heic|heif|gif|bmp|mp4|m4v|mov|mkv|webm|3gp)$/i;
+// items: [{ f: File, album?: string }]. No album = the one picked at the top.
+function addFiles(items) {
+  for (const it of items) {
+    const f = it.f || it, album = it.album ?? $('#upAlbum').value;
+    if (f.name.startsWith('.') || !MEDIA.test(f.name)) continue;
+    const row = document.createElement('div');
+    row.className = 'qitem';
+    row.innerHTML = `<div class="n"><span>${esc((album ? album + ' › ' : '') + f.name)}</span><span class="muted">${fmtBytes(f.size)}</span></div><div class="bar"><i></i></div>`;
+    $('#queue').prepend(row);
+    queue.push({ f, row, album });
+  }
+  pump();
+}
+// A dropped folder → album named after it (subfolders flattened in)
+async function entryFiles(entry, album, out) {
+  if (entry.isFile) { out.push({ f: await new Promise((ok, no) => entry.file(ok, no)), album }); return; }
+  if (!entry.isDirectory || entry.name.startsWith('.')) return;
+  const reader = entry.createReader();
+  for (;;) {
+    const batch = await new Promise((ok, no) => reader.readEntries(ok, no)); // at most 100 at a time
+    if (!batch.length) break;
+    for (const e of batch) await entryFiles(e, album, out);
+  }
+}
+async function addDropped(dt) {
+  const entries = [...dt.items].map(i => i.webkitGetAsEntry && i.webkitGetAsEntry()).filter(Boolean);
+  if (!entries.length) return addFiles(dt.files);
+  const out = [];
+  for (const e of entries) await entryFiles(e, e.isDirectory ? e.name : undefined, out);
+  addFiles(out);
+}
+function uploadOne(job) {
+  return new Promise(res => {
+    const x = new XMLHttpRequest();
+    const q = `album=${encodeURIComponent(job.album)}&name=${encodeURIComponent(job.f.name)}&mtime=${job.f.lastModified || 0}`;
+    x.open('POST', '/api/upload?' + q);
+    const bar = job.row.querySelector('i');
+    x.upload.onprogress = e => { if (e.lengthComputable) bar.style.width = (e.loaded / e.total * 100) + '%'; };
+    x.onload = () => {
+      if (x.status === 200) {
+        bar.style.width = '100%'; bar.style.background = 'var(--ok)';
+        try { if (JSON.parse(x.responseText).duplicate) job.row.querySelector('.muted').textContent = 'already on the TV'; } catch (e) {}
+      }
+      else { bar.style.background = 'var(--bad)'; bar.style.width = '100%'; let m = ''; try { m = JSON.parse(x.responseText).error; } catch(e) {} job.row.querySelector('.muted').textContent = m || 'Failed'; }
+      res();
+    };
+    x.onerror = () => { bar.style.background = 'var(--bad)'; bar.style.width = '100%'; job.row.querySelector('.muted').textContent = 'Failed'; res(); };
+    x.send(job.f);
+  });
+}
+async function pump() {
+  if (uploading) return;
+  uploading = true;
+  let n = 0;
+  while (queue.length) { await uploadOne(queue.shift()); n++; }
+  uploading = false;
+  if (n) toast(`Uploaded ${n} file${n === 1 ? '' : 's'} — they'll show next`);
+  loadAlbums(); loadStatus();
+}
+$('#pick').onchange = e => { addFiles(e.target.files); e.target.value = ''; };
+// Folder picker: "Holidays/sub/a.jpg" → album "Holidays"
+$('#pickDir').onchange = e => {
+  addFiles([...e.target.files].map(f => ({ f, album: (f.webkitRelativePath || '').split('/')[0] || undefined })));
+  e.target.value = '';
+};
+// Drop anywhere on the page (from Finder or Photos)
+let dragDepth = 0;
+const isFileDrag = e => [...(e.dataTransfer?.types || [])].includes('Files');
+document.addEventListener('dragenter', e => { if (!isFileDrag(e)) return; e.preventDefault(); dragDepth++; document.body.classList.add('dragging'); });
+document.addEventListener('dragover', e => { if (isFileDrag(e)) e.preventDefault(); });
+document.addEventListener('dragleave', e => { if (--dragDepth <= 0) { dragDepth = 0; document.body.classList.remove('dragging'); } });
+document.addEventListener('drop', e => {
+  if (!isFileDrag(e)) return;
+  e.preventDefault(); dragDepth = 0; document.body.classList.remove('dragging');
+  document.querySelector('nav button[data-tab="upload"]').click();
+  addDropped(e.dataTransfer);
+});
+
+// ---------- library ----------
+let libAlbum = null; // null = all
+const selected = new Set();
+async function loadLibrary() {
+  await loadAlbums();
+  const chips = [{ label:'All', v:null }, ...albums.map(a => ({ label:(a.name || 'Unsorted') + ' ' + a.count, v:a.name }))];
+  $('#albumChips').innerHTML = chips.map((c, i) => `<button class="chip ${c.v === libAlbum ? 'sel' : ''}" data-i="${i}">${esc(c.label)}</button>`).join('');
+  $('#albumChips').querySelectorAll('.chip').forEach(b => b.onclick = () => { libAlbum = chips[+b.dataset.i].v; selected.clear(); loadLibrary(); });
+  const items = await api('/api/media' + (libAlbum === null ? '' : '?album=' + encodeURIComponent(libAlbum)));
+  $('#libEmpty').style.display = items.length ? 'none' : 'block';
+  $('#delAlbumBtn').style.display = (libAlbum && !items.length) ? '' : 'none';
+  $('#grid').innerHTML = items.map(m => `<div class="tile ${selected.has(m.path) ? 'sel' : ''}" data-p="${esc(m.path)}"><img loading="lazy" src="/api/thumb?path=${encodeURIComponent(m.path)}" alt="">${m.video ? '<span class="v">▶ video</span>' : ''}</div>`).join('');
+  $('#grid').querySelectorAll('.tile').forEach(t => t.onclick = () => {
+    const p = t.dataset.p;
+    selected.has(p) ? selected.delete(p) : selected.add(p);
+    t.classList.toggle('sel'); updateSel();
+  });
+  updateSel();
+}
+function updateSel() { $('#delBtn').disabled = !selected.size; $('#delBtn').textContent = selected.size ? `Delete ${selected.size}` : 'Delete selected'; }
+function clearSel() { selected.clear(); document.querySelectorAll('.tile.sel').forEach(t => t.classList.remove('sel')); updateSel(); }
+async function deleteSelected() {
+  if (!selected.size || !confirm(`Delete ${selected.size} item(s) from the USB stick?`)) return;
+  for (const p of [...selected]) { try { await api('/api/delete?path=' + encodeURIComponent(p), { method:'POST' }); } catch (e) { toast(e.message); } }
+  selected.clear(); toast('Deleted'); loadLibrary();
+}
+async function deleteAlbum() {
+  try { await api('/api/delete?path=' + encodeURIComponent(libAlbum), { method:'POST' }); libAlbum = null; toast('Album removed'); loadLibrary(); } catch (e) { toast(e.message); }
+}
+
+// ---------- settings ----------
+let settings = {};
+function phoneRow(p = { name:'', ip:'' }) {
+  const d = document.createElement('div');
+  d.className = 'phone';
+  d.innerHTML = `<input type="text" placeholder="Name" class="pn" value="${esc(p.name)}"><input type="text" placeholder="192.168.1.50" class="pi" inputmode="decimal" value="${esc(p.ip)}"><span class="seen" data-ip="${esc(p.ip)}"></span><button type="button" class="danger" style="padding:8px 12px">✕</button>`;
+  d.querySelector('button').onclick = () => d.remove();
+  return d;
+}
+function addPhone() { $('#phones').appendChild(phoneRow()); }
+async function loadSettings() {
+  settings = await api('/api/settings');
+  await loadAlbums();
+  const f = $('#sf');
+  for (const el of f.elements) {
+    if (!el.name || !(el.name in settings)) continue;
+    if (el.type === 'checkbox') el.checked = !!settings[el.name]; else el.value = settings[el.name];
+  }
+  $('#albumPick').innerHTML = albums.map(a => `<label class="row">${a.name ? esc(a.name) : 'Unsorted'} <input type="checkbox" class="ap" value="${esc(a.name)}" ${settings.albums.includes(a.name) ? 'checked' : ''}></label>`).join('');
+  $('#phones').innerHTML = '';
+  (settings.phones || []).forEach(p => $('#phones').appendChild(phoneRow(p)));
+  loadStatus();
+}
+async function saveSettings() {
+  const f = $('#sf'), out = {};
+  for (const el of f.elements) {
+    if (!el.name) continue;
+    out[el.name] = el.type === 'checkbox' ? el.checked : el.type === 'number' ? Number(el.value) : el.value;
+  }
+  out.albums = [...document.querySelectorAll('.ap:checked')].map(c => c.value);
+  out.phones = [...document.querySelectorAll('.phone')].map(r => ({ name:r.querySelector('.pn').value.trim() || 'Phone', ip:r.querySelector('.pi').value.trim() })).filter(p => p.ip);
+  try { settings = await api('/api/settings', { method:'POST', headers:{ 'Content-Type':'application/json' }, body:JSON.stringify(out) }); toast('Saved'); } catch (e) { toast(e.message); }
+}
+
+// ---------- remote & status ----------
+async function ctl(a) { try { await api('/api/control?action=' + a, { method:'POST' }); toast('Sent'); setTimeout(loadStatus, 800); } catch (e) { toast(e.message); } }
+function ago(s) { return s < 0 ? 'not seen' : s < 90 ? 'just now' : s < 3600 ? Math.round(s/60) + ' min ago' : Math.round(s/3600) + ' h ago'; }
+async function loadStatus() {
+  try {
+    const s = await api('/api/status');
+    const a = $('#awake');
+    a.textContent = s.awake ? '● On' : '○ Off';
+    a.className = 'pill ' + (s.awake ? 'on' : 'off');
+    a.title = s.sleepReason || '';
+    $('#storageInfo').innerHTML = `Saving to <b>${esc(s.storage)}</b><br>${fmtBytes(s.freeBytes)} free of ${fmtBytes(s.totalBytes)} · ${s.photos} photos · ${s.videos} videos`;
+    $('#statusBox').innerHTML = [
+      `Frame: <b>${s.awake ? 'On' : 'Off'}</b>${s.sleepReason ? ' — ' + esc(s.sleepReason) : ''}`,
+      `Storage: ${esc(s.storage)}${s.allFilesAccess ? '' : ' <br><span style="color:var(--acc)">Tip: grant All-files access to store photos in a normal PhotoFrame folder on the stick (see README).</span>'}`,
+      `Free: ${fmtBytes(s.freeBytes)} of ${fmtBytes(s.totalBytes)}`,
+      `Library: ${s.photos} photos, ${s.videos} videos`,
+      ...s.phones.map(p => `📱 ${esc(p.name)} (${esc(p.ip)}): ${ago(p.secondsAgo)}`),
+    ].join('<br>');
+    s.phones.forEach(p => document.querySelectorAll(`.seen[data-ip="${CSS.escape(p.ip)}"]`).forEach(el => el.textContent = ago(p.secondsAgo)));
+  } catch (e) { $('#awake').textContent = 'offline'; }
+}
+
+loadAlbums().catch(() => {});
+loadStatus();
+setInterval(loadStatus, 10000);
+</script>
+</body>
+</html>
