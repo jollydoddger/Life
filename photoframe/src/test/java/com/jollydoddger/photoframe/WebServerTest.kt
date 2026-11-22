@@ -79,6 +79,29 @@ class WebServerTest {
         assertEquals(2, albums.getJSONObject(1).getInt("count"))
     }
 
+    @Test fun sameFileTwiceIsNotCopied() {
+        val bytes = ByteArray(50_000) { 7 }
+        call("POST", "/api/upload?album=A&name=x.jpg", bytes)
+        val again = JSONObject(call("POST", "/api/upload?album=A&name=x.jpg", bytes).body)
+        assertTrue(again.getBoolean("duplicate"))
+        assertEquals("A/x.jpg", again.getString("path"))
+        assertEquals(listOf("x.jpg"), File(root, "A").list()!!.toList())
+        // and the connection was drained cleanly: the next request still works
+        assertEquals(200, call("GET", "/api/status").code)
+    }
+
+    @Test fun duplicateWithExpectContinueSendsNoBody() {
+        File(root, "dup.mp4").writeBytes(ByteArray(1000))
+        Socket("127.0.0.1", server.boundPort).use { s ->
+            s.getOutputStream().write("POST /api/upload?name=dup.mp4 HTTP/1.1\r\nHost: x\r\nContent-Length: 1000\r\nExpect: 100-continue\r\n\r\n".toByteArray())
+            s.getOutputStream().flush()
+            // Answered straight away, with no 100 Continue: the 1000 bytes never needed sending
+            val res = String(s.getInputStream().readBytes())
+            assertTrue(res, res.startsWith("HTTP/1.1 200"))
+            assertTrue(res, res.contains("\"duplicate\":true"))
+        }
+    }
+
     @Test fun refusesNonMedia() {
         assertEquals(415, call("POST", "/api/upload?name=evil.apk", byteArrayOf(1)).code)
         assertEquals(0, root.listFiles()!!.size)

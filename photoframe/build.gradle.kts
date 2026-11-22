@@ -53,6 +53,9 @@ android {
     }
 }
 
+// The Mac-script test makes files named like "café.jpg"; without a UTF-8 locale the JVM mangles them.
+tasks.withType<Test>().configureEach { environment("LC_ALL", "C.UTF-8") }
+
 dependencies {
     implementation("com.google.zxing:core:3.5.3")
     testImplementation("junit:junit:4.13.2")

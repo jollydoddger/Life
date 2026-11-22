@@ -27,6 +27,9 @@
   button.danger { background:#4a2629; color:#ffb4b4; }
   .drop { border:2px dashed #3a3f4b; border-radius:16px; padding:30px 14px; text-align:center; color:var(--dim); }
   .drop.hover { border-color:var(--acc); color:var(--text); }
+  body.dragging::after { content:"Drop to send to the TV"; position:fixed; inset:0; display:flex; align-items:center; justify-content:center; font-size:24px; font-weight:600; background:rgba(22,24,30,.88); border:3px dashed var(--acc); color:var(--acc); z-index:9; pointer-events:none; }
+  .touch { display:none; }
+  @media (pointer:coarse) { .desk { display:none; } .touch { display:inline; } }
   .drop button { margin-top:12px; }
   .bar { height:6px; background:#2a2e38; border-radius:4px; overflow:hidden; margin-top:6px; }
   .bar > i { display:block; height:100%; width:0; background:var(--acc); transition:width .2s; }
@@ -75,9 +78,12 @@
     </div>
     <div class="card">
       <div id="drop" class="drop">
-        Drop photos &amp; videos here<br><span class="muted">or</span><br>
+        <span class="desk">Drop photos, videos or whole folders anywhere on this page<br><span class="muted">a folder becomes an album with its name</span><br></span>
+        <span class="touch">Pick photos &amp; videos to send<br></span>
         <button class="primary" onclick="document.getElementById('pick').click()">Choose files</button>
+        <button class="desk" onclick="document.getElementById('pickDir').click()">Choose folder</button>
         <input id="pick" type="file" multiple accept="image/*,video/*" hidden>
+        <input id="pickDir" type="file" webkitdirectory multiple hidden>
       </div>
       <div id="queue" style="margin-top:12px"></div>
     </div>
@@ -209,15 +215,37 @@ async function newAlbum() {
 // ---------- upload ----------
 const queue = [];
 let uploading = false;
-function addFiles(files) {
-  for (const f of files) {
+const MEDIA = /\.(jpe?g|png|webp|heic|heif|gif|bmp|mp4|m4v|mov|mkv|webm|3gp)$/i;
+// items: [{ f: File, album?: string }]. No album = the one picked at the top.
+function addFiles(items) {
+  for (const it of items) {
+    const f = it.f || it, album = it.album ?? $('#upAlbum').value;
+    if (f.name.startsWith('.') || !MEDIA.test(f.name)) continue;
     const row = document.createElement('div');
     row.className = 'qitem';
-    row.innerHTML = `<div class="n"><span>${esc(f.name)}</span><span class="muted">${fmtBytes(f.size)}</span></div><div class="bar"><i></i></div>`;
+    row.innerHTML = `<div class="n"><span>${esc((album ? album + ' › ' : '') + f.name)}</span><span class="muted">${fmtBytes(f.size)}</span></div><div class="bar"><i></i></div>`;
     $('#queue').prepend(row);
-    queue.push({ f, row, album: $('#upAlbum').value });
+    queue.push({ f, row, album });
   }
   pump();
+}
+// A dropped folder → album named after it (subfolders flattened in)
+async function entryFiles(entry, album, out) {
+  if (entry.isFile) { out.push({ f: await new Promise((ok, no) => entry.file(ok, no)), album }); return; }
+  if (!entry.isDirectory || entry.name.startsWith('.')) return;
+  const reader = entry.createReader();
+  for (;;) {
+    const batch = await new Promise((ok, no) => reader.readEntries(ok, no)); // at most 100 at a time
+    if (!batch.length) break;
+    for (const e of batch) await entryFiles(e, album, out);
+  }
+}
+async function addDropped(dt) {
+  const entries = [...dt.items].map(i => i.webkitGetAsEntry && i.webkitGetAsEntry()).filter(Boolean);
+  if (!entries.length) return addFiles(dt.files);
+  const out = [];
+  for (const e of entries) await entryFiles(e, e.isDirectory ? e.name : undefined, out);
+  addFiles(out);
 }
 function uploadOne(job) {
   return new Promise(res => {
@@ -227,7 +255,10 @@ function uploadOne(job) {
     const bar = job.row.querySelector('i');
     x.upload.onprogress = e => { if (e.lengthComputable) bar.style.width = (e.loaded / e.total * 100) + '%'; };
     x.onload = () => {
-      if (x.status === 200) { bar.style.width = '100%'; bar.style.background = 'var(--ok)'; }
+      if (x.status === 200) {
+        bar.style.width = '100%'; bar.style.background = 'var(--ok)';
+        try { if (JSON.parse(x.responseText).duplicate) job.row.querySelector('.muted').textContent = 'already on the TV'; } catch (e) {}
+      }
       else { bar.style.background = 'var(--bad)'; bar.style.width = '100%'; let m = ''; try { m = JSON.parse(x.responseText).error; } catch(e) {} job.row.querySelector('.muted').textContent = m || 'Failed'; }
       res();
     };
@@ -241,14 +272,27 @@ async function pump() {
   let n = 0;
   while (queue.length) { await uploadOne(queue.shift()); n++; }
   uploading = false;
-  toast(`Uploaded ${n} file${n === 1 ? '' : 's'} — they'll show next`);
+  if (n) toast(`Uploaded ${n} file${n === 1 ? '' : 's'} — they'll show next`);
   loadAlbums(); loadStatus();
 }
 $('#pick').onchange = e => { addFiles(e.target.files); e.target.value = ''; };
-const drop = $('#drop');
-['dragenter','dragover'].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.add('hover'); }));
-['dragleave','drop'].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.remove('hover'); }));
-drop.addEventListener('drop', e => addFiles(e.dataTransfer.files));
+// Folder picker: "Holidays/sub/a.jpg" → album "Holidays"
+$('#pickDir').onchange = e => {
+  addFiles([...e.target.files].map(f => ({ f, album: (f.webkitRelativePath || '').split('/')[0] || undefined })));
+  e.target.value = '';
+};
+// Drop anywhere on the page (from Finder or Photos)
+let dragDepth = 0;
+const isFileDrag = e => [...(e.dataTransfer?.types || [])].includes('Files');
+document.addEventListener('dragenter', e => { if (!isFileDrag(e)) return; e.preventDefault(); dragDepth++; document.body.classList.add('dragging'); });
+document.addEventListener('dragover', e => { if (isFileDrag(e)) e.preventDefault(); });
+document.addEventListener('dragleave', e => { if (--dragDepth <= 0) { dragDepth = 0; document.body.classList.remove('dragging'); } });
+document.addEventListener('drop', e => {
+  if (!isFileDrag(e)) return;
+  e.preventDefault(); dragDepth = 0; document.body.classList.remove('dragging');
+  document.querySelector('nav button[data-tab="upload"]').click();
+  addDropped(e.dataTransfer);
+});
 
 // ---------- library ----------
 let libAlbum = null; // null = all

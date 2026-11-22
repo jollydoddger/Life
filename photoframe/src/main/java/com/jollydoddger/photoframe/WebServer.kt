@@ -47,7 +47,17 @@ class WebServer(
         val query: Map<String, String>,
         val headers: Map<String, String>,
         val input: InputStream,
-    )
+        val out: OutputStream,
+    ) {
+        /** The client asked to hear back before sending the body (curl does for big files). */
+        val expectsContinue get() = headers["expect"]?.equals("100-continue", ignoreCase = true) == true
+
+        /** Tells such a client to go ahead. Sent only once the request has passed its checks, so a
+         *  refused or duplicate upload costs no transfer at all. */
+        fun goAhead() {
+            if (expectsContinue) { out.write("HTTP/1.1 100 Continue\r\n\r\n".toByteArray()); out.flush() }
+        }
+    }
 
     fun start() {
         running = true
@@ -124,12 +134,9 @@ class WebServer(
                     parseQuery(target.substringAfter('?', "")),
                     headers,
                     inp,
+                    out,
                 )
                 FrameState.touch() // someone's phone is using the page → someone's home
-                // curl (and some apps) wait for this before sending a large body
-                if (headers["expect"]?.equals("100-continue", ignoreCase = true) == true) {
-                    out.write("HTTP/1.1 100 Continue\r\n\r\n".toByteArray()); out.flush()
-                }
                 try {
                     route(req, out)
                 } catch (e: Exception) {
@@ -255,7 +262,18 @@ class WebServer(
         val dir = MediaLibrary.albumDir(r.query["album"].orEmpty())
         if (dir.usableSpace < len + 50L * 1024 * 1024) return fail(out, 507, "Not enough space on the storage")
 
-        val target = MediaLibrary.uniqueFile(dir, name)
+        // Same name and size already in this album: it's the same file sent again (a re-share, a
+        // re-run of the Mac script). Say so instead of saving "IMG_1 (1).jpg".
+        val same = File(dir, name)
+        if (same.isFile && same.length() == len) {
+            if (!r.expectsContinue) drain(r.input, len) // the body is on its way regardless
+            FrameState.touch()
+            return json(out, JSONObject().put("ok", true).put("path", MediaLibrary.relPath(same)).put("duplicate", true))
+        }
+
+        r.goAhead()
+        // replace=1 (the Mac script): a re-exported, edited photo overwrites the old one, atomically.
+        val target = if (r.query["replace"] == "1") File(dir, name) else MediaLibrary.uniqueFile(dir, name)
         val tmp = File(dir, ".${target.name}.part")
         try {
             FileOutputStream(tmp).use { fos ->
@@ -291,9 +309,20 @@ class WebServer(
 
     // ---------- HTTP helpers ----------
 
+    private fun drain(input: InputStream, len: Long) {
+        val buf = ByteArray(256 * 1024)
+        var left = len
+        while (left > 0) {
+            val n = input.read(buf, 0, minOf(buf.size.toLong(), left).toInt())
+            if (n < 0) break
+            left -= n
+        }
+    }
+
     private fun readBody(r: Req, max: Int): ByteArray {
         val len = r.headers["content-length"]?.toIntOrNull() ?: 0
         if (len > max) throw IOException("Body too large")
+        r.goAhead()
         val b = ByteArray(len)
         var off = 0
         while (off < len) {

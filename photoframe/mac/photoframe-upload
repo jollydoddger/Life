@@ -1,0 +1,247 @@
+#!/bin/bash
+# photoframe-upload: send photos and videos from the Mac to the TV photo frame.
+#
+#   photoframe-upload FILE|FOLDER...         send them (a folder becomes an album of that name)
+#   photoframe-upload -a "Album" FILE...     send into a named album
+#   photoframe-upload --watch [FOLDER]       auto-send anything exported into FOLDER
+#                                            (default ~/Pictures/Photo Frame). FOLDER/<Album>/x.jpg
+#                                            goes to <Album>; files loose in FOLDER go to Unsorted.
+#   photoframe-upload --unwatch              stop that
+#   photoframe-upload --install              copy this script to ~/.photoframe/bin (Shortcuts and
+#                                            the watcher run it from there)
+#   photoframe-upload --tv 192.168.1.20      set the TV's address by hand (normally it's found
+#                                            automatically)
+#
+# Safe to re-run: the TV skips a file it already has in that album (same name and size), and
+# answers before the file is sent, so re-sending a whole folder costs next to nothing. A file
+# with the same name but a different size (you edited and re-exported it) replaces the old one.
+#
+# Needs only what macOS ships (bash 3.2, curl, dns-sd). Also runs on Linux for the tests.
+
+set -u
+CONF_DIR="${PHOTOFRAME_HOME:-$HOME/.photoframe}"
+TV_FILE="$CONF_DIR/tv"
+SENT_FILE="$CONF_DIR/sent"
+LOG="$HOME/Library/Logs/photoframe-upload.log"
+AGENT_ID="com.jollydoddger.photoframe.watch"
+AGENT="$HOME/Library/LaunchAgents/$AGENT_ID.plist"
+EXTS="jpg jpeg png webp heic heif gif bmp mp4 m4v mov mkv webm 3gp"
+QUIET=0
+
+say() { [ "$QUIET" = 1 ] || echo "$@"; }
+die() { echo "photoframe-upload: $*" >&2; exit 1; }
+
+notify() { # a macOS notification, if we're on a Mac
+    command -v osascript >/dev/null 2>&1 || return 0
+    osascript -e "display notification \"$1\" with title \"Photo Frame\"" >/dev/null 2>&1 || true
+}
+
+urlencode() { # every byte as %XX: always valid, and safe for any name in any bash
+    local out="" hex
+    for hex in $(printf '%s' "$1" | od -An -tx1 -v); do out="$out%$hex"; done
+    printf '%s' "$out"
+}
+
+if [ "$(uname)" = Darwin ]; then   # BSD stat on the Mac; GNU stat elsewhere (where -f means something else)
+    mtime_s() { stat -f %m "$1" 2>/dev/null || echo 0; }
+    size_of() { stat -f %z "$1" 2>/dev/null || echo 0; }
+else
+    mtime_s() { stat -c %Y "$1" 2>/dev/null || echo 0; }
+    size_of() { stat -c %s "$1" 2>/dev/null || echo 0; }
+fi
+mtime_ms() { echo "$(mtime_s "$1")000"; }
+
+is_media() {
+    local name ext e
+    name=$(basename "$1")
+    case "$name" in .*) return 1 ;; esac
+    ext=$(printf '%s' "${name##*.}" | tr '[:upper:]' '[:lower:]')
+    [ "$ext" = "$name" ] && return 1
+    for e in $EXTS; do [ "$e" = "$ext" ] && return 0; done
+    return 1
+}
+
+answers() { curl -fsS --max-time 3 "$1/api/status" 2>/dev/null | grep -q '"awake"'; }
+
+discover() { # the TV advertises _photoframe._tcp; macOS's dns-sd can see it
+    command -v dns-sd >/dev/null 2>&1 || return 1
+    local out host port
+    out=$( (dns-sd -L "Photo Frame" _photoframe._tcp local. & p=$!; sleep 4; kill $p) 2>/dev/null \
+        | grep -m1 'can be reached at' ) || return 1
+    # "... can be reached at Android-3.local.:8080 (interface 14)"
+    host=$(printf '%s' "$out" | sed -E 's/.*reached at ([^ ]+):([0-9]+).*/\1/; s/\.$//')
+    port=$(printf '%s' "$out" | sed -E 's/.*reached at [^ ]+:([0-9]+).*/\1/')
+    [ -n "$host" ] && [ -n "$port" ] || return 1
+    # Use the IP, not the .local name: curl resolving .local each time is slow
+    local ip
+    ip=$(dscacheutil -q host -a name "$host" 2>/dev/null | awk '/^ip_address:/ { print $2; exit }')
+    echo "http://${ip:-$host}:$port"
+}
+
+find_tv() {
+    if [ -n "${PHOTOFRAME_TV:-}" ]; then TV="$PHOTOFRAME_TV"; return; fi
+    TV=""
+    [ -f "$TV_FILE" ] && TV=$(cat "$TV_FILE")
+    if [ -n "$TV" ] && answers "$TV"; then return; fi
+    say "Looking for the TV on the Wi-Fi…"
+    local found
+    found=$(discover) || found=""
+    if [ -n "$found" ] && answers "$found"; then
+        mkdir -p "$CONF_DIR"; echo "$found" > "$TV_FILE"; TV="$found"; return
+    fi
+    die "can't find the TV. Is the Photo Frame app open on it? Or set it: photoframe-upload --tv <address shown on the TV>"
+}
+
+SENT=0; SKIPPED=0; FAILED=0
+
+send_one() { # file album
+    local f="$1" album="$2" name code res
+    name=$(basename "$f")
+    res=$(mktemp)
+    if [ "$QUIET" = 1 ]; then prog=(-sS); else printf '%s → %s\n' "$name" "${album:-Unsorted}"; prog=(--progress-bar); fi
+    # -T streams the file (no loading a 4 GB video into memory); Expect lets the TV turn down a
+    # duplicate before any of it is sent.
+    code=$(curl "${prog[@]}" -X POST -T "$f" \
+        -H "Expect: 100-continue" -H "Content-Type: application/octet-stream" \
+        -o "$res" -w '%{http_code}' --connect-timeout 5 \
+        "$TV/api/upload?replace=1&album=$(urlencode "$album")&name=$(urlencode "$name")&mtime=$(mtime_ms "$f")") || code=000
+    if [ "$code" = 200 ]; then
+        if grep -q '"duplicate":true' "$res"; then SKIPPED=$((SKIPPED + 1)); say "   already on the TV"; else SENT=$((SENT + 1)); fi
+        rm -f "$res"; return 0
+    fi
+    FAILED=$((FAILED + 1))
+    echo "   failed: $(sed -E 's/.*"error":"([^"]*)".*/\1/' "$res" 2>/dev/null || echo "HTTP $code") (HTTP $code)" >&2
+    rm -f "$res"; return 1
+}
+
+send_tree() { # folder album: every media file under it, flattened into one album
+    local dir="$1" album="$2" f
+    while IFS= read -r -d '' f; do
+        is_media "$f" && send_one "$f" "$album"
+    done < <(find "$dir" -type f ! -path '*/.*' -print0 | sort -z)
+}
+
+summary() {
+    local msg="Sent $SENT"
+    [ "$SKIPPED" -gt 0 ] && msg="$msg, $SKIPPED already there"
+    [ "$FAILED" -gt 0 ] && msg="$msg, $FAILED failed"
+    say "$msg"
+    [ $((SENT + FAILED)) -gt 0 ] && notify "$msg"
+    [ "$FAILED" = 0 ]
+}
+
+# ---- the export folder ----
+
+sync_folder() { # called by launchd every minute and when the folder changes
+    local root="$1" f rel album key now age
+    [ -d "$root" ] || exit 0
+    mkdir -p "$CONF_DIR"; touch "$SENT_FILE"
+    QUIET=1
+    now=$(date +%s)
+    local pending=() keys=() albums=()
+    while IFS= read -r -d '' f; do
+        is_media "$f" || continue
+        # Leave files alone while an export is still writing them
+        age=$(( now - $(mtime_s "$f") ))
+        [ "$age" -lt 20 ] && continue
+        key="$f|$(size_of "$f")|$(mtime_ms "$f")"
+        grep -qxF "$key" "$SENT_FILE" && continue
+        rel="${f#"$root"/}"
+        case "$rel" in */*) album="${rel%%/*}" ;; *) album="" ;; esac
+        pending+=("$f"); keys+=("$key"); albums+=("$album")
+    done < <(find "$root" -type f ! -path '*/.*' -print0)
+    [ ${#pending[@]} -gt 0 ] || exit 0       # nothing new: don't even look for the TV
+    ( find_tv ) >/dev/null 2>&1 || exit 0     # TV off or away: try again next minute
+    find_tv
+    local i
+    for (( i = 0; i < ${#pending[@]}; i++ )); do
+        if send_one "${pending[$i]}" "${albums[$i]}"; then echo "${keys[$i]}" >> "$SENT_FILE"; fi
+    done
+    summary >/dev/null || true
+    echo "$(date '+%F %T') sent $SENT, skipped $SKIPPED, failed $FAILED"
+    exit 0
+}
+
+install_self() {
+    mkdir -p "$CONF_DIR/bin"
+    local me; me=$(cd "$(dirname "$0")" && pwd)/$(basename "$0")
+    if [ "$me" != "$CONF_DIR/bin/photoframe-upload" ]; then cp "$me" "$CONF_DIR/bin/photoframe-upload"; fi
+    chmod +x "$CONF_DIR/bin/photoframe-upload"
+    echo "Installed to $CONF_DIR/bin/photoframe-upload"
+    case ":$PATH:" in *":$CONF_DIR/bin:"*) ;; *)
+        echo "To run it by name, add this line to ~/.zshrc:"
+        echo "  export PATH=\"\$HOME/.photoframe/bin:\$PATH\"" ;;
+    esac
+}
+
+watch() {
+    local root="${1:-$HOME/Pictures/Photo Frame}"
+    mkdir -p "$root" "$(dirname "$AGENT")" "$(dirname "$LOG")"
+    root=$(cd "$root" && pwd)
+    install_self >/dev/null
+    find_tv
+    cat > "$AGENT" <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key><string>$AGENT_ID</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>$CONF_DIR/bin/photoframe-upload</string>
+        <string>--sync</string>
+        <string>$root</string>
+    </array>
+    <key>WatchPaths</key><array><string>$root</string></array>
+    <!-- WatchPaths only sees the top folder change, so also look every minute for album folders -->
+    <key>StartInterval</key><integer>60</integer>
+    <key>StandardOutPath</key><string>$LOG</string>
+    <key>StandardErrorPath</key><string>$LOG</string>
+</dict>
+</plist>
+PLIST
+    launchctl unload "$AGENT" 2>/dev/null || true
+    launchctl load "$AGENT"
+    echo "Watching: $root"
+    echo "Export into \"$root/<Album>/\" (or loose into it for Unsorted) and it goes to the TV within a minute."
+    echo "Log: $LOG"
+}
+
+unwatch() {
+    launchctl unload "$AGENT" 2>/dev/null || true
+    rm -f "$AGENT"
+    echo "Stopped watching."
+}
+
+# ---- main ----
+
+ALBUM=""; ALBUM_SET=0; ARGS=()
+while [ $# -gt 0 ]; do
+    case "$1" in
+        -a|--album) [ $# -ge 2 ] || die "-a needs an album name"; ALBUM="$2"; ALBUM_SET=1; shift 2 ;;
+        --tv) [ $# -ge 2 ] || die "--tv needs an address"
+              t="$2"; t="${t#http://}"; t="${t%/}"; case "$t" in *:*) ;; *) t="$t:8080" ;; esac
+              answers "http://$t" || die "no photo frame answered at http://$t"
+              mkdir -p "$CONF_DIR"; echo "http://$t" > "$TV_FILE"; echo "TV set to http://$t"; exit 0 ;;
+        --watch) shift; watch "${1:-}"; exit 0 ;;
+        --unwatch) unwatch; exit 0 ;;
+        --sync) [ $# -ge 2 ] || die "--sync needs a folder"; sync_folder "$2" ;;
+        --install) install_self; exit 0 ;;
+        -h|--help) sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        *) ARGS+=("$1"); shift ;;
+    esac
+done
+[ ${#ARGS[@]} -gt 0 ] || { sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'; exit 1; }
+
+find_tv
+for p in "${ARGS[@]}"; do
+    if [ -d "$p" ]; then
+        p="${p%/}"
+        if [ "$ALBUM_SET" = 1 ]; then send_tree "$p" "$ALBUM"; else send_tree "$p" "$(basename "$p")"; fi
+    elif [ -f "$p" ]; then
+        if is_media "$p"; then send_one "$p" "$ALBUM"; else say "skipping $(basename "$p") (not a photo or video)"; fi
+    else
+        echo "no such file: $p" >&2; FAILED=$((FAILED + 1))
+    fi
+done
+summary

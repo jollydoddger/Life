@@ -22,6 +22,11 @@ A personal digital-photo-frame app for John's **TCL 55C7K** (55" QD-Mini LED, **
 - MainActivity is a WebView of the TV's web app, with a file chooser.
 - To check on device: the read grant reaching UploadService for Samsung Gallery shares; mDNS getting through the router; a big 4K video uploading with the screen off.
 
+## Mac uploads
+- `photoframe/mac/photoframe-upload` (bash 3.2 + curl + dns-sd: nothing to install) handles one-off sends, a Shortcuts Quick Action/Share Sheet, and `--watch`, a launchd agent (WatchPaths plus every 60 s) syncing `~/Pictures/Photo Frame/<Album>/`. A sent-list lives in `~/.photoframe/sent`.
+- Server: a same-name, same-size file in the album is answered `duplicate:true`. With `Expect: 100-continue` this happens before the body is sent; otherwise the body is drained. `replace=1` (which the script uses) overwrites a same-name file of a different size, so edited re-exports replace the old copy. The web app drops folders as albums.
+- `MacScriptTest` runs the real script against the real server (in CI too). Not checked on a real Mac: dns-sd parsing, the Shortcuts hand-off, and whether macOS 15 Local Network privacy blocks the launch agent.
+
 ## Tech decisions (keep these unless there's a reason)
 | Area | Decision | Why |
 |---|---|---|

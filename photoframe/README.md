@@ -53,12 +53,48 @@ Every build is signed with the repo's pinned debug key, so `adb install -r` upda
 - **No IP addresses to type:** the TV announces itself on the Wi-Fi and the app finds it. If your router blocks that, the app asks for the address shown on the TV (press ▼ on the TV remote).
 - Allow notifications when it asks, so you can see upload progress.
 
-## 4. USB stick
+## 4. From the Mac
+Three ways to upload, from least to most setup. All three are safe to repeat: the TV skips anything it already has (same name and size in that album) without re-sending it.
+
+**a) Drag and drop.** Open `http://<TV-IP>:8080` in Safari or Chrome and bookmark it. Drop photos, videos or whole folders from Finder or Photos anywhere on the page. A folder becomes an album with the folder's name, and its subfolders go into the same album. *Choose folder* does the same thing without dragging.
+
+**b) Right-click › Send to Photo Frame** (in Finder, and in the Photos share menu).
+1. Install the script once. In Terminal:
+   ```
+   bash ~/Downloads/photoframe-upload --install
+   ```
+   (The script is `photoframe/mac/photoframe-upload` in the repo.) It finds the TV on the Wi-Fi by itself. If that fails: `~/.photoframe/bin/photoframe-upload --tv <address shown on the TV>`.
+2. Open **Shortcuts › File › New Shortcut** and name it *Send to Photo Frame*.
+   - Click ⓘ (Shortcut details) and tick **Use as Quick Action** (Finder) and **Show in Share Sheet**.
+   - Set the *Receive* block at the top to **Images, Media and Files**.
+   - Add the **Run Shell Script** action: Shell *zsh*, Pass Input **as arguments**, with this script:
+     ```
+     ~/.photoframe/bin/photoframe-upload "$@"
+     ```
+   - The first time, allow it under *Shortcuts › Settings › Advanced › Allow Running Scripts*, and say yes if macOS asks about the local network.
+3. Now in Finder: select files or folders, then right-click › *Quick Actions › Send to Photo Frame*. In Photos: select, then *Share › Send to Photo Frame* (Photos sends the edited version). A notification says what was sent. Folders become albums; loose files go to Unsorted.
+
+The script also works on its own: `photoframe-upload -a "Holidays 2026" *.jpg`, or `photoframe-upload ~/Exports/Holidays` for a whole folder as an album.
+
+**c) An export folder that uploads itself.** This one suits an editing workflow:
+```
+~/.photoframe/bin/photoframe-upload --watch
+```
+This watches `~/Pictures/Photo Frame/`. Anything exported to `~/Pictures/Photo Frame/<Album>/` reaches the TV within about a minute, in that album. Files loose in the folder go to Unsorted.
+- **Lightroom Classic:** *Export › Export To: Specific folder* → `~/Pictures/Photo Frame`, and tick *Put in Subfolder* with the album name. Save it as an export preset.
+- **Final Cut Pro / Photos / anything else:** export or save into `~/Pictures/Photo Frame/<Album>/`.
+- Edited and re-exported with the same name? The TV's copy is **replaced**, not duplicated. Deleting from the folder does *not* delete from the TV; use the Library tab for that.
+- It waits until an export has finished writing, and if the TV is off or you're away it tries again each minute.
+- To stop: `photoframe-upload --unwatch`. Log: `~/Library/Logs/photoframe-upload.log`.
+- Keep the watch folder inside `~/Pictures`. macOS blocks background tasks from Desktop, Documents and Downloads.
+- If the log shows "No route to host", allow the network access under *System Settings › Privacy & Security › Local Network* (macOS 15+).
+
+## 5. USB stick
 - Use the **USB 3.0** port and format the stick as **exFAT**.
 - Folder layout: `PhotoFrame/<Album name>/photo.jpg`. You can also copy files onto it directly from a computer.
 - Supported: JPG, PNG, HEIC, WebP, GIF (first frame), MP4, MOV, MKV, WebM.
 
-## 5. TV settings for 24/7 use
+## 6. TV settings for 24/7 use
 | Setting | Value | Why |
 |---|---|---|
 | Picture mode | Standard / Eco (not Vivid) | Less power and less heat |
@@ -71,7 +107,7 @@ Every build is signed with the repo's pinned debug key, so `adb install -r` upda
 
 There's no burn-in risk: it's an LCD with a Mini-LED backlight, not OLED, and the pictures keep changing anyway.
 
-## 6. "Only when we're home"
+## 7. "Only when we're home"
 1. In your router, give each phone a **fixed IP** (DHCP reservation).
 2. On each S24 Ultra, turn off the random Wi-Fi address for the home network: *Settings › Connections › Wi-Fi*, tap ⚙ next to your network, *View more › MAC address type › **Phone MAC***. The phone reconnects. Do this **before** you make the router reservation, because the router has to see the phone's real MAC.
    - If a locked phone keeps showing "not seen" for long stretches while it's at home, turn off *Wi-Fi › ⋮ › Intelligent Wi-Fi › **Wi-Fi power saving mode***. It's optional: the 20-minute grace period usually covers the gaps.
@@ -100,5 +136,6 @@ photoframe/src/main/java/.../FrameActivity.kt   screen, remote keys, overlays
                             Imaging.kt          decoding, background blur, thumbnails, QR
 photoframe/src/main/assets/web/index.html       the phone web app
 photoframe/src/test/                            JVM tests: the real web server against a temp folder, playlist, settings
+photoframe/mac/photoframe-upload                Mac uploader: Finder/Photos Quick Action, export-folder watcher (bash + curl)
 photoframe-phone/                               the phone app: share-sheet uploads (UploadService), TV discovery (Tv.kt), WebView of the web app
 ```
