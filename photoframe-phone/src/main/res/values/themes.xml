@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Matches the web app's colours, so there's no white flash before it loads -->
+    <style name="AppTheme" parent="@android:style/Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/bg</item>
+        <item name="android:statusBarColor">@color/bg</item>
+        <item name="android:navigationBarColor">#FF121318</item>
+        <item name="android:colorAccent">#FFF0C878</item>
+    </style>
+    <style name="ShareTheme" parent="@android:style/Theme.Material.Dialog.NoActionBar">
+        <item name="android:windowCloseOnTouchOutside">false</item>
+        <item name="android:colorAccent">#FFF0C878</item>
+    </style>
+    <color name="bg">#FF16181E</color>
+</resources>

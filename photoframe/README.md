@@ -45,12 +45,20 @@ Every build is signed with the repo's pinned debug key, so `adb install -r` upda
 
 **No-computer alternative:** install **Downloader** (by AFTVnews) from the Play Store on the TV and point it at the Releases APK link. You'll still need ADB for step 5.
 
-## 3. USB stick
+## 3. Phone app (both S24 Ultras)
+`photoframe-phone.apk` sits next to `photoframe.apk` in the same build. To install it, open the APK on each phone and allow *Install unknown apps* for whichever app opened it (Chrome or My Files). If you're installing over USB, `adb install -r photoframe-phone.apk` works too.
+
+- **Share from Gallery** (or Google Photos, My Files, WhatsApp…): select photos or videos, tap *Share › **Photo Frame (TV)***, pick an album (or *+ New album…*) and tap **Send**. Uploads continue in the background with a progress notification, even with the phone locked. If you share more while it's sending, they join the queue. The album you chose last time is preselected.
+- **Open the app** to get the full Upload / Library / Settings / Remote pages, the same as the browser version.
+- **No IP addresses to type:** the TV announces itself on the Wi-Fi and the app finds it. If your router blocks that, the app asks for the address shown on the TV (press ▼ on the TV remote).
+- Allow notifications when it asks, so you can see upload progress.
+
+## 4. USB stick
 - Use the **USB 3.0** port and format the stick as **exFAT**.
 - Folder layout: `PhotoFrame/<Album name>/photo.jpg`. You can also copy files onto it directly from a computer.
 - Supported: JPG, PNG, HEIC, WebP, GIF (first frame), MP4, MOV, MKV, WebM.
 
-## 4. TV settings for 24/7 use
+## 5. TV settings for 24/7 use
 | Setting | Value | Why |
 |---|---|---|
 | Picture mode | Standard / Eco (not Vivid) | Less power and less heat |
@@ -63,7 +71,7 @@ Every build is signed with the repo's pinned debug key, so `adb install -r` upda
 
 There's no burn-in risk: it's an LCD with a Mini-LED backlight, not OLED, and the pictures keep changing anyway.
 
-## 5. "Only when we're home"
+## 6. "Only when we're home"
 1. In your router, give each phone a **fixed IP** (DHCP reservation).
 2. On each S24 Ultra, turn off the random Wi-Fi address for the home network: *Settings › Connections › Wi-Fi*, tap ⚙ next to your network, *View more › MAC address type › **Phone MAC***. The phone reconnects. Do this **before** you make the router reservation, because the router has to see the phone's real MAC.
    - If a locked phone keeps showing "not seen" for long stretches while it's at home, turn off *Wi-Fi › ⋮ › Intelligent Wi-Fi › **Wi-Fi power saving mode***. It's optional: the 20-minute grace period usually covers the gaps.
@@ -92,4 +100,5 @@ photoframe/src/main/java/.../FrameActivity.kt   screen, remote keys, overlays
                             Imaging.kt          decoding, background blur, thumbnails, QR
 photoframe/src/main/assets/web/index.html       the phone web app
 photoframe/src/test/                            JVM tests: the real web server against a temp folder, playlist, settings
+photoframe-phone/                               the phone app: share-sheet uploads (UploadService), TV discovery (Tv.kt), WebView of the web app
 ```

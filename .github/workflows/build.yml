@@ -48,7 +48,7 @@ jobs:
       # turn a failed build into a green tick.
       - name: Build and test
         shell: bash
-        run: ./gradlew :shared:testDebugUnitTest :phone:testDebugUnitTest :phone:assembleDebug :wear:assembleDebug :photoframe:testDebugUnitTest :photoframe:assembleDebug 2>&1 | tee /tmp/build.log
+        run: ./gradlew :shared:testDebugUnitTest :phone:testDebugUnitTest :phone:assembleDebug :wear:assembleDebug :photoframe:testDebugUnitTest :photoframe:assembleDebug :photoframe-phone:testDebugUnitTest :photoframe-phone:assembleDebug 2>&1 | tee /tmp/build.log
 
       # A failed build that nobody can read costs a round trip of guessing at
       # the cause. Published to a branch over git rather than to an issue or
@@ -80,6 +80,8 @@ jobs:
           cp wear/build/outputs/apk/debug/*.apk /tmp/apks/waymark-watch.apk
           # The TV photo frame (photoframe/README.md), adb-installed on the TV
           cp photoframe/build/outputs/apk/debug/*.apk /tmp/apks/photoframe.apk
+          # Its phone companion: tap the release link on the phone to install
+          cp photoframe-phone/build/outputs/apk/debug/*.apk /tmp/apks/photoframe-phone.apk
 
       - name: Upload APK artifacts
         uses: actions/upload-artifact@v4

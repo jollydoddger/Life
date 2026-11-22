@@ -16,6 +16,12 @@ A personal digital-photo-frame app for John's **TCL 55C7K** (55" QD-Mini LED, **
 - It has **never run on a device**. Expect a round of on-device fixes.
 - Fixed after the first read-through: a manual Sleep now ends at the next automatic on; a late-mounting USB stick no longer plays the library in date order; file dates are cached (no stat() per sort compare); the background blur is pre-computed once per photo (no live RenderEffect); thumbnail decodes are capped at 3 at a time and written atomically; uploads take the EXIF capture date; startForeground can't crash-loop the service.
 
+## Phone companion (`photoframe-phone/`)
+- Native Android app, since both phones are S24 Ultras. It finds the TV over mDNS: the TV's FrameService advertises `_photoframe._tcp` on port 8080, and the app falls back to a typed IP.
+- ShareActivity takes ACTION_SEND/SEND_MULTIPLE for image/* and video/* and shows an album picker. UploadService (a dataSync foreground service, holding wake and Wi-Fi locks) streams each content URI to `/api/upload` one at a time, sending the size from OpenableColumns and the MediaStore DATE_TAKEN as mtime.
+- MainActivity is a WebView of the TV's web app, with a file chooser.
+- To check on device: the read grant reaching UploadService for Samsung Gallery shares; mDNS getting through the router; a big 4K video uploading with the screen off.
+
 ## Tech decisions (keep these unless there's a reason)
 | Area | Decision | Why |
 |---|---|---|

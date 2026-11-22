@@ -14,6 +14,8 @@ import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import android.os.PowerManager
+import android.net.nsd.NsdManager
+import android.net.nsd.NsdServiceInfo
 import java.time.LocalTime
 
 /**
@@ -27,6 +29,13 @@ class FrameService : Service(), FrameState.Listener {
     private var manualSleep = false
     private var manualWakeUntil = 0L
     private var lastAutoAwake = true
+    private var nsd: NsdManager? = null
+    private val nsdListener = object : NsdManager.RegistrationListener {
+        override fun onServiceRegistered(info: NsdServiceInfo) {}
+        override fun onRegistrationFailed(info: NsdServiceInfo, code: Int) { android.util.Log.w("PhotoFrame", "mDNS advertise failed: $code") }
+        override fun onServiceUnregistered(info: NsdServiceInfo) {}
+        override fun onUnregistrationFailed(info: NsdServiceInfo, code: Int) {}
+    }
 
     private val tick = object : Runnable {
         override fun run() {
@@ -51,6 +60,7 @@ class FrameService : Service(), FrameState.Listener {
         MediaLibrary.init(this)
         goForeground()
         server = WebServer.forContext(this).also { it.start() }
+        advertise()
         presence.start()
         FrameState.add(this)
         val f = IntentFilter().apply {
@@ -72,6 +82,7 @@ class FrameService : Service(), FrameState.Listener {
         handler.removeCallbacksAndMessages(null)
         FrameState.remove(this)
         runCatching { unregisterReceiver(usbReceiver) }
+        runCatching { nsd?.unregisterService(nsdListener) }
         presence.stop()
         server?.stop()
         super.onDestroy()
@@ -89,6 +100,20 @@ class FrameService : Service(), FrameState.Listener {
                 manualSleep = true
                 manualWakeUntil = 0
                 evaluate()
+            }
+        }
+    }
+
+    /** Announces the web server on the LAN (mDNS/DNS-SD) so the phone app finds the TV without an IP. */
+    private fun advertise() {
+        runCatching {
+            val info = NsdServiceInfo().apply {
+                serviceName = "Photo Frame"
+                serviceType = SERVICE_TYPE
+                port = WebServer.PORT
+            }
+            nsd = getSystemService(NsdManager::class.java).also {
+                it.registerService(info, NsdManager.PROTOCOL_DNS_SD, nsdListener)
             }
         }
     }
@@ -165,6 +190,9 @@ class FrameService : Service(), FrameState.Listener {
     }
 
     companion object {
+        /** Must match the phone app's discovery type. */
+        const val SERVICE_TYPE = "_photoframe._tcp"
+
         fun start(ctx: Context) {
             runCatching { ctx.startForegroundService(Intent(ctx, FrameService::class.java)) }
         }
