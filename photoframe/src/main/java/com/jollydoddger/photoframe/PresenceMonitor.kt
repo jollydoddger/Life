@@ -48,17 +48,19 @@ class PresenceMonitor {
     private fun reachable(ip: String): Boolean {
         // 1. ICMP ping via the system binary
         try {
-            val p = ProcessBuilder("/system/bin/ping", "-c", "1", "-W", "1", ip).redirectErrorStream(true).start()
-            val done = p.waitFor(3, TimeUnit.SECONDS)
+            // Two tries, 2 s each: a locked Android phone's Wi-Fi is in power-save and only
+            // picks up buffered packets at the router's beacon interval, so replies arrive late.
+            val p = ProcessBuilder("/system/bin/ping", "-c", "2", "-i", "1", "-W", "2", ip).redirectErrorStream(true).start()
+            val done = p.waitFor(5, TimeUnit.SECONDS)
             if (done && p.exitValue() == 0) return true
             if (!done) p.destroy()
         } catch (_: Exception) {
         }
         // 2. TCP knock: any answer, even "connection refused", proves the phone is awake on the network.
-        //    62078 is a port iPhones listen on.
-        for (port in intArrayOf(62078, 80, 443, 7)) {
+        //    Android phones have no firewall and answer a closed port with a reset straight away.
+        for (port in intArrayOf(80, 443)) {
             try {
-                Socket().use { it.connect(InetSocketAddress(ip, port), 700) }
+                Socket().use { it.connect(InetSocketAddress(ip, port), 1500) }
                 return true
             } catch (e: ConnectException) {
                 if (e.message?.contains("ECONNREFUSED") == true || e.message?.contains("refused", true) == true) return true

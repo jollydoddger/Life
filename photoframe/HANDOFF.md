@@ -28,7 +28,7 @@ A personal digital-photo-frame app for John's **TCL 55C7K** (55" QD-Mini LED, **
 | Albums | A sub-folder = an album. Files in the root are "Unsorted" | You can also copy files on from a computer |
 | Background | Foreground service (`specialUse` type) runs the web server, presence checks and schedule. Started by the activity and on `BOOT_COMPLETED` | |
 | Off state | Default **"black"**: the activity stays open on full black, and local dimming keeps the backlight nearly off. Optional **"sleep"** (experimental): clear `FLAG_KEEP_SCREEN_ON` so the TV's own timer goes to standby, then wake with an `ACQUIRE_CAUSES_WAKEUP` wakelock plus a relaunch | Apps can't power the TV off themselves without system permissions |
-| Presence | Wi-Fi, not Bluetooth. Every 30 s, ping each phone's fixed IP (`/system/bin/ping`), then a TCP knock (ports 62078/80/443/7; ECONNREFUSED counts as present). Away = nobody seen for `awayGraceMin` (default 20). Web requests and remote key presses also count as presence. A 3-minute grace period after boot | Phones randomise BLE addresses, so Bluetooth would need a companion app. Wi-Fi needs no phone app |
+| Presence | Wi-Fi, not Bluetooth. Every 30 s, ping each phone's fixed IP (`/system/bin/ping`), then a TCP knock (ports 80/443; ECONNREFUSED counts as present). Both phones are Galaxy S24 Ultras (One UI), so there are no iPhone special cases. Away = nobody seen for `awayGraceMin` (default 20). Web requests and remote key presses also count as presence. A 3-minute grace period after boot | Phones randomise BLE addresses, so Bluetooth would need a companion app. Wi-Fi needs no phone app |
 
 ## Files
 ```
@@ -96,7 +96,7 @@ adb shell dumpsys deviceidle whitelist +com.jollydoddger.photoframe
 1. ~~First Gradle build~~: done, and it builds cleanly.
 2. **USB detection** on TCL firmware: check that `StorageVolume.isRemovable`/`directory` and `getExternalFilesDirs` actually return the stick.
 3. **All-files access**: check the `appops` grant works, and whether TCL has the Settings screen at all (the activity tries `ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION` once).
-4. **Presence**: check whether `/system/bin/ping` is allowed for apps on this firmware. Tune for an iPhone vs Android phone in Wi-Fi sleep.
+4. **Presence**: check whether `/system/bin/ping` is allowed for apps on this firmware. Check how often a locked S24 Ultra answers; ping is 2 tries, 2 s timeout.
 5. **"sleep" mode**: does the TV really go to standby, and does the wakelock/relaunch bring it back? If not, consider a Home Assistant/Pi using ADB (`input keyevent 223/224`) or HDMI-CEC.
 6. **Background launch** after boot/wake needs SYSTEM_ALERT_WINDOW. Confirm.
 7. **Memory/perf**: 4K-plus photos are downsampled to the screen size, and the wall uses tile-sized decodes. The blur is now a 96 px pre-blurred bitmap, not a RenderEffect. Check that the Ken Burns pan stays smooth on the TV GPU.

@@ -3,7 +3,7 @@
 Turns the TV into a digital photo frame. Photos and videos live on a USB stick in the TV, you upload them from your phone over Wi-Fi, and the TV shows them as a slideshow or photo wall. It can switch itself off when nobody's home.
 
 ## Features
-- **Upload from any phone or computer**: open `http://<TV-IP>:8080` (the QR code is on the TV screen). Drag-drop or pick files, with progress bars. New uploads show up next. Photos keep their capture date (read from EXIF), even from an iPhone, whose browser reports every picked photo as taken "now".
+- **Upload from any phone or computer**: open `http://<TV-IP>:8080` (the QR code is on the TV screen). Drag-drop or pick files, with progress bars. New uploads show up next. Photos keep their capture date (read from EXIF), even though the phone browser reports every picked photo as taken "now".
 - **Albums**: one folder per album on the stick. You choose which albums play.
 - **Modes**: full-screen slideshow (Ken Burns pan/zoom, crossfade or none), photo wall (mosaic or grids), or mixed (alternates between the two).
 - **Portrait photos** get a blurred copy of themselves behind them instead of black bars.
@@ -65,10 +65,14 @@ There's no burn-in risk: it's an LCD with a Mini-LED backlight, not OLED, and th
 
 ## 5. "Only when we're home"
 1. In your router, give each phone a **fixed IP** (DHCP reservation).
-2. On each phone, turn off **Private / Random Wi-Fi address** for your home network. On iPhone: Wi-Fi › (i) › Private Wi-Fi Address › Off. On Android: Wi-Fi › network › Privacy › Use device MAC.
+2. On each S24 Ultra, turn off the random Wi-Fi address for the home network: *Settings › Connections › Wi-Fi*, tap ⚙ next to your network, *View more › MAC address type › **Phone MAC***. The phone reconnects. Do this **before** you make the router reservation, because the router has to see the phone's real MAC.
+   - If a locked phone keeps showing "not seen" for long stretches while it's at home, turn off *Wi-Fi › ⋮ › Intelligent Wi-Fi › **Wi-Fi power saving mode***. It's optional: the 20-minute grace period usually covers the gaps.
+   - Quick test from the Mac with a phone locked on the table: `ping <phone-IP>`. Replies arriving every second or so (even slowly) means presence will work.
 3. In the web app go to **Settings › Only when we're home**, add both phones, tick the box and save. **Remote › Status** shows when each phone was last seen.
 
-Phones nap their Wi-Fi, so the frame only turns off after nobody has been seen for the grace period (20 min by default). Using the TV remote or the web page also counts as someone being home. Pressing any key on the remote wakes the frame for an hour. **Sleep** (from the phone's Remote tab) keeps it dark until the next time the schedule or presence would turn it on, such as tomorrow's on-time or someone coming home, or until you wake it.
+Phones nap their Wi-Fi, so the frame only turns off after nobody has been seen for the grace period (20 min by default). Using the TV remote or the web page also counts as someone being home.
+
+**S24 Ultra photos and videos:** JPEG and HEIF photos, Motion Photos (they show as the still) and Ultra HDR photos (they show as normal SDR) all work. Videos up to **4K** play. **8K** video is beyond the TV's decoder, so the frame skips those clips; record in 4K if you want them on the TV. Expert RAW `.dng` files are refused at upload. Pressing any key on the remote wakes the frame for an hour. **Sleep** (from the phone's Remote tab) keeps it dark until the next time the schedule or presence would turn it on, such as tomorrow's on-time or someone coming home, or until you wake it.
 
 ## Power: "When off" options
 - **Black screen** (default, reliable): the app stays open on pure black. With local dimming the backlight is almost off, but the TV's electronics still draw some power.
