@@ -28,6 +28,8 @@ data class FrameSettings(
     val phones: List<Phone> = emptyList(),
     val awayGraceMin: Int = 20,
     val sleepAction: String = "black",       // black | sleep
+    /** screensaver: shows when the TV is idle (Google TV screensaver); app: stays open, reopens at boot. */
+    val showAs: String = "screensaver",      // screensaver | app
 ) {
     fun toJson(): JSONObject = JSONObject().apply {
         put("mode", mode)
@@ -51,6 +53,7 @@ data class FrameSettings(
         })
         put("awayGraceMin", awayGraceMin)
         put("sleepAction", sleepAction)
+        put("showAs", showAs)
     }
 
     companion object {
@@ -85,6 +88,7 @@ data class FrameSettings(
                 phones = phones,
                 awayGraceMin = o.optInt("awayGraceMin", base.awayGraceMin).coerceIn(1, 720),
                 sleepAction = oneOf(o.optString("sleepAction", base.sleepAction), setOf("black", "sleep"), base.sleepAction),
+                showAs = oneOf(o.optString("showAs", base.showAs), setOf("screensaver", "app"), base.showAs),
             )
         }
     }

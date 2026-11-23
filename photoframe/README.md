@@ -45,6 +45,22 @@ Every build is signed with the repo's pinned debug key, so `adb install -r` upda
 
 **No-computer alternative:** install **Downloader** (by AFTVnews) from the Play Store on the TV and point it at the Releases APK link. You'll still need ADB for step 5.
 
+## 2b. Screensaver
+By default the frame is the TV's **screensaver**: after the TV has been idle for a few minutes your photos come on, and any button on the remote takes you back to what you were doing. Google TV hides third-party screensavers in its menus, so you switch it on from the Mac, once:
+```
+adb connect TV-IP:5555
+adb shell settings put secure screensaver_components com.jollydoddger.photoframe/.PhotoDream
+adb shell settings put secure screensaver_enabled 1
+```
+- **Try it now:** `adb shell am start -n com.android.systemui/.Somnambulator`. The screensaver starts straight away; press any button to leave it.
+- **How long before it starts:** *Settings › System › Ambient mode* (or *Energy*) on the TV, or `adb shell settings put system screen_off_timeout 300000` for 5 minutes (the value is in milliseconds).
+- **Check it took:** `adb shell settings get secure screensaver_components` should print `com.jollydoddger.photoframe/.PhotoDream`. If a TV update ever puts Google's Ambient mode back, run the two lines again.
+- **Undo:** pick Ambient mode again in the TV's settings.
+
+The schedule and "only when we're home" still apply. Outside them the screensaver shows black, and the TV's own *turn off display* timer can then put the TV into standby. An app can't switch a TV on from standby, so after that the frame is back the next time the TV is on and idle.
+
+If you'd rather the frame stayed open all the time (reopening after a restart and when you get home), set **Settings › How it shows › An app that stays open** in the phone app, and open Photo Frame once.
+
 ## 3. Phone app (both S24 Ultras)
 `photoframe-phone.apk` sits next to `photoframe.apk` in the same build. To install it, open the APK on each phone and allow *Install unknown apps* for whichever app opened it (Chrome or My Files). If you're installing over USB, `adb install -r photoframe-phone.apk` works too.
 

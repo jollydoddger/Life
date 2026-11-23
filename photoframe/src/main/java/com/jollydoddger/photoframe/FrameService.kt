@@ -151,6 +151,10 @@ class FrameService : Service(), FrameState.Listener {
 
     @Suppress("DEPRECATION")
     private fun wakeScreen() {
+        // As a screensaver the frame only shows when the TV is idle: popping the app up when
+        // someone comes home would cover whatever they're watching. (An active screensaver
+        // picks the change up by itself.)
+        if (SettingsStore.current.showAs == "screensaver") return
         if (SettingsStore.current.sleepAction == "sleep") {
             runCatching {
                 val pm = getSystemService(PowerManager::class.java)
@@ -203,6 +207,8 @@ class BootReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         if (intent.action != Intent.ACTION_BOOT_COMPLETED) return
         FrameService.start(context)
+        SettingsStore.init(context)
+        if (SettingsStore.current.showAs == "screensaver") return // the TV starts us when it's idle
         // Opening the screen from boot needs "Display over other apps" (see README)
         runCatching {
             context.startActivity(Intent(context, FrameActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))

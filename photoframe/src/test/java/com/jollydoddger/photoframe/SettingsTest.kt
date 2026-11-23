@@ -26,4 +26,10 @@ class SettingsTest {
         assertEquals(720, s.awayGraceMin)
         assertEquals(listOf(Phone("P", "10.0.0.9")), s.phones)
     }
+
+    @Test fun screensaverIsTheDefaultAndJunkIsIgnored() {
+        assertEquals("screensaver", FrameSettings().showAs)
+        assertEquals("app", FrameSettings.fromJson(JSONObject("""{"showAs":"app"}""")).showAs)
+        assertEquals("screensaver", FrameSettings.fromJson(JSONObject("""{"showAs":"popup"}""")).showAs)
+    }
 }
